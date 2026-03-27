@@ -52,7 +52,16 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { backfillFromRegisteredGroups, recordJidMapping } from './jid-map.js';
-import { send, sendTyping, setLegacyChannels } from './outbound.js';
+import {
+  groupEvents,
+  hasActiveHandler,
+  registerHandlerThread,
+  send,
+  sendTyping,
+  setLegacyChannels,
+  unregisterHandlerThread,
+  waitForGroupDone,
+} from './outbound.js';
 import {
   formatMessages,
   formatOutbound,
@@ -278,6 +287,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      groupEvents.emit(`done:${chatJid}`);
       return true;
     }
     // Roll back cursor so retries can re-process these messages
@@ -287,9 +297,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
     );
+    groupEvents.emit(`done:${chatJid}`);
     return false;
   }
 
+  groupEvents.emit(`done:${chatJid}`);
   return true;
 }
 
@@ -641,12 +653,16 @@ async function main(): Promise<void> {
       logger: 'silent',
     });
 
-    // Inbound handlers: convert Chat SDK messages → NanoClaw pipeline
-    const forwardInbound = (
-      adapterName: string,
+    // Inbound handlers: convert Chat SDK messages → NanoClaw pipeline.
+    // With concurrency: 'concurrent', handlers can stay alive — the first
+    // handler for a JID registers its Thread and waits for processing to
+    // complete, enabling typing indicators and handler-level thread.post().
+    const forwardAndHold = async (
       thread: Thread,
       message: ChatMessage,
+      subscribe: boolean,
     ) => {
+      const adapterName = thread.id.split(':')[0];
       const jid = `csdk:${adapterName}:${thread.id}`;
       const newMessage: NewMessage = {
         id: message.id,
@@ -667,29 +683,37 @@ async function main(): Promise<void> {
         true,
       );
       channelOpts.onMessage(jid, newMessage);
+      if (subscribe) await thread.subscribe();
+
+      // If another handler is already holding the Thread for this JID,
+      // just write the message and return — it'll be picked up.
+      if (hasActiveHandler(jid)) return;
+
+      // First handler: register Thread and stay alive for outbound.
+      // send() will use this Thread for thread.post() calls.
+      registerHandlerThread(jid, thread);
+      try {
+        await thread.startTyping();
+        await waitForGroupDone(jid, IDLE_TIMEOUT);
+      } finally {
+        unregisterHandlerThread(jid);
+      }
     };
 
     chatInstance.onNewMention(async (thread, message) => {
-      const adapterName = thread.id.split(':')[0];
-      forwardInbound(adapterName, thread, message);
-      await thread.subscribe();
+      await forwardAndHold(thread, message, true);
     });
 
     chatInstance.onDirectMessage(async (thread, message) => {
-      const adapterName = thread.id.split(':')[0];
-      forwardInbound(adapterName, thread, message);
-      await thread.subscribe();
+      await forwardAndHold(thread, message, true);
     });
 
     chatInstance.onSubscribedMessage(async (thread, message) => {
-      const adapterName = thread.id.split(':')[0];
-      forwardInbound(adapterName, thread, message);
+      await forwardAndHold(thread, message, false);
     });
 
     chatInstance.onNewMessage(/./, async (thread, message) => {
-      const adapterName = thread.id.split(':')[0];
-      forwardInbound(adapterName, thread, message);
-      await thread.subscribe();
+      await forwardAndHold(thread, message, true);
     });
 
     await chatInstance.initialize();
