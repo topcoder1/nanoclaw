@@ -454,3 +454,11 @@ When an email mentions a project or person associated with a project, use this r
 - Search the project's docs for context
 - Update project docs with decisions from emails
 - Create GitHub issues in the right repo
+
+### Scheduled Tasks
+
+#### Morning Briefing
+- schedule_type: cron
+- schedule_value: "30 7 * * *" (7:30 AM CST)
+- prompt: "Run the morning-briefing skill. Generate a comprehensive briefing and send via send_message."
+- context_mode: group
