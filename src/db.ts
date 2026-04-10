@@ -6,6 +6,7 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  Commitment,
   NewMessage,
   ProcessedItem,
   RegisteredGroup,
@@ -99,6 +100,21 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_log(action_type, timestamp);
+
+    CREATE TABLE IF NOT EXISTS commitments (
+      id TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      person TEXT NOT NULL,
+      person_email TEXT,
+      due_date TEXT,
+      source TEXT,
+      status TEXT DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status);
+    CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -749,20 +765,34 @@ export function cleanupOldProcessedItems(olderThan: string): number {
 
 // --- Approval log (trust graduation) ---
 
-export function logApproval(actionType: string, actionDetail: string, outcome: string): void {
+export function logApproval(
+  actionType: string,
+  actionDetail: string,
+  outcome: string,
+): void {
   db.prepare(
     'INSERT INTO approval_log (action_type, action_detail, outcome, timestamp) VALUES (?, ?, ?, ?)',
   ).run(actionType, actionDetail, outcome, new Date().toISOString());
 }
 
-export function getRecentApprovals(actionType: string, limit: number = 5): Array<{outcome: string; timestamp: string}> {
-  return db.prepare(
-    'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
-  ).all(actionType, limit) as Array<{outcome: string; timestamp: string}>;
+export function getRecentApprovals(
+  actionType: string,
+  limit: number = 5,
+): Array<{ outcome: string; timestamp: string }> {
+  return db
+    .prepare(
+      'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
+    )
+    .all(actionType, limit) as Array<{ outcome: string; timestamp: string }>;
 }
 
-export function getGraduationCandidates(): Array<{action_type: string; consecutive_approvals: number}> {
-  return db.prepare(`
+export function getGraduationCandidates(): Array<{
+  action_type: string;
+  consecutive_approvals: number;
+}> {
+  return db
+    .prepare(
+      `
     WITH ranked AS (
       SELECT action_type, outcome,
         ROW_NUMBER() OVER (PARTITION BY action_type ORDER BY timestamp DESC) as rn
@@ -776,7 +806,51 @@ export function getGraduationCandidates(): Array<{action_type: string; consecuti
       HAVING COUNT(*) = 5
     )
     SELECT * FROM streaks
-  `).all() as Array<{action_type: string; consecutive_approvals: number}>;
+  `,
+    )
+    .all() as Array<{ action_type: string; consecutive_approvals: number }>;
+}
+
+// --- Commitments ---
+
+export function createCommitment(c: Omit<Commitment, 'completed_at'>): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO commitments (id, description, direction, person, person_email, due_date, source, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    c.id,
+    c.description,
+    c.direction,
+    c.person,
+    c.person_email,
+    c.due_date,
+    c.source,
+    c.status,
+    c.created_at,
+  );
+}
+
+export function getOpenCommitments(): Commitment[] {
+  return db
+    .prepare(
+      "SELECT * FROM commitments WHERE status = 'open' ORDER BY due_date",
+    )
+    .all() as Commitment[];
+}
+
+export function getOverdueCommitments(): Commitment[] {
+  const now = new Date().toISOString();
+  return db
+    .prepare(
+      "SELECT * FROM commitments WHERE status = 'open' AND due_date IS NOT NULL AND due_date < ? ORDER BY due_date",
+    )
+    .all(now) as Commitment[];
+}
+
+export function completeCommitment(id: string): void {
+  db.prepare(
+    "UPDATE commitments SET status = 'completed', completed_at = ? WHERE id = ?",
+  ).run(new Date().toISOString(), id);
 }
 
 // --- JSON migration ---

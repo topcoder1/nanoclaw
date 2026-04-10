@@ -22,6 +22,10 @@ import {
   logApproval,
   getRecentApprovals,
   getGraduationCandidates,
+  createCommitment,
+  getOpenCommitments,
+  getOverdueCommitments,
+  completeCommitment,
 } from './db.js';
 import { formatMessages } from './router.js';
 
@@ -744,5 +748,60 @@ describe('approval_log', () => {
     logApproval('reply:meeting', 'bad reply', 'rejected');
     const candidates = getGraduationCandidates();
     expect(candidates).toHaveLength(0);
+  });
+});
+
+describe('commitments', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('creates and retrieves open commitments', () => {
+    createCommitment({
+      id: 'c1',
+      description: 'Send proposal',
+      direction: 'mine',
+      person: 'David',
+      person_email: 'david@example.com',
+      due_date: '2026-04-15T17:00:00Z',
+      source: 'email:thread_1',
+      status: 'open',
+      created_at: '2026-04-10T10:00:00Z',
+    });
+    const open = getOpenCommitments();
+    expect(open).toHaveLength(1);
+    expect(open[0].description).toBe('Send proposal');
+  });
+
+  it('completes a commitment', () => {
+    createCommitment({
+      id: 'c2',
+      description: 'Review PR',
+      direction: 'mine',
+      person: 'Sarah',
+      person_email: null,
+      due_date: null,
+      source: 'discord:msg_1',
+      status: 'open',
+      created_at: '2026-04-10T10:00:00Z',
+    });
+    completeCommitment('c2');
+    expect(getOpenCommitments()).toHaveLength(0);
+  });
+
+  it('finds overdue commitments', () => {
+    createCommitment({
+      id: 'c3',
+      description: 'Send specs',
+      direction: 'theirs',
+      person: 'Mike',
+      person_email: 'mike@example.com',
+      due_date: '2026-04-01T17:00:00Z',
+      source: 'email:thread_2',
+      status: 'open',
+      created_at: '2026-03-28T10:00:00Z',
+    });
+    const overdue = getOverdueCommitments();
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0].person).toBe('Mike');
   });
 });

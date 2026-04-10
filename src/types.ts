@@ -117,3 +117,16 @@ export interface ProcessedItem {
   processed_at: string; // ISO timestamp
   action_taken: string; // "auto:calendar" | "propose:reply" | "escalate" | "skip"
 }
+
+export interface Commitment {
+  id: string;
+  description: string;
+  direction: 'mine' | 'theirs';
+  person: string;
+  person_email: string | null;
+  due_date: string | null;
+  source: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+}
