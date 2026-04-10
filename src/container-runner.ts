@@ -259,6 +259,13 @@ async function buildContainerArgs(
   if (isMain) {
     args.push('-e', `SUPERPILOT_MCP_URL=${SUPERPILOT_MCP_URL}`);
     args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
+    // Pass tokens that container scripts need (e.g., discord-digest.py)
+    if (process.env.DISCORD_BOT_TOKEN) {
+      args.push('-e', `DISCORD_BOT_TOKEN=${process.env.DISCORD_BOT_TOKEN}`);
+    }
+    if (process.env.NANOCLAW_SERVICE_TOKEN) {
+      args.push('-e', `NANOCLAW_SERVICE_TOKEN=${process.env.NANOCLAW_SERVICE_TOKEN}`);
+    }
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
