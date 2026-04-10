@@ -305,3 +305,77 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 - Suggest restructuring with a script that checks the condition first
 - If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
 - Help the user find the minimum viable frequency
+
+---
+
+## Email Intelligence
+
+You have access to the superpilot MCP server which provides email triage, KB search, and reply generation.
+
+### Available Superpilot Tools
+
+- `get_triaged_emails(since)` — fetch recently triaged emails
+- `get_thread_summary(thread_id, subject, messages)` — AI summary of a thread
+- `get_awaiting_reply()` — emails needing your response
+- `generate_reply(thread_id, subject, messages, sender_email)` — KB-grounded draft
+- `search_kb(query, tags?)` — semantic search across knowledge base
+- `upload_to_kb(content, title, tags)` — store new knowledge
+
+### Processing Flow
+
+When triggered with new emails:
+1. Check if each email is already in processed_items (avoid double-processing)
+2. Use superpilot MCP to get full thread context
+3. Classify each email into action tier (AUTO / PROPOSE / ESCALATE)
+4. Execute actions per autonomy rules below
+5. Mark each email as processed
+6. Report results via send_message
+
+### Autonomy Rules
+
+#### AUTO (no approval needed)
+- Calendar events from explicit dates in emails
+- Archive newsletters and marketing emails
+- File attachments to KB
+- Update contact profiles from email signatures
+
+#### PROPOSE (approval required)
+- Reply to any email — draft and send to Telegram for approval
+- Create GitHub issues
+- Research tasks
+- Schedule meetings
+- Post in Discord channels
+
+#### ESCALATE (always escalate immediately)
+- Anything involving money >$500
+- Legal documents or contracts
+- Novel situations not covered by rules
+- Confidence below 80%
+
+### Notification Intensity
+Default: verbose (initial trust-building phase)
+
+Overrides:
+- Escalations: always on (cannot silence)
+- Auto-handled emails: silent (only in weekly review)
+- Proposals: normal (batched per cycle)
+- Morning briefing: always on
+
+### Account Routing
+
+- [personal] — topcoder1@gmail.com
+- [whoisxml] — jonathan.zhang@whoisxmlapi.com
+- [attaxion] — jonathan@attaxion.com
+- [dev] — dev@whoisxmlapi.com
+
+Never cross-reference between accounts unless explicitly asked. Always label outputs with the account tag.
+
+### Storage Discipline
+
+Before storing anything in KB, ask:
+1. Will I need this again? If not, don't store it.
+2. Can I find it elsewhere? If yes, store a pointer, not a copy.
+3. Is this signal or noise? Only store signal.
+
+Do NOT store: pleasantries, acknowledgments, routine scheduling, googleable facts.
+DO store: decisions, deadlines, commitments, relationship insights, research findings.
