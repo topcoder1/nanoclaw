@@ -174,7 +174,12 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     // For email_trigger
-    emails?: Array<{ thread_id: string; account: string; subject: string; sender: string }>;
+    emails?: Array<{
+      thread_id: string;
+      account: string;
+      subject: string;
+      sender: string;
+    }>;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -466,7 +471,10 @@ export async function processTaskIpc(
 
     case 'email_trigger': {
       if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized email_trigger attempt blocked');
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized email_trigger attempt blocked',
+        );
         break;
       }
 
@@ -501,7 +509,10 @@ export async function processTaskIpc(
       }
 
       await deps.sendMessage(mainJid, prompt);
-      logger.info({ emailCount, sourceGroup }, 'Email trigger dispatched to main group');
+      logger.info(
+        { emailCount, sourceGroup },
+        'Email trigger dispatched to main group',
+      );
       break;
     }
 

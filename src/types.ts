@@ -112,8 +112,8 @@ export type OnChatMetadata = (
 ) => void;
 
 export interface ProcessedItem {
-  item_id: string;       // e.g., "email:thread_abc123" or "discord:msg_456"
-  source: string;        // "superpilot" | "discord" | "poll"
-  processed_at: string;  // ISO timestamp
-  action_taken: string;  // "auto:calendar" | "propose:reply" | "escalate" | "skip"
+  item_id: string; // e.g., "email:thread_abc123" or "discord:msg_456"
+  source: string; // "superpilot" | "discord" | "poll"
+  processed_at: string; // ISO timestamp
+  action_taken: string; // "auto:calendar" | "propose:reply" | "escalate" | "skip"
 }
