@@ -946,33 +946,50 @@ export function getFrequentNewContacts(
 
 // --- Session costs ---
 
-export function logSessionCost(sessionType: string, groupFolder: string, durationMs: number, estimatedCostUsd: number): void {
+export function logSessionCost(
+  sessionType: string,
+  groupFolder: string,
+  durationMs: number,
+  estimatedCostUsd: number,
+): void {
   db.prepare(
     'INSERT INTO session_costs (session_type, group_folder, started_at, duration_ms, estimated_cost_usd) VALUES (?, ?, ?, ?, ?)',
-  ).run(sessionType, groupFolder, new Date().toISOString(), durationMs, estimatedCostUsd);
+  ).run(
+    sessionType,
+    groupFolder,
+    new Date().toISOString(),
+    durationMs,
+    estimatedCostUsd,
+  );
 }
 
 export function getTodaysCost(): number {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const row = db.prepare(
-    'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
-  ).get(todayStart.toISOString()) as { total: number };
+  const row = db
+    .prepare(
+      'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+    )
+    .get(todayStart.toISOString()) as { total: number };
   return row.total;
 }
 
 export function getWeeklyCost(): number {
   const weekStart = new Date(Date.now() - 7 * 86400000);
-  const row = db.prepare(
-    'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
-  ).get(weekStart.toISOString()) as { total: number };
+  const row = db
+    .prepare(
+      'SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM session_costs WHERE started_at >= ?',
+    )
+    .get(weekStart.toISOString()) as { total: number };
   return row.total;
 }
 
 // --- System state ---
 
 export function getSystemState(key: string): string | undefined {
-  const row = db.prepare('SELECT value FROM system_state WHERE key = ?').get(key) as { value: string } | undefined;
+  const row = db
+    .prepare('SELECT value FROM system_state WHERE key = ?')
+    .get(key) as { value: string } | undefined;
   return row?.value;
 }
 

@@ -866,10 +866,10 @@ describe('session_costs', () => {
   afterEach(() => _closeDatabase());
 
   it('logs and sums session costs', () => {
-    logSessionCost('email_trigger', 'main', 30000, 0.50);
-    logSessionCost('scheduled', 'main', 60000, 1.00);
+    logSessionCost('email_trigger', 'main', 30000, 0.5);
+    logSessionCost('scheduled', 'main', 60000, 1.0);
     const total = getTodaysCost();
-    expect(total).toBe(1.50);
+    expect(total).toBe(1.5);
   });
 });
 
