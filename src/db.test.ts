@@ -26,6 +26,9 @@ import {
   getOpenCommitments,
   getOverdueCommitments,
   completeCommitment,
+  upsertContactActivity,
+  getStaleContacts,
+  getFrequentNewContacts,
 } from './db.js';
 import { formatMessages } from './router.js';
 
@@ -803,5 +806,52 @@ describe('commitments', () => {
     const overdue = getOverdueCommitments();
     expect(overdue).toHaveLength(1);
     expect(overdue[0].person).toBe('Mike');
+  });
+});
+
+describe('contact_activity', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('tracks contact activity', () => {
+    upsertContactActivity('mike@example.com', 'Mike', 'inbound');
+    upsertContactActivity('mike@example.com', 'Mike', 'outbound');
+    // Should have 2 interactions
+    const stale = getStaleContacts(0); // 0 days = everything is stale
+    // Won't appear because interaction_count (2) < 3 threshold
+    expect(stale).toHaveLength(0);
+  });
+
+  it('increments interaction_count on upsert', () => {
+    upsertContactActivity('alice@example.com', 'Alice', 'inbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'inbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'outbound');
+    upsertContactActivity('alice@example.com', 'Alice', 'outbound');
+    // 4 interactions — above the >3 threshold; use a future cutoff (negative offset trick)
+    // getStaleContacts(0) sets cutoff = now, records set to now are not < now.
+    // Use getFrequentNewContacts to verify the count instead.
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(1);
+    expect(frequent[0].contact_email).toBe('alice@example.com');
+    expect(frequent[0].interaction_count).toBe(4);
+  });
+
+  it('getFrequentNewContacts returns contacts with enough interactions', () => {
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    upsertContactActivity('bob@example.com', 'Bob', 'inbound');
+    // 4 interactions, updated just now
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(1);
+    expect(frequent[0].contact_email).toBe('bob@example.com');
+    expect(frequent[0].interaction_count).toBe(4);
+  });
+
+  it('getFrequentNewContacts excludes contacts below minInteractions', () => {
+    upsertContactActivity('carol@example.com', 'Carol', 'inbound');
+    upsertContactActivity('carol@example.com', 'Carol', 'inbound');
+    const frequent = getFrequentNewContacts(1, 4);
+    expect(frequent).toHaveLength(0);
   });
 });

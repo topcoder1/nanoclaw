@@ -115,6 +115,16 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status);
     CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date);
+
+    CREATE TABLE IF NOT EXISTS contact_activity (
+      contact_email TEXT PRIMARY KEY,
+      contact_name TEXT,
+      last_inbound TEXT,
+      last_outbound TEXT,
+      typical_cadence_days INTEGER,
+      interaction_count INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -851,6 +861,73 @@ export function completeCommitment(id: string): void {
   db.prepare(
     "UPDATE commitments SET status = 'completed', completed_at = ? WHERE id = ?",
   ).run(new Date().toISOString(), id);
+}
+
+// --- Contact activity (relationship pulse) ---
+
+export function upsertContactActivity(
+  email: string,
+  name: string | null,
+  direction: 'inbound' | 'outbound',
+): void {
+  const now = new Date().toISOString();
+  const field = direction === 'inbound' ? 'last_inbound' : 'last_outbound';
+  db.prepare(
+    `
+    INSERT INTO contact_activity (contact_email, contact_name, ${field}, interaction_count, updated_at)
+    VALUES (?, ?, ?, 1, ?)
+    ON CONFLICT(contact_email) DO UPDATE SET
+      contact_name = COALESCE(excluded.contact_name, contact_name),
+      ${field} = excluded.${field},
+      interaction_count = interaction_count + 1,
+      updated_at = excluded.updated_at
+  `,
+  ).run(email, name, now, now);
+}
+
+export function getStaleContacts(
+  olderThanDays: number,
+): Array<{
+  contact_email: string;
+  contact_name: string | null;
+  last_inbound: string | null;
+  last_outbound: string | null;
+  typical_cadence_days: number | null;
+}> {
+  const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
+  return db
+    .prepare(
+      `
+    SELECT contact_email, contact_name, last_inbound, last_outbound, typical_cadence_days
+    FROM contact_activity
+    WHERE (last_inbound IS NULL OR last_inbound < ?)
+      AND (last_outbound IS NULL OR last_outbound < ?)
+      AND interaction_count > 3
+    ORDER BY COALESCE(last_inbound, last_outbound) ASC
+  `,
+    )
+    .all(cutoff, cutoff) as any[];
+}
+
+export function getFrequentNewContacts(
+  sinceDays: number,
+  minInteractions: number,
+): Array<{
+  contact_email: string;
+  contact_name: string | null;
+  interaction_count: number;
+}> {
+  const since = new Date(Date.now() - sinceDays * 86400000).toISOString();
+  return db
+    .prepare(
+      `
+    SELECT contact_email, contact_name, interaction_count
+    FROM contact_activity
+    WHERE updated_at > ? AND interaction_count >= ?
+    ORDER BY interaction_count DESC
+  `,
+    )
+    .all(since, minInteractions) as any[];
 }
 
 // --- JSON migration ---
