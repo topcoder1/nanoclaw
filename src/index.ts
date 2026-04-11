@@ -61,6 +61,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startEmailSSE } from './email-sse.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -746,6 +747,8 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Real-time email notifications via SSE (poll is fallback)
+  startEmailSSE();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
