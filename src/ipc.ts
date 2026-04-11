@@ -501,8 +501,8 @@ export async function processTaskIpc(
 
       // Send email intelligence to Telegram (primary notification channel).
       // Falls back to main group if Telegram not registered.
-      const telegramJid = Object.entries(registeredGroups).find(
-        ([jid]) => jid.startsWith('tg:'),
+      const telegramJid = Object.entries(registeredGroups).find(([jid]) =>
+        jid.startsWith('tg:'),
       )?.[0];
       const mainJid = Object.entries(registeredGroups).find(
         ([, g]) => g.isMain,
