@@ -28,6 +28,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -259,15 +260,21 @@ async function buildContainerArgs(
   if (isMain) {
     args.push('-e', `SUPERPILOT_MCP_URL=${SUPERPILOT_MCP_URL}`);
     args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
-    // Pass tokens that container scripts need (e.g., discord-digest.py)
-    if (process.env.DISCORD_BOT_TOKEN) {
-      args.push('-e', `DISCORD_BOT_TOKEN=${process.env.DISCORD_BOT_TOKEN}`);
+    // Pass tokens that container scripts need (e.g., discord-digest.py).
+    // readEnvFile() is needed because .env values are NOT loaded into process.env.
+    const containerEnv = readEnvFile([
+      'DISCORD_BOT_TOKEN',
+      'NANOCLAW_SERVICE_TOKEN',
+    ]);
+    const discordToken =
+      process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
+    if (discordToken) {
+      args.push('-e', `DISCORD_BOT_TOKEN=${discordToken}`);
     }
-    if (process.env.NANOCLAW_SERVICE_TOKEN) {
-      args.push(
-        '-e',
-        `NANOCLAW_SERVICE_TOKEN=${process.env.NANOCLAW_SERVICE_TOKEN}`,
-      );
+    const serviceToken =
+      process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
+    if (serviceToken) {
+      args.push('-e', `NANOCLAW_SERVICE_TOKEN=${serviceToken}`);
     }
   }
 
