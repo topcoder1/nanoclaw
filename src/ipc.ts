@@ -23,6 +23,12 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  // Spawn agent for email triggers instead of sending raw messages
+  enqueueEmailTrigger: (
+    chatJid: string,
+    prompt: string,
+    onResult: (text: string) => Promise<void>,
+  ) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -499,27 +505,33 @@ export async function processTaskIpc(
 
       const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nFollow the Email Intelligence instructions in your CLAUDE.md. For each email:\n1. Check if already processed (search processed_items)\n2. Use superpilot MCP to get full context\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed`;
 
-      // Send email intelligence to Telegram (primary notification channel).
-      // Falls back to main group if Telegram not registered.
-      const telegramJid = Object.entries(registeredGroups).find(([jid]) =>
-        jid.startsWith('tg:'),
-      )?.[0];
+      // Find main group JID for agent invocation
       const mainJid = Object.entries(registeredGroups).find(
         ([, g]) => g.isMain,
       )?.[0];
-      const targetJid = telegramJid || mainJid;
 
-      if (!targetJid) {
+      if (!mainJid) {
         logger.warn(
-          'No Telegram or main group registered, cannot process email trigger',
+          'No main group registered, cannot process email trigger',
         );
         break;
       }
 
-      await deps.sendMessage(targetJid, prompt);
+      // Find Telegram JID for notification forwarding (falls back to main group)
+      const telegramJid = Object.entries(registeredGroups).find(([jid]) =>
+        jid.startsWith('tg:'),
+      )?.[0];
+      const notifyJid = telegramJid || mainJid;
+
+      // Enqueue agent task — the agent processes emails in a container
+      // and sends clean proposals back via the onResult callback
+      deps.enqueueEmailTrigger(mainJid, prompt, async (text: string) => {
+        await deps.sendMessage(notifyJid, text);
+      });
+
       logger.info(
-        { emailCount, sourceGroup, targetJid },
-        'Email trigger dispatched',
+        { emailCount, sourceGroup, mainJid, notifyJid },
+        'Email trigger enqueued for agent processing',
       );
       break;
     }

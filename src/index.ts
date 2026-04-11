@@ -730,6 +730,36 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    enqueueEmailTrigger: (chatJid, prompt, onResult) => {
+      const taskId = `email-trigger-${Date.now()}`;
+      queue.enqueueTask(chatJid, taskId, async () => {
+        const group = registeredGroups[chatJid];
+        if (!group) {
+          logger.warn({ chatJid }, 'No group for email trigger');
+          return;
+        }
+
+        const result = await runAgent(group, prompt, chatJid, async (output) => {
+          if (output.result) {
+            await onResult(output.result);
+          }
+        });
+
+        if (result === 'error') {
+          const telegramJid = Object.keys(registeredGroups).find((jid) =>
+            jid.startsWith('tg:'),
+          );
+          const notifyJid = telegramJid || chatJid;
+          const channel = findChannel(channels, notifyJid);
+          if (channel) {
+            await channel.sendMessage(
+              notifyJid,
+              '⚠️ Email intelligence trigger failed. Check logs.',
+            );
+          }
+        }
+      });
+    },
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({
