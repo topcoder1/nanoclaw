@@ -93,6 +93,17 @@ function buildVolumeMounts(
       });
     }
 
+    // Store directory (messages.db) — writable so agents can mark items
+    // as processed, log approvals, and update contact activity.
+    const storeDir = path.join(projectRoot, 'store');
+    if (fs.existsSync(storeDir)) {
+      mounts.push({
+        hostPath: storeDir,
+        containerPath: '/workspace/project/store',
+        readonly: false,
+      });
+    }
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,

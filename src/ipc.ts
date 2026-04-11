@@ -497,10 +497,11 @@ export async function processTaskIpc(
       }
 
       const emailSummaries = (data.emails ?? [])
-        .map(
-          (e) =>
-            `- [${e.account}] From: ${e.sender}, Subject: ${e.subject} (thread: ${e.thread_id})`,
-        )
+        .map((e) => {
+          const from = e.sender || 'unknown sender';
+          const subj = e.subject || '(no subject)';
+          return `- [${e.account}] From: ${from}, Subject: ${subj} (thread: ${e.thread_id})`;
+        })
         .join('\n');
 
       const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nFollow the Email Intelligence instructions in your CLAUDE.md. For each email:\n1. Check if already processed (search processed_items)\n2. Use superpilot MCP to get full context\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed`;

@@ -749,9 +749,11 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      const text = formatOutbound(rawText);
+      if (!text) return Promise.resolve();
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
@@ -781,7 +783,8 @@ async function main(): Promise<void> {
           chatJid,
           async (output) => {
             if (output.result) {
-              await onResult(output.result);
+              const clean = formatOutbound(output.result);
+              if (clean) await onResult(clean);
             }
           },
         );
