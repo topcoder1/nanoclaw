@@ -49,18 +49,17 @@ When you learn something important:
 
 ## Persistence — How to Remember Things
 
-You have workspace files that persist across sessions. USE THEM:
+You have workspace files that persist across sessions:
 
-- `contacts.md` — Known contacts with phone/email. Update when you learn new info.
 - `active-tasks.md` — Multi-step tasks in progress. Add new tasks, remove completed ones.
 - `conversations/` — Searchable archive of past conversations.
 
 **On every session start, read `active-tasks.md` to resume unfinished work.**
 
-When asked to contact someone:
-1. Check `contacts.md` first
-2. Use `search_contacts` to check macOS Contacts
-3. Search Gmail history
+When asked to contact someone, search ALL sources before giving up:
+1. `search_contacts` — macOS Contacts (phone numbers, emails)
+2. Gmail tools — search email history for their address
+3. `get_contact_memory` — SuperPilot's memory about the contact
 4. NEVER say "I don't have their info" without checking all three
 
 When a new multi-step task comes in, add it to `active-tasks.md` immediately. When completed, mark it done. This survives context compaction and session restarts.
