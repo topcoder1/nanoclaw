@@ -366,6 +366,8 @@ let oauthTokenCache: { tokens: string[]; expiresAt: number } = {
 };
 const OAUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 min cooldown on rate limit
+const COST_RESET_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+let costPeriodStart = Date.now();
 
 function refreshOAuthTokens(): string[] {
   try {
@@ -410,8 +412,20 @@ function getTokenStats(token: string): TokenStats {
   return stats;
 }
 
-function getNextOAuthToken(): string | null {
+export function getNextOAuthToken(): string | null {
   const now = Date.now();
+
+  // Daily cost reset — prevents routing from converging to random as all
+  // tokens accumulate similar lifetime costs.
+  if (now - costPeriodStart >= COST_RESET_INTERVAL_MS) {
+    for (const stats of oauthTokenStats.values()) {
+      stats.costUsd = 0;
+      stats.requests = 0;
+    }
+    costPeriodStart = now;
+    logger.info('Token cost stats reset (24h period)');
+  }
+
   if (now >= oauthTokenCache.expiresAt) {
     const tokens = refreshOAuthTokens();
     oauthTokenCache = { tokens, expiresAt: now + OAUTH_CACHE_TTL_MS };
@@ -504,7 +518,11 @@ async function buildContainerArgs(
   containerName: string,
   isMain: boolean,
   agentIdentifier?: string,
-): Promise<{ args: string[]; oauthToken: string | null; envFilePath: string | null }> {
+): Promise<{
+  args: string[];
+  oauthToken: string | null;
+  envFilePath: string | null;
+}> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -634,7 +652,9 @@ async function buildContainerArgs(
   let envFilePath: string | null = null;
   if (secretEnvLines.length > 0) {
     envFilePath = path.join(os.tmpdir(), `nanoclaw-env-${randomUUID()}`);
-    fs.writeFileSync(envFilePath, secretEnvLines.join('\n') + '\n', { mode: 0o600 });
+    fs.writeFileSync(envFilePath, secretEnvLines.join('\n') + '\n', {
+      mode: 0o600,
+    });
     // Insert --env-file right after 'run' (before other flags)
     const runIdx = cleanedArgs.indexOf('run');
     cleanedArgs.splice(runIdx + 1, 0, '--env-file', envFilePath);
@@ -689,27 +709,38 @@ async function spawnContainerWithRetry(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  const { args: containerArgs, oauthToken: selectedToken, envFilePath } =
-    await buildContainerArgs(
-      mounts,
-      containerName,
-      input.isMain,
-      agentIdentifier,
-    );
-
-  const result = await spawnContainer(
-    group,
-    input,
-    containerArgs,
+  const {
+    args: containerArgs,
+    oauthToken: selectedToken,
+    envFilePath,
+  } = await buildContainerArgs(
+    mounts,
     containerName,
-    selectedToken,
-    onProcess,
-    onOutput,
+    input.isMain,
+    agentIdentifier,
   );
 
-  // Clean up secrets tmpfile
-  if (envFilePath) {
-    try { fs.unlinkSync(envFilePath); } catch { /* already gone */ }
+  let result: ContainerOutput;
+  try {
+    result = await spawnContainer(
+      group,
+      input,
+      containerArgs,
+      containerName,
+      selectedToken,
+      onProcess,
+      onOutput,
+    );
+  } finally {
+    // Clean up secrets tmpfile — must run even if spawnContainer throws,
+    // otherwise secret-containing tmpfile is left on disk indefinitely.
+    if (envFilePath) {
+      try {
+        fs.unlinkSync(envFilePath);
+      } catch {
+        /* already gone */
+      }
+    }
   }
 
   // If Docker failed with exit code 125 (mount/config error) and we have
@@ -733,27 +764,36 @@ async function spawnContainerWithRetry(
     );
 
     const retryName = `${containerName}-retry`;
-    const { args: retryArgs, oauthToken: retryToken, envFilePath: retryEnvFilePath } =
-      await buildContainerArgs(
-        mounts,
-        retryName,
-        input.isMain,
-        agentIdentifier,
-      );
-
-    const retryResult = await spawnContainer(
-      group,
-      input,
-      retryArgs,
+    const {
+      args: retryArgs,
+      oauthToken: retryToken,
+      envFilePath: retryEnvFilePath,
+    } = await buildContainerArgs(
+      mounts,
       retryName,
-      retryToken,
-      onProcess,
-      onOutput,
+      input.isMain,
+      agentIdentifier,
     );
 
-    // Clean up retry secrets tmpfile
-    if (retryEnvFilePath) {
-      try { fs.unlinkSync(retryEnvFilePath); } catch { /* already gone */ }
+    let retryResult: ContainerOutput;
+    try {
+      retryResult = await spawnContainer(
+        group,
+        input,
+        retryArgs,
+        retryName,
+        retryToken,
+        onProcess,
+        onOutput,
+      );
+    } finally {
+      if (retryEnvFilePath) {
+        try {
+          fs.unlinkSync(retryEnvFilePath);
+        } catch {
+          /* already gone */
+        }
+      }
     }
 
     return retryResult;
@@ -1249,4 +1289,19 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+}
+
+/** @internal — test helpers for token cost routing */
+export function _testResetTokenState(): void {
+  oauthTokenStats.clear();
+  oauthTokenCache = { tokens: [], expiresAt: 0 };
+  costPeriodStart = Date.now();
+}
+
+export function _testSetOAuthTokens(tokens: string[]): void {
+  oauthTokenCache = { tokens, expiresAt: Date.now() + 999_999_999 };
+}
+
+export function _testAdvancePeriod(): void {
+  costPeriodStart = Date.now() - COST_RESET_INTERVAL_MS - 1;
 }

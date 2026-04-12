@@ -106,7 +106,9 @@ vi.mock('child_process', async () => {
       },
     ),
     // Mock execSync to prevent OAuth token scanning from reading real process list
-    execSync: vi.fn(() => { throw new Error('no processes'); }),
+    execSync: vi.fn(() => {
+      throw new Error('no processes');
+    }),
   };
 });
 
@@ -240,7 +242,12 @@ describe('container-runner secret env-file security', () => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     // Set secret env vars so buildContainerArgs will push -e flags for them
-    for (const key of ['DISCORD_BOT_TOKEN', 'NANOCLAW_SERVICE_TOKEN', 'GH_TOKEN', 'NOTION_TOKEN']) {
+    for (const key of [
+      'DISCORD_BOT_TOKEN',
+      'NANOCLAW_SERVICE_TOKEN',
+      'GH_TOKEN',
+      'NOTION_TOKEN',
+    ]) {
       savedEnv[key] = process.env[key];
       process.env[key] = `fake-${key}-value`;
     }
@@ -273,7 +280,8 @@ describe('container-runner secret env-file security', () => {
 
     // Inspect the args passed to spawn (use the latest call, not index 0)
     expect(spawnMock.mock.calls.length).toBeGreaterThan(callCountBefore);
-    const spawnArgs: string[] = spawnMock.mock.calls[spawnMock.mock.calls.length - 1][1];
+    const spawnArgs: string[] =
+      spawnMock.mock.calls[spawnMock.mock.calls.length - 1][1];
 
     // Secret keys must NOT appear as -e flag values
     const SECRET_KEYS = [
@@ -298,16 +306,24 @@ describe('container-runner secret env-file security', () => {
     expect(spawnArgs).toContain('--env-file');
 
     // The env file should have been written with mode 0o600
-    const writeFileSyncMock = fs.writeFileSync as unknown as ReturnType<typeof vi.fn>;
+    const writeFileSyncMock = fs.writeFileSync as unknown as ReturnType<
+      typeof vi.fn
+    >;
     const envFileCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('nanoclaw-env-'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        (call[0] as string).includes('nanoclaw-env-'),
     );
     expect(envFileCall).toBeDefined();
 
     // Verify the file contents contain the secrets
     const envFileContent = envFileCall![1] as string;
-    expect(envFileContent).toContain('DISCORD_BOT_TOKEN=fake-DISCORD_BOT_TOKEN-value');
-    expect(envFileContent).toContain('NANOCLAW_SERVICE_TOKEN=fake-NANOCLAW_SERVICE_TOKEN-value');
+    expect(envFileContent).toContain(
+      'DISCORD_BOT_TOKEN=fake-DISCORD_BOT_TOKEN-value',
+    );
+    expect(envFileContent).toContain(
+      'NANOCLAW_SERVICE_TOKEN=fake-NANOCLAW_SERVICE_TOKEN-value',
+    );
     expect(envFileContent).toContain('GH_TOKEN=fake-GH_TOKEN-value');
     expect(envFileContent).toContain('NOTION_TOKEN=fake-NOTION_TOKEN-value');
 
@@ -332,5 +348,41 @@ describe('container-runner secret env-file security', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
+  });
+});
+
+describe('token cost daily reset', () => {
+  it('should reset token costs after 24 hours', async () => {
+    const {
+      reportTokenUsage,
+      getNextOAuthToken,
+      _testResetTokenState,
+      _testSetOAuthTokens,
+      _testAdvancePeriod,
+    } = await import('./container-runner.js');
+
+    // Reset internal state for clean test
+    _testResetTokenState();
+
+    // Inject two known tokens via the cache
+    _testSetOAuthTokens(['token-a', 'token-b']);
+
+    // Accumulate cost on token-a
+    reportTokenUsage('token-a', 25.0);
+    reportTokenUsage('token-b', 5.0);
+
+    // token-b should be preferred (lower cost)
+    let next = getNextOAuthToken();
+    expect(next).toBe('token-b');
+
+    // Advance time past 24h
+    _testAdvancePeriod();
+
+    // After reset, costs are zero — first token in array wins (both are 0)
+    next = getNextOAuthToken();
+    expect(next).toBe('token-a');
+
+    // Cleanup
+    _testResetTokenState();
   });
 });
