@@ -300,6 +300,42 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Extract the live OAuth token from the running Claude Desktop process.
+ * Returns the token string if available, or null if the app isn't running
+ * or the token can't be extracted.
+ */
+function getDesktopOAuthToken(): string | null {
+  try {
+    // Find a Claude CLI process spawned by the Desktop app and extract
+    // the CLAUDE_CODE_OAUTH_TOKEN from its environment.
+    const { execSync } = require('child_process') as typeof import('child_process');
+    const pids = execSync(
+      'pgrep -f "Claude.app/Contents/MacOS/claude"',
+      { encoding: 'utf-8', timeout: 3000 },
+    )
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+
+    for (const pid of pids) {
+      try {
+        const env = execSync(`ps eww ${pid}`, {
+          encoding: 'utf-8',
+          timeout: 3000,
+        });
+        const match = env.match(/CLAUDE_CODE_OAUTH_TOKEN=(sk-ant-oat01-\S+)/);
+        if (match) return match[1];
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // Desktop app not running or pgrep not available
+  }
+  return null;
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -338,18 +374,31 @@ async function buildContainerArgs(
     args.push('-e', `GH_TOKEN=${ghToken}`);
   }
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
+  // OneCLI gateway handles credential injection for non-Anthropic services
+  // (GitHub, Gmail, etc.) and as fallback for Anthropic if no OAuth token.
   const onecliApplied = await onecli.applyContainerConfig(args, {
     addHostMapping: false, // Nanoclaw already handles host gateway
     agent: agentIdentifier,
   });
-  if (onecliApplied) {
+
+  // Auth strategy: prefer Max subscription OAuth token (free included usage)
+  // over OneCLI API key injection (billed per token).
+  // Applied AFTER OneCLI so our -e flags override OneCLI's ANTHROPIC_BASE_URL.
+  const oauthToken = getDesktopOAuthToken();
+  if (oauthToken) {
+    args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
+    // Override OneCLI's proxy URL — OAuth must talk directly to Anthropic
+    args.push('-e', 'ANTHROPIC_BASE_URL=https://api.anthropic.com');
+    logger.info(
+      { containerName },
+      'Using Max subscription OAuth token from Claude Desktop',
+    );
+  } else if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'No OAuth token and OneCLI not reachable — container will have no Anthropic credentials',
     );
   }
 
