@@ -304,13 +304,21 @@ function buildVolumeMounts(
   const contactsCacheDir = path.join(DATA_DIR, 'contacts-cache');
   try {
     if (fs.existsSync(addressBookDir)) {
-      fs.mkdirSync(contactsCacheDir, { recursive: true });
-      // Copy the Sources directory with the .abcddb files
       const sourcesDir = path.join(addressBookDir, 'Sources');
+      const cachedSourcesDir = path.join(contactsCacheDir, 'Sources');
       if (fs.existsSync(sourcesDir)) {
-        fs.cpSync(sourcesDir, path.join(contactsCacheDir, 'Sources'), {
-          recursive: true,
-        });
+        // Only re-copy if the source DB is newer than the cache (staleness check)
+        let needsCopy = !fs.existsSync(cachedSourcesDir);
+        if (!needsCopy) {
+          const srcStat = fs.statSync(sourcesDir);
+          const cacheStat = fs.statSync(cachedSourcesDir);
+          needsCopy = srcStat.mtimeMs > cacheStat.mtimeMs;
+        }
+        if (needsCopy) {
+          fs.mkdirSync(contactsCacheDir, { recursive: true });
+          fs.cpSync(sourcesDir, cachedSourcesDir, { recursive: true });
+          logger.debug('Contacts cache refreshed');
+        }
         mounts.push({
           hostPath: contactsCacheDir,
           containerPath: '/workspace/contacts',
@@ -529,8 +537,7 @@ async function buildContainerArgs(
     args.push('-e', `GH_TOKEN=${ghToken}`);
   }
   // Notion integration token for Notion MCP server
-  const notionToken =
-    process.env.NOTION_TOKEN || containerEnv.NOTION_TOKEN;
+  const notionToken = process.env.NOTION_TOKEN || containerEnv.NOTION_TOKEN;
   if (notionToken) {
     args.push('-e', `NOTION_TOKEN=${notionToken}`);
   }

@@ -587,21 +587,25 @@ if (contactsDbPath) {
     },
     async (args) => {
       try {
-        // Use sqlite3 CLI (available in container) instead of better-sqlite3
+        // Use sqlite3 CLI with parameterized query to prevent SQL injection
         const { execFileSync } = await import('child_process');
-        const q = args.query.replace(/'/g, "''"); // escape single quotes
+        const likePattern = `%${args.query}%`;
         const sql = `SELECT DISTINCT p.ZFIRSTNAME, p.ZLASTNAME, p.ZORGANIZATION,
                       pn.ZFULLNUMBER, pe.ZADDRESS AS email
                FROM ZABCDRECORD p
                LEFT JOIN ZABCDPHONENUMBER pn ON pn.ZOWNER = p.Z_PK
                LEFT JOIN ZABCDEMAILADDRESS pe ON pe.ZOWNER = p.Z_PK
-               WHERE p.ZFIRSTNAME LIKE '%${q}%' OR p.ZLASTNAME LIKE '%${q}%'
-                  OR pn.ZFULLNUMBER LIKE '%${q}%' OR pe.ZADDRESS LIKE '%${q}%'
-                  OR p.ZORGANIZATION LIKE '%${q}%'
+               WHERE p.ZFIRSTNAME LIKE :q OR p.ZLASTNAME LIKE :q
+                  OR pn.ZFULLNUMBER LIKE :q OR pe.ZADDRESS LIKE :q
+                  OR p.ZORGANIZATION LIKE :q
                ORDER BY p.ZLASTNAME, p.ZFIRSTNAME
                LIMIT 20;`;
 
-        const output = execFileSync('sqlite3', ['-json', '-readonly', contactsDbPath, sql], {
+        const output = execFileSync('sqlite3', [
+          '-json', '-readonly', contactsDbPath,
+          '-cmd', `.param set :q '${likePattern.replace(/'/g, "''")}'`,
+          sql,
+        ], {
           encoding: 'utf-8',
           timeout: 5000,
         });

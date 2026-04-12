@@ -572,6 +572,7 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__notion__*',
+        'mcp__superpilot__*',
         'mcp__gmail__*',
         'mcp__gmail-personal__*',
         'mcp__gmail-whoisxml__*',
@@ -595,6 +596,7 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
             'TodoWrite',
             'mcp__nanoclaw__*',
             'mcp__notion__*',
+            'mcp__superpilot__*',
             'mcp__gmail__*',
             'mcp__gmail-personal__*',
             'mcp__gmail-whoisxml__*',
@@ -665,6 +667,10 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
           };
           log('Notion MCP server registered');
         }
+
+        // SuperPilot MCP — requires a local bridge at SUPERPILOT_MCP_URL.
+        // Not yet available as a standalone service. Email intelligence
+        // works via SSE triggers on the host side instead.
 
         return servers;
       })(),
