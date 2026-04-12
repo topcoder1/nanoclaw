@@ -9,6 +9,9 @@ import './gmail.js';
 
 // slack
 
+// imessage
+import './imessage.js';
+
 // telegram
 import './telegram.js';
 
