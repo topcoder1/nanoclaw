@@ -309,11 +309,12 @@ function getDesktopOAuthToken(): string | null {
   try {
     // Find a Claude CLI process spawned by the Desktop app and extract
     // the CLAUDE_CODE_OAUTH_TOKEN from its environment.
-    const { execSync } = require('child_process') as typeof import('child_process');
-    const pids = execSync(
-      'pgrep -f "Claude.app/Contents/MacOS/claude"',
-      { encoding: 'utf-8', timeout: 3000 },
-    )
+    const { execSync } =
+      require('child_process') as typeof import('child_process');
+    const pids = execSync('pgrep -f "Claude.app/Contents"', {
+      encoding: 'utf-8',
+      timeout: 3000,
+    })
       .trim()
       .split('\n')
       .filter(Boolean);
