@@ -83,11 +83,14 @@ function runDealWatchScript(): Promise<DealWatchResult | null> {
     });
 
     // Hard timeout at 3 min so a hung HubSpot/Gong request can't wedge the loop.
-    const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      logger.warn('deal-watch script exceeded 3min, killed');
-      resolve(null);
-    }, 3 * 60 * 1000);
+    const timeout = setTimeout(
+      () => {
+        child.kill('SIGKILL');
+        logger.warn('deal-watch script exceeded 3min, killed');
+        resolve(null);
+      },
+      3 * 60 * 1000,
+    );
 
     child.on('close', (code) => {
       clearTimeout(timeout);
@@ -103,7 +106,10 @@ function runDealWatchScript(): Promise<DealWatchResult | null> {
         const parsed = JSON.parse(stdout) as DealWatchResult;
         resolve(parsed);
       } catch (err) {
-        logger.warn({ err, stdout: stdout.slice(0, 500) }, 'failed to parse deal-watch JSON');
+        logger.warn(
+          { err, stdout: stdout.slice(0, 500) },
+          'failed to parse deal-watch JSON',
+        );
         resolve(null);
       }
     });
@@ -130,15 +136,26 @@ function fmtMoney(n: number): string {
 }
 
 function formatAlert(a: Alert): string {
-  const icon = a.kind === 'momentum' ? '🚀' : a.kind === 'at-risk' ? '⚠️' : '🔥';
-  const label = a.kind === 'momentum' ? 'MOMENTUM' : a.kind === 'at-risk' ? 'AT RISK' : 'CHURN';
-  const name = a.deal.name.length > 70 ? a.deal.name.slice(0, 67) + '…' : a.deal.name;
+  const icon =
+    a.kind === 'momentum' ? '🚀' : a.kind === 'at-risk' ? '⚠️' : '🔥';
+  const label =
+    a.kind === 'momentum'
+      ? 'MOMENTUM'
+      : a.kind === 'at-risk'
+        ? 'AT RISK'
+        : 'CHURN';
+  const name =
+    a.deal.name.length > 70 ? a.deal.name.slice(0, 67) + '…' : a.deal.name;
   return `${icon} *${label}* — ${fmtMoney(a.deal.amount)}\n${name}\n_${a.reasons.join(' · ')}_`;
 }
 
 function formatDigest(newAlerts: Alert[]): string {
   // Order: churn (most urgent) → at-risk → momentum, then by amount desc within each.
-  const order: Record<AlertKind, number> = { churn: 0, 'at-risk': 1, momentum: 2 };
+  const order: Record<AlertKind, number> = {
+    churn: 0,
+    'at-risk': 1,
+    momentum: 2,
+  };
   const sorted = [...newAlerts].sort((x, y) => {
     const ko = order[x.kind] - order[y.kind];
     if (ko !== 0) return ko;
@@ -151,7 +168,9 @@ function formatDigest(newAlerts: Alert[]): string {
   return [header, '', ...sorted.map(formatAlert)].join('\n\n');
 }
 
-function findMainGroupJid(groups: Record<string, RegisteredGroup>): string | null {
+function findMainGroupJid(
+  groups: Record<string, RegisteredGroup>,
+): string | null {
   for (const [jid, g] of Object.entries(groups)) {
     if (g.isMain) return jid;
   }
@@ -215,16 +234,22 @@ export function startDealWatchLoop(deps: Deps): void {
     readEnvFlag('DEAL_WATCH_ENABLED') === '1';
 
   if (!enabled) {
-    logger.debug('deal-watch loop disabled (set DEAL_WATCH_ENABLED=1 to enable)');
+    logger.debug(
+      'deal-watch loop disabled (set DEAL_WATCH_ENABLED=1 to enable)',
+    );
     return;
   }
 
   logger.info({ intervalMs: POLL_INTERVAL_MS }, 'deal-watch loop starting');
 
   setTimeout(() => {
-    void pollOnce(deps).catch((err) => logger.warn({ err }, 'deal-watch poll crashed'));
+    void pollOnce(deps).catch((err) =>
+      logger.warn({ err }, 'deal-watch poll crashed'),
+    );
     setInterval(() => {
-      void pollOnce(deps).catch((err) => logger.warn({ err }, 'deal-watch poll crashed'));
+      void pollOnce(deps).catch((err) =>
+        logger.warn({ err }, 'deal-watch poll crashed'),
+      );
     }, POLL_INTERVAL_MS);
   }, STARTUP_DELAY_MS);
 }

@@ -15,12 +15,7 @@ import { logger } from '../logger.js';
 // Apple epoch offset: macOS CoreData timestamps start 2001-01-01, not 1970-01-01
 const APPLE_EPOCH_OFFSET = 978307200;
 
-const CHAT_DB_PATH = path.join(
-  os.homedir(),
-  'Library',
-  'Messages',
-  'chat.db',
-);
+const CHAT_DB_PATH = path.join(os.homedir(), 'Library', 'Messages', 'chat.db');
 
 export interface ChatMessage {
   ROWID: number;
@@ -92,7 +87,10 @@ export function getChatIdentifier(db: Db, chatId: number): string | null {
       .get(chatId) as { chat_identifier: string } | undefined;
     return row?.chat_identifier ?? null;
   } catch (err) {
-    logger.error({ err, chatId }, 'iMessage: failed to resolve chat_identifier');
+    logger.error(
+      { err, chatId },
+      'iMessage: failed to resolve chat_identifier',
+    );
     return null;
   }
 }

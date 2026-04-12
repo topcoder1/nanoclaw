@@ -120,7 +120,13 @@ export class IMessageChannel implements Channel {
 
       // Notify metadata discovery
       const chatName = msg.display_name || msg.chat_identifier;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'imessage', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'imessage',
+        isGroup,
+      );
 
       // Skip messages from bot itself — mark but still deliver so orchestrator can see them
       const isBotMessage = msg.is_from_me === 1;

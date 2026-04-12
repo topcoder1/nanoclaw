@@ -566,9 +566,7 @@ export async function processTaskIpc(
         break;
       }
       const newVerbose =
-        data.enabled !== undefined
-          ? data.enabled
-          : !targetGroupVerbose.verbose;
+        data.enabled !== undefined ? data.enabled : !targetGroupVerbose.verbose;
       setGroupVerbose(targetJidVerbose, newVerbose);
       // Update in-memory state
       targetGroupVerbose.verbose = newVerbose;

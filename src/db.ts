@@ -650,7 +650,9 @@ export function deleteRouterState(key: string): void {
  */
 export function getPendingCursors(): Map<string, string> {
   const rows = db
-    .prepare("SELECT key, value FROM router_state WHERE key LIKE 'pending_cursor:%'")
+    .prepare(
+      "SELECT key, value FROM router_state WHERE key LIKE 'pending_cursor:%'",
+    )
     .all() as Array<{ key: string; value: string }>;
   const result = new Map<string, string>();
   for (const row of rows) {
