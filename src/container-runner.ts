@@ -333,9 +333,7 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    mounts.push(
-      ...validatedMounts.map((m) => ({ ...m, optional: true })),
-    );
+    mounts.push(...validatedMounts.map((m) => ({ ...m, optional: true })));
   }
 
   return mounts;
@@ -513,6 +511,7 @@ async function buildContainerArgs(
     'DISCORD_BOT_TOKEN',
     'NANOCLAW_SERVICE_TOKEN',
     'GH_TOKEN',
+    'NOTION_TOKEN',
   ]);
   const discordToken =
     process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
@@ -528,6 +527,12 @@ async function buildContainerArgs(
   const ghToken = process.env.GH_TOKEN || containerEnv.GH_TOKEN;
   if (ghToken) {
     args.push('-e', `GH_TOKEN=${ghToken}`);
+  }
+  // Notion integration token for Notion MCP server
+  const notionToken =
+    process.env.NOTION_TOKEN || containerEnv.NOTION_TOKEN;
+  if (notionToken) {
+    args.push('-e', `NOTION_TOKEN=${notionToken}`);
   }
 
   // OneCLI gateway handles credential injection for non-Anthropic services
@@ -947,7 +952,9 @@ async function spawnContainer(
           containerArgs.join(' '),
           ``,
           `=== Mounts (from args) ===`,
-          containerArgs.filter((a) => a.includes(':/workspace') || a.includes(':/home')).join('\n'),
+          containerArgs
+            .filter((a) => a.includes(':/workspace') || a.includes(':/home'))
+            .join('\n'),
           ``,
           `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
           stderr,
@@ -962,7 +969,9 @@ async function spawnContainer(
           `Session ID: ${input.sessionId || 'new'}`,
           ``,
           `=== Mounts (from args) ===`,
-          containerArgs.filter((a) => a.includes(':/workspace') || a.includes(':/home')).join('\n'),
+          containerArgs
+            .filter((a) => a.includes(':/workspace') || a.includes(':/home'))
+            .join('\n'),
           ``,
         );
       }

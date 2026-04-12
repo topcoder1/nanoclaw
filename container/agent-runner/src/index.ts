@@ -571,6 +571,7 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__notion__*',
         'mcp__gmail__*',
         'mcp__gmail-personal__*',
         'mcp__gmail-whoisxml__*',
@@ -593,6 +594,7 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
             'WebFetch',
             'TodoWrite',
             'mcp__nanoclaw__*',
+            'mcp__notion__*',
             'mcp__gmail__*',
             'mcp__gmail-personal__*',
             'mcp__gmail-whoisxml__*',
@@ -646,6 +648,22 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
         // Backwards compat: also register as plain "gmail" pointing to personal
         if (servers['gmail-personal']) {
           servers['gmail'] = servers['gmail-personal'];
+        }
+
+        // Notion MCP server — requires NOTION_TOKEN env var (integration token)
+        const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
+        if (notionToken) {
+          servers['notion'] = {
+            command: 'npx',
+            args: ['-y', '@notionhq/notion-mcp-server'],
+            env: {
+              OPENAPI_MCP_HEADERS: JSON.stringify({
+                Authorization: `Bearer ${notionToken}`,
+                'Notion-Version': '2022-06-28',
+              }),
+            },
+          };
+          log('Notion MCP server registered');
         }
 
         return servers;
