@@ -81,15 +81,19 @@ let mockWsInstance: MockWebSocket | null = null;
 
 function installWsMock() {
   mockWsInstance = null;
-  (globalThis as Record<string, unknown>).WebSocket = class extends MockWebSocket {
+  (globalThis as Record<string, unknown>).WebSocket = class extends (
+    MockWebSocket
+  ) {
     constructor(url: string) {
       super(url);
       mockWsInstance = this;
     }
   };
   // Expose static constants on the mock constructor
-  (globalThis.WebSocket as unknown as typeof MockWebSocket).OPEN = MockWebSocket.OPEN;
-  (globalThis.WebSocket as unknown as typeof MockWebSocket).CLOSED = MockWebSocket.CLOSED;
+  (globalThis.WebSocket as unknown as typeof MockWebSocket).OPEN =
+    MockWebSocket.OPEN;
+  (globalThis.WebSocket as unknown as typeof MockWebSocket).CLOSED =
+    MockWebSocket.CLOSED;
 }
 
 // --- Envelope factories ---
@@ -140,7 +144,9 @@ function makeGroupEnvelope(overrides?: Record<string, unknown>) {
   };
 }
 
-function createInboundTestOpts(overrides?: Partial<SignalChannelOpts>): SignalChannelOpts {
+function createInboundTestOpts(
+  overrides?: Partial<SignalChannelOpts>,
+): SignalChannelOpts {
   const groups: Record<string, RegisteredGroup> = {
     'sig:+15559876543': {
       name: 'Alice',
@@ -296,7 +302,9 @@ describe('inbound messages', () => {
     const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
     await channel.connect();
     expect(mockWsInstance).not.toBeNull();
-    expect(mockWsInstance!.url).toBe(`ws://localhost:18080/v1/receive/${PHONE}`);
+    expect(mockWsInstance!.url).toBe(
+      `ws://localhost:18080/v1/receive/${PHONE}`,
+    );
   });
 
   it('parses 1:1 text message and calls onMessage', async () => {
@@ -357,7 +365,10 @@ describe('inbound messages', () => {
     await channel.connect();
 
     // This sender is not in registeredGroups
-    const envelope = make1to1Envelope({ sourceNumber: '+15550000000', source: '+15550000000' });
+    const envelope = make1to1Envelope({
+      sourceNumber: '+15550000000',
+      source: '+15550000000',
+    });
     mockWsInstance!.simulateMessage(envelope);
 
     // onChatMetadata should still be called
@@ -453,5 +464,102 @@ describe('inbound messages', () => {
     expect(channel.isConnected()).toBe(false);
     await channel.connect();
     expect(channel.isConnected()).toBe(true);
+  });
+});
+
+// --- sendMessage tests ---
+
+describe('sendMessage', () => {
+  const PHONE = '+15551234567';
+  const API_URL = 'http://localhost:18080';
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('sends 1:1 message via REST API', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await channel.sendMessage('sig:+15559876543', 'Hello');
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:18080/v2/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          number: '+15551234567',
+          recipients: ['+15559876543'],
+          message: 'Hello',
+        }),
+      }),
+    );
+  });
+
+  it('sends group message via REST API', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await channel.sendMessage('sig:group:dGVzdGdyb3VwMTIz', 'Hello group');
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:18080/v2/send',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          number: '+15551234567',
+          recipients: ['dGVzdGdyb3VwMTIz'],
+          message: 'Hello group',
+        }),
+      }),
+    );
+  });
+
+  it('splits messages over 4096 characters', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    const longText = 'a'.repeat(5000);
+    await channel.sendMessage('sig:+15559876543', longText);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(firstBody.message).toHaveLength(4096);
+    expect(secondBody.message).toHaveLength(904);
+  });
+
+  it('sends exactly one message at 4096 characters', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    const exactText = 'b'.repeat(4096);
+    await channel.sendMessage('sig:+15559876543', exactText);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles send failure gracefully', async () => {
+    const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    globalThis.fetch = mockFetch;
+
+    const channel = new SignalChannel(API_URL, PHONE, createTestOpts());
+    await expect(channel.sendMessage('sig:+15559876543', 'Hello')).resolves.toBeUndefined();
   });
 });

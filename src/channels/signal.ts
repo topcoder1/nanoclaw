@@ -60,7 +60,8 @@ export class SignalChannel implements Channel {
 
   private openWebSocket(): Promise<void> {
     return new Promise((resolve) => {
-      const wsUrl = this.apiUrl.replace(/^http/, 'ws') + `/v1/receive/${this.phoneNumber}`;
+      const wsUrl =
+        this.apiUrl.replace(/^http/, 'ws') + `/v1/receive/${this.phoneNumber}`;
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
 
@@ -164,7 +165,39 @@ export class SignalChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    logger.info({ jid, length: text.length }, 'Signal sendMessage stub');
+    const MAX_LENGTH = 4096;
+    try {
+      const chunks =
+        text.length <= MAX_LENGTH
+          ? [text]
+          : Array.from(
+              { length: Math.ceil(text.length / MAX_LENGTH) },
+              (_, i) => text.slice(i * MAX_LENGTH, (i + 1) * MAX_LENGTH),
+            );
+      for (const chunk of chunks) {
+        const body = this.buildSendBody(jid, chunk);
+        const res = await fetch(`${this.apiUrl}/v2/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          logger.warn({ jid, status: res.status }, 'Signal: send returned non-OK status');
+        }
+      }
+      logger.info({ jid, length: text.length }, 'Signal message sent');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Signal message');
+    }
+  }
+
+  private buildSendBody(jid: string, message: string): Record<string, unknown> {
+    if (jid.startsWith('sig:group:')) {
+      const groupId = jid.slice('sig:group:'.length);
+      return { number: this.phoneNumber, recipients: [groupId], message };
+    }
+    const recipient = jid.slice('sig:'.length);
+    return { number: this.phoneNumber, recipients: [recipient], message };
   }
 
   isConnected(): boolean {
