@@ -329,14 +329,14 @@ server.tool(
 
 server.tool(
   'block_autodraft_sender',
-  'Block a sender from auto-drafting. No more auto-drafts for emails from this person.',
+  'Block a sender from auto-drafting. No more auto-drafts for emails from this person. Accepts exact email or wildcard pattern (e.g. "*@company.com").',
   {
-    email: z.string().describe('Sender email to block'),
+    email: z.string().describe('Sender email or pattern to block (e.g. "ryan@example.com" or "*@company.com")'),
   },
   async (args) => {
     try {
       const data = await apiPost('/auto-draft/settings/blocked-senders', {
-        email: args.email,
+        pattern: args.email,
       });
       return {
         content: [{ type: 'text' as const, text: `Blocked auto-drafting for ${args.email}.` }],

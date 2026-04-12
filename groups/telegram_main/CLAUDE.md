@@ -62,6 +62,13 @@ When asked to contact someone, ALWAYS:
 
 When you learn new contact info, save it here by updating this file.
 
+## Active Tasks & Context (update as things change)
+
+- *ARAKII charge*: $440 foreign transaction at ARAKII STOCKHOLM SWE on Additional Card ending 043013. Identified as a legitimate Stockholm women's fashion brand. Need to confirm with Joanna if she made this purchase. TEXT her at +16268419858 about it.
+- *Ryan (ryan@ryanwmcc.com)*: Disable his SuperPilot auto-drafting. Use `block_autodraft_sender` with pattern "ryan@ryanwmcc.com".
+
+When you complete a task, remove it from this list. When a new multi-step task comes in, add it here so it survives context compaction.
+
 ## Available Channels
 
 You can send messages to ANY of these channels:
