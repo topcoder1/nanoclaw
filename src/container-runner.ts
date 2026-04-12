@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -321,9 +321,6 @@ const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 min cooldown on rate limit
 
 function refreshOAuthTokens(): string[] {
   try {
-    const { execSync } =
-      require('child_process') as typeof import('child_process');
-
     const pids = execSync('pgrep -f "claude"', {
       encoding: 'utf-8',
       timeout: 5000,
@@ -347,7 +344,11 @@ function refreshOAuthTokens(): string[] {
       }
     }
     return [...tokens];
-  } catch {
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'OAuth token scan failed',
+    );
     return [];
   }
 }
@@ -428,7 +429,10 @@ export function markTokenRateLimited(token: string): void {
   const stats = getTokenStats(token);
   stats.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
   logger.warn(
-    { tokenPrefix: token.slice(0, 20) + '...', cooldownMs: RATE_LIMIT_COOLDOWN_MS },
+    {
+      tokenPrefix: token.slice(0, 20) + '...',
+      cooldownMs: RATE_LIMIT_COOLDOWN_MS,
+    },
     'Token rate-limited, deprioritizing',
   );
 }
@@ -565,7 +569,12 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
   const { args: containerArgs, oauthToken: selectedToken } =
-    await buildContainerArgs(mounts, containerName, input.isMain, agentIdentifier);
+    await buildContainerArgs(
+      mounts,
+      containerName,
+      input.isMain,
+      agentIdentifier,
+    );
 
   logger.debug(
     {
@@ -984,7 +993,11 @@ export async function runContainerAgent(
       if (accumulatedCostUsd > 0) {
         reportTokenUsage(selectedToken, accumulatedCostUsd);
       }
-      if (result.status === 'error' && result.error && isRateLimitError(result.error)) {
+      if (
+        result.status === 'error' &&
+        result.error &&
+        isRateLimitError(result.error)
+      ) {
         markTokenRateLimited(selectedToken);
       }
     }
