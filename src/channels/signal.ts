@@ -14,6 +14,28 @@ export interface SignalChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+interface DataMessage {
+  timestamp: number;
+  message?: string | null;
+  expiresInSeconds?: number;
+  viewOnce?: boolean;
+  attachments?: Array<{ contentType: string; filename?: string }>;
+  groupInfo?: { groupId: string; type: string };
+}
+
+interface SignalEnvelope {
+  source?: string;
+  sourceNumber?: string;
+  sourceName?: string;
+  timestamp: number;
+  dataMessage?: DataMessage;
+}
+
+interface SignalPayload {
+  envelope?: SignalEnvelope;
+  account?: string;
+}
+
 export class SignalChannel implements Channel {
   name = 'signal';
 
@@ -32,7 +54,113 @@ export class SignalChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    logger.info({ apiUrl: this.apiUrl, phoneNumber: this.phoneNumber }, 'Signal channel connect stub');
+    this.closed = false;
+    return this.openWebSocket();
+  }
+
+  private openWebSocket(): Promise<void> {
+    return new Promise((resolve) => {
+      const wsUrl = this.apiUrl.replace(/^http/, 'ws') + `/v1/receive/${this.phoneNumber}`;
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
+
+      ws.onopen = () => {
+        this.reconnectDelay = 1000;
+        logger.info({ wsUrl }, 'Signal WebSocket connected');
+        resolve();
+      };
+
+      ws.onmessage = (event: { data: string }) => {
+        try {
+          const data: SignalPayload = JSON.parse(event.data);
+          this.handleEnvelope(data);
+        } catch (err) {
+          logger.debug({ err }, 'Signal: failed to parse WebSocket message');
+        }
+      };
+
+      ws.onclose = () => {
+        if (!this.closed) {
+          this.scheduleReconnect();
+        }
+      };
+
+      ws.onerror = (err: unknown) => {
+        logger.debug({ err }, 'Signal WebSocket error');
+      };
+    });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.closed) return;
+    const delay = Math.min(this.reconnectDelay, 30000);
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+    logger.info({ delay }, 'Signal: scheduling reconnect');
+    this.reconnectTimer = setTimeout(() => {
+      if (!this.closed) {
+        this.openWebSocket().catch((err) => {
+          logger.debug({ err }, 'Signal: reconnect failed');
+        });
+      }
+    }, delay);
+  }
+
+  private handleEnvelope(data: SignalPayload): void {
+    const envelope = data.envelope;
+    if (!envelope) return;
+
+    const dataMsg = envelope.dataMessage;
+    if (!dataMsg) return;
+
+    const sourceNumber = envelope.sourceNumber ?? envelope.source ?? '';
+    const sourceName = envelope.sourceName ?? '';
+    const timestamp = String(envelope.timestamp);
+
+    const isGroup = Boolean(dataMsg.groupInfo?.groupId);
+    const chatJid = isGroup
+      ? `sig:group:${dataMsg.groupInfo!.groupId}`
+      : `sig:${sourceNumber}`;
+
+    this.opts.onChatMetadata(
+      chatJid,
+      timestamp,
+      isGroup ? undefined : sourceName,
+      'signal',
+      isGroup,
+    );
+
+    const content = this.extractContent(dataMsg);
+    if (content === null) return;
+
+    const groups = this.opts.registeredGroups();
+    if (!(chatJid in groups)) return;
+
+    const is_from_me = sourceNumber === this.phoneNumber;
+
+    this.opts.onMessage(chatJid, {
+      id: `${envelope.timestamp}-${sourceNumber}`,
+      chat_jid: chatJid,
+      sender: sourceNumber,
+      sender_name: sourceName,
+      content,
+      timestamp,
+      is_from_me,
+    });
+  }
+
+  private extractContent(dataMsg: DataMessage): string | null {
+    if (dataMsg.message) return dataMsg.message;
+
+    if (dataMsg.attachments && dataMsg.attachments.length > 0) {
+      const att = dataMsg.attachments[0];
+      const ct = att.contentType ?? '';
+      if (ct.startsWith('image/')) return '[Photo]';
+      if (ct.startsWith('video/')) return '[Video]';
+      if (ct.startsWith('audio/')) return '[Voice message]';
+      return `[Document: ${att.filename ?? 'file'}]`;
+    }
+
+    return null;
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -67,8 +195,7 @@ export class SignalChannel implements Channel {
 
 registerChannel('signal', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['SIGNAL_API_URL', 'SIGNAL_PHONE_NUMBER']);
-  const apiUrl =
-    process.env.SIGNAL_API_URL || envVars.SIGNAL_API_URL || '';
+  const apiUrl = process.env.SIGNAL_API_URL || envVars.SIGNAL_API_URL || '';
   const phoneNumber =
     process.env.SIGNAL_PHONE_NUMBER || envVars.SIGNAL_PHONE_NUMBER || '';
 

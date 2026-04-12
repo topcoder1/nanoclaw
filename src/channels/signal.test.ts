@@ -27,10 +27,13 @@ vi.mock('../logger.js', () => ({
 import { registerChannel } from './registry.js';
 import { readEnvFile } from '../env.js';
 import { SignalChannel, SignalChannelOpts } from './signal.js';
+import { RegisteredGroup } from '../types.js';
 
 // --- Test helpers ---
 
-function createTestOpts(overrides?: Partial<SignalChannelOpts>): SignalChannelOpts {
+function createTestOpts(
+  overrides?: Partial<SignalChannelOpts>,
+): SignalChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
@@ -39,30 +42,158 @@ function createTestOpts(overrides?: Partial<SignalChannelOpts>): SignalChannelOp
   };
 }
 
+// --- MockWebSocket ---
+
+class MockWebSocket {
+  static OPEN = 1;
+  static CLOSED = 3;
+
+  readyState: number;
+  url: string;
+
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: ((err: unknown) => void) | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+    this.readyState = MockWebSocket.OPEN;
+    // Simulate async open
+    Promise.resolve().then(() => {
+      if (this.onopen) this.onopen();
+    });
+  }
+
+  simulateMessage(data: unknown) {
+    if (this.onmessage) {
+      this.onmessage({ data: JSON.stringify(data) });
+    }
+  }
+
+  close() {
+    this.readyState = MockWebSocket.CLOSED;
+    if (this.onclose) this.onclose();
+  }
+}
+
+let mockWsInstance: MockWebSocket | null = null;
+
+function installWsMock() {
+  mockWsInstance = null;
+  (globalThis as Record<string, unknown>).WebSocket = class extends MockWebSocket {
+    constructor(url: string) {
+      super(url);
+      mockWsInstance = this;
+    }
+  };
+  // Expose static constants on the mock constructor
+  (globalThis.WebSocket as unknown as typeof MockWebSocket).OPEN = MockWebSocket.OPEN;
+  (globalThis.WebSocket as unknown as typeof MockWebSocket).CLOSED = MockWebSocket.CLOSED;
+}
+
+// --- Envelope factories ---
+
+function make1to1Envelope(overrides?: Record<string, unknown>) {
+  return {
+    envelope: {
+      source: '+15559876543',
+      sourceNumber: '+15559876543',
+      sourceUuid: 'uuid-alice',
+      sourceName: 'Alice',
+      sourceDevice: 1,
+      timestamp: 1700000000000,
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'Hello from Signal',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+      ...overrides,
+    },
+    account: '+15551234567',
+  };
+}
+
+function makeGroupEnvelope(overrides?: Record<string, unknown>) {
+  return {
+    envelope: {
+      source: '+15559876543',
+      sourceNumber: '+15559876543',
+      sourceUuid: 'uuid-alice',
+      sourceName: 'Alice',
+      sourceDevice: 1,
+      timestamp: 1700000000000,
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'Hello from group',
+        expiresInSeconds: 0,
+        viewOnce: false,
+        groupInfo: {
+          groupId: 'dGVzdGdyb3VwMTIz',
+          type: 'DELIVER',
+        },
+      },
+      ...overrides,
+    },
+    account: '+15551234567',
+  };
+}
+
+function createInboundTestOpts(overrides?: Partial<SignalChannelOpts>): SignalChannelOpts {
+  const groups: Record<string, RegisteredGroup> = {
+    'sig:+15559876543': {
+      name: 'Alice',
+      folder: 'alice',
+      trigger: '@Andy',
+      added_at: '2024-01-01',
+    },
+    'sig:group:dGVzdGdyb3VwMTIz': {
+      name: 'Test Group',
+      folder: 'testgroup',
+      trigger: '@Andy',
+      added_at: '2024-01-01',
+    },
+  };
+  return {
+    onMessage: vi.fn(),
+    onChatMetadata: vi.fn(),
+    registeredGroups: vi.fn(() => groups),
+    ...overrides,
+  };
+}
+
 // --- Tests ---
 
 describe('SignalChannel factory registration', () => {
   it('calls registerChannel("signal", ...) on import', () => {
-    expect(registerChannel).toHaveBeenCalledWith('signal', expect.any(Function));
+    expect(registerChannel).toHaveBeenCalledWith(
+      'signal',
+      expect.any(Function),
+    );
   });
 
   it('factory returns null when SIGNAL_API_URL is missing', () => {
-    vi.mocked(readEnvFile).mockReturnValue({ SIGNAL_PHONE_NUMBER: '+15550001234' });
+    vi.mocked(readEnvFile).mockReturnValue({
+      SIGNAL_PHONE_NUMBER: '+15550001234',
+    });
 
-    const [, factory] = vi.mocked(registerChannel).mock.calls.find(
-      ([name]) => name === 'signal',
-    )!;
+    const [, factory] = vi
+      .mocked(registerChannel)
+      .mock.calls.find(([name]) => name === 'signal')!;
 
     const result = factory(createTestOpts());
     expect(result).toBeNull();
   });
 
   it('factory returns null when SIGNAL_PHONE_NUMBER is missing', () => {
-    vi.mocked(readEnvFile).mockReturnValue({ SIGNAL_API_URL: 'http://localhost:8080' });
+    vi.mocked(readEnvFile).mockReturnValue({
+      SIGNAL_API_URL: 'http://localhost:8080',
+    });
 
-    const [, factory] = vi.mocked(registerChannel).mock.calls.find(
-      ([name]) => name === 'signal',
-    )!;
+    const [, factory] = vi
+      .mocked(registerChannel)
+      .mock.calls.find(([name]) => name === 'signal')!;
 
     const result = factory(createTestOpts());
     expect(result).toBeNull();
@@ -143,5 +274,184 @@ describe('SignalChannel', () => {
       );
       expect(channel.isConnected()).toBe(false);
     });
+  });
+});
+
+// --- Inbound message tests ---
+
+describe('inbound messages', () => {
+  const PHONE = '+15551234567';
+  const API_URL = 'http://localhost:18080';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installWsMock();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('connects WebSocket to correct URL', async () => {
+    const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
+    await channel.connect();
+    expect(mockWsInstance).not.toBeNull();
+    expect(mockWsInstance!.url).toBe(`ws://localhost:18080/v1/receive/${PHONE}`);
+  });
+
+  it('parses 1:1 text message and calls onMessage', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    const envelope = make1to1Envelope();
+    mockWsInstance!.simulateMessage(envelope);
+
+    expect(opts.onChatMetadata).toHaveBeenCalledWith(
+      'sig:+15559876543',
+      expect.any(String),
+      'Alice',
+      'signal',
+      false,
+    );
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sig:+15559876543',
+      expect.objectContaining({
+        id: `1700000000000-+15559876543`,
+        chat_jid: 'sig:+15559876543',
+        sender: '+15559876543',
+        sender_name: 'Alice',
+        content: 'Hello from Signal',
+        is_from_me: false,
+      }),
+    );
+  });
+
+  it('parses group message and uses sig:group: JID', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    const envelope = makeGroupEnvelope();
+    mockWsInstance!.simulateMessage(envelope);
+
+    expect(opts.onChatMetadata).toHaveBeenCalledWith(
+      'sig:group:dGVzdGdyb3VwMTIz',
+      expect.any(String),
+      undefined,
+      'signal',
+      true,
+    );
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sig:group:dGVzdGdyb3VwMTIz',
+      expect.objectContaining({
+        chat_jid: 'sig:group:dGVzdGdyb3VwMTIz',
+        content: 'Hello from group',
+      }),
+    );
+  });
+
+  it('ignores messages from unregistered chats', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    // This sender is not in registeredGroups
+    const envelope = make1to1Envelope({ sourceNumber: '+15550000000', source: '+15550000000' });
+    mockWsInstance!.simulateMessage(envelope);
+
+    // onChatMetadata should still be called
+    expect(opts.onChatMetadata).toHaveBeenCalled();
+    // onMessage should NOT be called
+    expect(opts.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('ignores envelopes without dataMessage', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    mockWsInstance!.simulateMessage({
+      envelope: {
+        source: '+15559876543',
+        sourceNumber: '+15559876543',
+        sourceName: 'Alice',
+        timestamp: 1700000000000,
+        typingMessage: { action: 'STARTED', timestamp: 1700000000000 },
+      },
+      account: PHONE,
+    });
+
+    expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    expect(opts.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('ignores dataMessage with null message (e.g., reactions)', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    const envelope = make1to1Envelope();
+    // @ts-expect-error — intentionally set message to null
+    envelope.envelope.dataMessage.message = null;
+
+    mockWsInstance!.simulateMessage(envelope);
+
+    expect(opts.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('marks messages from own number as is_from_me', async () => {
+    const opts = createInboundTestOpts({
+      registeredGroups: vi.fn(() => ({
+        [`sig:${PHONE}`]: {
+          name: 'Self',
+          folder: 'self',
+          trigger: '@Andy',
+          added_at: '2024-01-01',
+        },
+      })),
+    });
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    const envelope = make1to1Envelope({
+      sourceNumber: PHONE,
+      source: PHONE,
+      sourceName: 'Me',
+    });
+    mockWsInstance!.simulateMessage(envelope);
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      `sig:${PHONE}`,
+      expect.objectContaining({ is_from_me: true }),
+    );
+  });
+
+  it('stores non-text attachments as placeholders', async () => {
+    const opts = createInboundTestOpts();
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await channel.connect();
+
+    const envelope = make1to1Envelope();
+    // @ts-expect-error — override message to null, add attachment
+    envelope.envelope.dataMessage.message = null;
+    // @ts-expect-error — add attachments
+    envelope.envelope.dataMessage.attachments = [
+      { contentType: 'image/jpeg', filename: 'photo.jpg' },
+    ];
+
+    mockWsInstance!.simulateMessage(envelope);
+
+    expect(opts.onMessage).toHaveBeenCalledWith(
+      'sig:+15559876543',
+      expect.objectContaining({ content: '[Photo]' }),
+    );
+  });
+
+  it('isConnected returns true after connect', async () => {
+    const channel = new SignalChannel(API_URL, PHONE, createInboundTestOpts());
+    expect(channel.isConnected()).toBe(false);
+    await channel.connect();
+    expect(channel.isConnected()).toBe(true);
   });
 });
