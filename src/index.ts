@@ -67,7 +67,10 @@ import {
 import { isBudgetExceeded } from './budget.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
-import { refreshGmailTokens } from './gmail-token-refresh.js';
+import {
+  refreshGmailTokens,
+  startGmailRefreshLoop,
+} from './gmail-token-refresh.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -977,6 +980,26 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
+  });
+  // Background Gmail token refresh: tokens expire every 60 min, refresh every 45 min.
+  startGmailRefreshLoop({
+    onAuthExpired: (summary) => {
+      // Alert via the main group's channel
+      const mainJid = Object.keys(registeredGroups).find(
+        (jid) => registeredGroups[jid].isMain,
+      );
+      if (!mainJid) return;
+      const channel = findChannel(channels, mainJid);
+      if (!channel) return;
+      channel
+        .sendMessage(
+          mainJid,
+          `⚠️ Gmail auth needs re-authorization.\n\nRun on your Mac:\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n\nDetails: ${summary}`,
+        )
+        .catch((err) =>
+          logger.warn({ err }, 'Failed to send Gmail auth alert'),
+        );
+    },
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
