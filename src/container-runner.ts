@@ -319,6 +319,7 @@ async function buildContainerArgs(
   const containerEnv = readEnvFile([
     'DISCORD_BOT_TOKEN',
     'NANOCLAW_SERVICE_TOKEN',
+    'GH_TOKEN',
   ]);
   const discordToken =
     process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
@@ -329,6 +330,11 @@ async function buildContainerArgs(
     process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
   if (serviceToken) {
     args.push('-e', `NANOCLAW_SERVICE_TOKEN=${serviceToken}`);
+  }
+  // GitHub token for gh CLI and git push (same pattern as GitHub Actions)
+  const ghToken = process.env.GH_TOKEN || containerEnv.GH_TOKEN;
+  if (ghToken) {
+    args.push('-e', `GH_TOKEN=${ghToken}`);
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
