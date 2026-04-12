@@ -5,6 +5,7 @@ FROM node:22-slim
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
+    sqlite3 \
     chromium \
     fonts-liberation \
     fonts-noto-cjk \

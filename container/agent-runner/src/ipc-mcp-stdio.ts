@@ -557,128 +557,82 @@ function findContactsDb(): string | null {
 const contactsDbPath = findContactsDb();
 
 if (contactsDbPath) {
-  // Import better-sqlite3 dynamically (available in container)
-  let Database: any;
-  try {
-    Database = (await import('better-sqlite3')).default;
-  } catch {
-    // better-sqlite3 not available in container — skip contacts tool
-  }
-
-  if (Database) {
-    server.tool(
-      'search_contacts',
-      'Search the macOS Contacts (address book) for a person by name, phone number, or email. Returns matching contacts with all their phone numbers and email addresses.',
-      {
-        query: z
-          .string()
-          .describe(
-            'Search term — name, phone number, or email address (partial match supported)',
-          ),
-      },
-      async (args) => {
-        try {
-          const db = new Database(contactsDbPath, { readonly: true });
-          const q = `%${args.query}%`;
-          const rows = db
-            .prepare(
-              `SELECT DISTINCT p.ZFIRSTNAME, p.ZLASTNAME, p.ZORGANIZATION,
-                      pn.ZFULLNUMBER, pn.ZLABEL AS phone_label,
-                      pe.ZADDRESS AS email, pe.ZLABEL AS email_label
+  server.tool(
+    'search_contacts',
+    'Search the macOS Contacts (address book) for a person by name, phone number, or email. Returns matching contacts with all their phone numbers and email addresses.',
+    {
+      query: z
+        .string()
+        .describe(
+          'Search term — name, phone number, or email address (partial match supported)',
+        ),
+    },
+    async (args) => {
+      try {
+        // Use sqlite3 CLI (available in container) instead of better-sqlite3
+        const { execFileSync } = await import('child_process');
+        const q = args.query.replace(/'/g, "''"); // escape single quotes
+        const sql = `SELECT DISTINCT p.ZFIRSTNAME, p.ZLASTNAME, p.ZORGANIZATION,
+                      pn.ZFULLNUMBER, pe.ZADDRESS AS email
                FROM ZABCDRECORD p
                LEFT JOIN ZABCDPHONENUMBER pn ON pn.ZOWNER = p.Z_PK
                LEFT JOIN ZABCDEMAILADDRESS pe ON pe.ZOWNER = p.Z_PK
-               WHERE p.ZFIRSTNAME LIKE ? OR p.ZLASTNAME LIKE ?
-                  OR pn.ZFULLNUMBER LIKE ? OR pe.ZADDRESS LIKE ?
-                  OR p.ZORGANIZATION LIKE ?
+               WHERE p.ZFIRSTNAME LIKE '%${q}%' OR p.ZLASTNAME LIKE '%${q}%'
+                  OR pn.ZFULLNUMBER LIKE '%${q}%' OR pe.ZADDRESS LIKE '%${q}%'
+                  OR p.ZORGANIZATION LIKE '%${q}%'
                ORDER BY p.ZLASTNAME, p.ZFIRSTNAME
-               LIMIT 20`,
-            )
-            .all(q, q, q, q, q) as Array<{
-            ZFIRSTNAME: string | null;
-            ZLASTNAME: string | null;
-            ZORGANIZATION: string | null;
-            ZFULLNUMBER: string | null;
-            phone_label: string | null;
-            email: string | null;
-            email_label: string | null;
-          }>;
-          db.close();
+               LIMIT 20;`;
 
-          if (rows.length === 0) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `No contacts found for "${args.query}".`,
-                },
-              ],
-            };
-          }
+        const output = execFileSync('sqlite3', ['-json', '-readonly', contactsDbPath, sql], {
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
 
-          // Group by person
-          const contacts = new Map<
-            string,
-            {
-              name: string;
-              org: string | null;
-              phones: string[];
-              emails: string[];
-            }
-          >();
-          for (const r of rows) {
-            const name =
-              [r.ZFIRSTNAME, r.ZLASTNAME].filter(Boolean).join(' ') ||
-              'Unknown';
-            if (!contacts.has(name)) {
-              contacts.set(name, {
-                name,
-                org: r.ZORGANIZATION,
-                phones: [],
-                emails: [],
-              });
-            }
-            const c = contacts.get(name)!;
-            if (r.ZFULLNUMBER && !c.phones.includes(r.ZFULLNUMBER)) {
-              c.phones.push(r.ZFULLNUMBER);
-            }
-            if (r.email && !c.emails.includes(r.email)) {
-              c.emails.push(r.email);
-            }
-          }
+        const rows = JSON.parse(output || '[]') as Array<{
+          ZFIRSTNAME: string | null;
+          ZLASTNAME: string | null;
+          ZORGANIZATION: string | null;
+          ZFULLNUMBER: string | null;
+          email: string | null;
+        }>;
 
-          const lines = [...contacts.values()].map((c) => {
-            const parts = [`**${c.name}**`];
-            if (c.org) parts.push(`(${c.org})`);
-            if (c.phones.length > 0)
-              parts.push(`📱 ${c.phones.join(', ')}`);
-            if (c.emails.length > 0)
-              parts.push(`✉️ ${c.emails.join(', ')}`);
-            return parts.join(' — ');
-          });
-
+        if (rows.length === 0) {
           return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Found ${contacts.size} contact(s):\n\n${lines.join('\n')}`,
-              },
-            ],
-          };
-        } catch (err: any) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Contacts search error: ${err?.message || String(err)}`,
-              },
-            ],
-            isError: true,
+            content: [{ type: 'text' as const, text: `No contacts found for "${args.query}".` }],
           };
         }
-      },
-    );
-  }
+
+        // Group by person
+        const contacts = new Map<string, { name: string; org: string | null; phones: string[]; emails: string[] }>();
+        for (const r of rows) {
+          const name = [r.ZFIRSTNAME, r.ZLASTNAME].filter(Boolean).join(' ') || 'Unknown';
+          if (!contacts.has(name)) {
+            contacts.set(name, { name, org: r.ZORGANIZATION, phones: [], emails: [] });
+          }
+          const c = contacts.get(name)!;
+          if (r.ZFULLNUMBER && !c.phones.includes(r.ZFULLNUMBER)) c.phones.push(r.ZFULLNUMBER);
+          if (r.email && !c.emails.includes(r.email)) c.emails.push(r.email);
+        }
+
+        const lines = [...contacts.values()].map((c) => {
+          const parts = [`**${c.name}**`];
+          if (c.org) parts.push(`(${c.org})`);
+          if (c.phones.length > 0) parts.push(`Phone: ${c.phones.join(', ')}`);
+          if (c.emails.length > 0) parts.push(`Email: ${c.emails.join(', ')}`);
+          return parts.join(' — ');
+        });
+
+        return {
+          content: [{ type: 'text' as const, text: `Found ${contacts.size} contact(s):\n\n${lines.join('\n')}` }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text' as const, text: `Contacts search error: ${err?.message || String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
 }
 
 // Start the stdio transport
