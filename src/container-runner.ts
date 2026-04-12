@@ -301,23 +301,29 @@ function buildVolumeMounts(
 }
 
 /**
- * Collect all unique OAuth tokens from running Claude processes (Desktop + CLI).
- * Multiple tokens means multiple Max subscriptions — round-robin spreads usage.
- * Cached for 5 minutes to avoid shelling out on every container spawn.
+ * Usage-aware OAuth token routing across multiple Max subscriptions.
+ * Tracks per-token cost and rate-limit events to distribute load optimally.
  */
+interface TokenStats {
+  costUsd: number; // Accumulated cost this period
+  requests: number; // Number of container spawns
+  rateLimitedUntil: number; // Timestamp — deprioritize until this time
+  lastUsed: number; // Timestamp of last use
+}
+
+const oauthTokenStats = new Map<string, TokenStats>();
 let oauthTokenCache: { tokens: string[]; expiresAt: number } = {
   tokens: [],
   expiresAt: 0,
 };
-let oauthTokenIndex = 0;
 const OAUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 min cooldown on rate limit
 
 function refreshOAuthTokens(): string[] {
   try {
     const { execSync } =
       require('child_process') as typeof import('child_process');
 
-    // Find ALL claude-related processes (Desktop and CLI)
     const pids = execSync('pgrep -f "claude"', {
       encoding: 'utf-8',
       timeout: 5000,
@@ -325,7 +331,7 @@ function refreshOAuthTokens(): string[] {
       .trim()
       .split('\n')
       .filter(Boolean)
-      .slice(0, 40); // cap to avoid scanning too many processes
+      .slice(0, 40);
 
     const tokens = new Set<string>();
     for (const pid of pids) {
@@ -346,11 +352,24 @@ function refreshOAuthTokens(): string[] {
   }
 }
 
+function getTokenStats(token: string): TokenStats {
+  let stats = oauthTokenStats.get(token);
+  if (!stats) {
+    stats = { costUsd: 0, requests: 0, rateLimitedUntil: 0, lastUsed: 0 };
+    oauthTokenStats.set(token, stats);
+  }
+  return stats;
+}
+
 function getNextOAuthToken(): string | null {
   const now = Date.now();
   if (now >= oauthTokenCache.expiresAt) {
     const tokens = refreshOAuthTokens();
     oauthTokenCache = { tokens, expiresAt: now + OAUTH_CACHE_TTL_MS };
+    // Clean up stats for tokens that no longer exist
+    for (const key of oauthTokenStats.keys()) {
+      if (!tokens.includes(key)) oauthTokenStats.delete(key);
+    }
     if (tokens.length > 0) {
       logger.info(
         { count: tokens.length },
@@ -361,11 +380,71 @@ function getNextOAuthToken(): string | null {
 
   const { tokens } = oauthTokenCache;
   if (tokens.length === 0) return null;
+  if (tokens.length === 1) {
+    const stats = getTokenStats(tokens[0]);
+    stats.requests++;
+    stats.lastUsed = now;
+    return tokens[0];
+  }
 
-  // Round-robin across available tokens
-  const token = tokens[oauthTokenIndex % tokens.length];
-  oauthTokenIndex++;
-  return token;
+  // Pick the token with the lowest effective score.
+  // Score = accumulated cost + rate-limit penalty.
+  // Rate-limited tokens get a large penalty until cooldown expires.
+  let bestToken = tokens[0];
+  let bestScore = Infinity;
+
+  for (const token of tokens) {
+    const stats = getTokenStats(token);
+    let score = stats.costUsd;
+    if (now < stats.rateLimitedUntil) {
+      score += 1000; // Heavy penalty — avoid rate-limited tokens
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestToken = token;
+    }
+  }
+
+  const stats = getTokenStats(bestToken);
+  stats.requests++;
+  stats.lastUsed = now;
+  return bestToken;
+}
+
+/**
+ * Report cost for a token after a container run completes.
+ * Called from runContainerAgent to update per-token usage stats.
+ */
+export function reportTokenUsage(token: string, costUsd: number): void {
+  const stats = getTokenStats(token);
+  stats.costUsd += costUsd;
+}
+
+/**
+ * Mark a token as rate-limited. Called when a container error
+ * suggests the token hit a usage or rate limit.
+ */
+export function markTokenRateLimited(token: string): void {
+  const stats = getTokenStats(token);
+  stats.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  logger.warn(
+    { tokenPrefix: token.slice(0, 20) + '...', cooldownMs: RATE_LIMIT_COOLDOWN_MS },
+    'Token rate-limited, deprioritizing',
+  );
+}
+
+/** Check if an error message indicates a rate limit or usage limit. */
+function isRateLimitError(errorMsg: string): boolean {
+  const lower = errorMsg.toLowerCase();
+  return (
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('429') ||
+    lower.includes('too many requests') ||
+    lower.includes('usage limit') ||
+    lower.includes('quota exceeded') ||
+    lower.includes('overloaded')
+  );
 }
 
 async function buildContainerArgs(
@@ -373,7 +452,7 @@ async function buildContainerArgs(
   containerName: string,
   isMain: boolean,
   agentIdentifier?: string,
-): Promise<string[]> {
+): Promise<{ args: string[]; oauthToken: string | null }> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -421,13 +500,14 @@ async function buildContainerArgs(
     args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
     // Override OneCLI's proxy URL — OAuth must talk directly to Anthropic
     args.push('-e', 'ANTHROPIC_BASE_URL=https://api.anthropic.com');
-    const tokenSlot =
-      ((oauthTokenIndex - 1) % oauthTokenCache.tokens.length) + 1;
+    const stats = getTokenStats(oauthToken);
     logger.info(
       {
         containerName,
-        tokenSlot: `${tokenSlot}/${oauthTokenCache.tokens.length}`,
         tokenPrefix: oauthToken.slice(0, 20) + '...',
+        totalTokens: oauthTokenCache.tokens.length,
+        tokenCostSoFar: `$${stats.costUsd.toFixed(2)}`,
+        tokenRequests: stats.requests,
       },
       'Using Max subscription OAuth token',
     );
@@ -463,7 +543,7 @@ async function buildContainerArgs(
 
   args.push(CONTAINER_IMAGE);
 
-  return args;
+  return { args, oauthToken };
 }
 
 export async function runContainerAgent(
@@ -484,12 +564,8 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
-    mounts,
-    containerName,
-    input.isMain,
-    agentIdentifier,
-  );
+  const { args: containerArgs, oauthToken: selectedToken } =
+    await buildContainerArgs(mounts, containerName, input.isMain, agentIdentifier);
 
   logger.debug(
     {
@@ -517,7 +593,20 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  return new Promise((resolve) => {
+  // Track per-token cost and accumulate from streamed results
+  let accumulatedCostUsd = 0;
+  const originalOnOutput = onOutput;
+  const trackingOnOutput = onOutput
+    ? async (output: ContainerOutput) => {
+        if (typeof output.totalCostUsd === 'number') {
+          accumulatedCostUsd += output.totalCostUsd;
+        }
+        return originalOnOutput!(output);
+      }
+    : undefined;
+  onOutput = trackingOnOutput;
+
+  const containerPromise = new Promise<ContainerOutput>((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -887,6 +976,19 @@ export async function runContainerAgent(
         error: `Container spawn error: ${err.message}`,
       });
     });
+  });
+
+  // After container completes, report usage and detect rate limits
+  return containerPromise.then((result) => {
+    if (selectedToken) {
+      if (accumulatedCostUsd > 0) {
+        reportTokenUsage(selectedToken, accumulatedCostUsd);
+      }
+      if (result.status === 'error' && result.error && isRateLimitError(result.error)) {
+        markTokenRateLimited(selectedToken);
+      }
+    }
+    return result;
   });
 }
 
