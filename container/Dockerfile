@@ -64,7 +64,9 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Pre-compile to /app/dist so cold starts skip compilation when source is unchanged
 RUN cp -r /app/dist /app/dist-prebuilt
 
-RUN printf '#!/bin/bash\nset -e\n\n# Configure git identity and credential helper for GitHub\ngit config --global user.name "NanoClaw Bot"\ngit config --global user.email "bot@nanoclaw.dev"\n\n# Use gh as git credential helper (gh auth is handled by OneCLI proxy)\nif command -v gh &>/dev/null; then\n  gh auth setup-git 2>/dev/null || true\nfi\n\n# Fast path: use pre-built dist if source hasn\'t changed (saves ~5-8s)\n# Compare mounted src/ timestamp against the pre-built dist\nSRC_NEWEST=$(find /app/src -name "*.ts" -newer /app/dist-prebuilt/index.js 2>/dev/null | head -1)\nif [ -z "$SRC_NEWEST" ] && [ -f /app/dist-prebuilt/index.js ]; then\n  cp -r /app/dist-prebuilt /tmp/dist 2>/dev/null\nelse\n  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nfi\nln -sf /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist 2>/dev/null || true\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Copy entrypoint script (uses pre-built dist when source unchanged)
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
