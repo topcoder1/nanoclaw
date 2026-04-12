@@ -301,24 +301,33 @@ function buildVolumeMounts(
 }
 
 /**
- * Extract the live OAuth token from the running Claude Desktop process.
- * Returns the token string if available, or null if the app isn't running
- * or the token can't be extracted.
+ * Collect all unique OAuth tokens from running Claude processes (Desktop + CLI).
+ * Multiple tokens means multiple Max subscriptions — round-robin spreads usage.
+ * Cached for 5 minutes to avoid shelling out on every container spawn.
  */
-function getDesktopOAuthToken(): string | null {
+let oauthTokenCache: { tokens: string[]; expiresAt: number } = {
+  tokens: [],
+  expiresAt: 0,
+};
+let oauthTokenIndex = 0;
+const OAUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function refreshOAuthTokens(): string[] {
   try {
-    // Find a Claude CLI process spawned by the Desktop app and extract
-    // the CLAUDE_CODE_OAUTH_TOKEN from its environment.
     const { execSync } =
       require('child_process') as typeof import('child_process');
-    const pids = execSync('pgrep -f "Claude.app/Contents"', {
+
+    // Find ALL claude-related processes (Desktop and CLI)
+    const pids = execSync('pgrep -f "claude"', {
       encoding: 'utf-8',
-      timeout: 3000,
+      timeout: 5000,
     })
       .trim()
       .split('\n')
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, 40); // cap to avoid scanning too many processes
 
+    const tokens = new Set<string>();
     for (const pid of pids) {
       try {
         const env = execSync(`ps eww ${pid}`, {
@@ -326,15 +335,37 @@ function getDesktopOAuthToken(): string | null {
           timeout: 3000,
         });
         const match = env.match(/CLAUDE_CODE_OAUTH_TOKEN=(sk-ant-oat01-\S+)/);
-        if (match) return match[1];
+        if (match) tokens.add(match[1]);
       } catch {
         continue;
       }
     }
+    return [...tokens];
   } catch {
-    // Desktop app not running or pgrep not available
+    return [];
   }
-  return null;
+}
+
+function getNextOAuthToken(): string | null {
+  const now = Date.now();
+  if (now >= oauthTokenCache.expiresAt) {
+    const tokens = refreshOAuthTokens();
+    oauthTokenCache = { tokens, expiresAt: now + OAUTH_CACHE_TTL_MS };
+    if (tokens.length > 0) {
+      logger.info(
+        { count: tokens.length },
+        `Found ${tokens.length} Max subscription OAuth token(s)`,
+      );
+    }
+  }
+
+  const { tokens } = oauthTokenCache;
+  if (tokens.length === 0) return null;
+
+  // Round-robin across available tokens
+  const token = tokens[oauthTokenIndex % tokens.length];
+  oauthTokenIndex++;
+  return token;
 }
 
 async function buildContainerArgs(
@@ -385,14 +416,20 @@ async function buildContainerArgs(
   // Auth strategy: prefer Max subscription OAuth token (free included usage)
   // over OneCLI API key injection (billed per token).
   // Applied AFTER OneCLI so our -e flags override OneCLI's ANTHROPIC_BASE_URL.
-  const oauthToken = getDesktopOAuthToken();
+  const oauthToken = getNextOAuthToken();
   if (oauthToken) {
     args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
     // Override OneCLI's proxy URL — OAuth must talk directly to Anthropic
     args.push('-e', 'ANTHROPIC_BASE_URL=https://api.anthropic.com');
+    const tokenSlot =
+      ((oauthTokenIndex - 1) % oauthTokenCache.tokens.length) + 1;
     logger.info(
-      { containerName },
-      'Using Max subscription OAuth token from Claude Desktop',
+      {
+        containerName,
+        tokenSlot: `${tokenSlot}/${oauthTokenCache.tokens.length}`,
+        tokenPrefix: oauthToken.slice(0, 20) + '...',
+      },
+      'Using Max subscription OAuth token',
     );
   } else if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
