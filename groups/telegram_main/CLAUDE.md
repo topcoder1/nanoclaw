@@ -47,27 +47,23 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## Key Contacts (Persistent — survives session restarts)
+## Persistence — How to Remember Things
 
-| Name | Phone | Email | Relationship |
-|------|-------|-------|-------------|
-| Joanna He | +16268419858 | joanna.he88@gmail.com | Wife |
-| Ryan W. McClellan | | ryan@ryanwmcc.com | Colleague (Inbox SuperPilot) |
+You have workspace files that persist across sessions. USE THEM:
 
-When asked to contact someone, ALWAYS:
-1. Check this list first
-2. If not here, use `search_contacts` to look up macOS Contacts
-3. If not in Contacts, search Gmail history
-4. NEVER say "I don't have their info" without checking all three sources
+- `contacts.md` — Known contacts with phone/email. Update when you learn new info.
+- `active-tasks.md` — Multi-step tasks in progress. Add new tasks, remove completed ones.
+- `conversations/` — Searchable archive of past conversations.
 
-When you learn new contact info, save it here by updating this file.
+**On every session start, read `active-tasks.md` to resume unfinished work.**
 
-## Active Tasks & Context (update as things change)
+When asked to contact someone:
+1. Check `contacts.md` first
+2. Use `search_contacts` to check macOS Contacts
+3. Search Gmail history
+4. NEVER say "I don't have their info" without checking all three
 
-- *ARAKII charge*: $440 foreign transaction at ARAKII STOCKHOLM SWE on Additional Card ending 043013. Identified as a legitimate Stockholm women's fashion brand. Need to confirm with Joanna if she made this purchase. TEXT her at +16268419858 about it.
-- *Ryan (ryan@ryanwmcc.com)*: Disable his SuperPilot auto-drafting. Use `block_autodraft_sender` with pattern "ryan@ryanwmcc.com".
-
-When you complete a task, remove it from this list. When a new multi-step task comes in, add it here so it survives context compaction.
+When a new multi-step task comes in, add it to `active-tasks.md` immediately. When completed, mark it done. This survives context compaction and session restarts.
 
 ## Available Channels
 
