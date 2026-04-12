@@ -41,9 +41,23 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  `Send a message immediately. By default sends to the current chat. Main group can send to any channel.
+
+Available channels and JID formats:
+• Telegram (current chat): omit target_jid
+• iMessage/SMS: target_jid = "im:+14155551234" (phone) or "im:user@icloud.com" (Apple ID)
+• Discord: target_jid = "dc:channel_id"
+• Email: use the Gmail MCP tools instead
+
+Use search_contacts to look up phone numbers before sending iMessage/SMS.`,
   {
     text: z.string().describe('The message text to send'),
+    target_jid: z
+      .string()
+      .optional()
+      .describe(
+        'Send to a different channel. E.g. "im:+14155551234" for iMessage/SMS. Main group only.',
+      ),
     sender: z
       .string()
       .optional()
@@ -52,9 +66,12 @@ server.tool(
       ),
   },
   async (args) => {
+    // Main group can target any JID; others can only send to their own chat
+    const targetJid = isMain && args.target_jid ? args.target_jid : chatJid;
+
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
@@ -63,7 +80,8 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const dest = targetJid === chatJid ? 'current chat' : targetJid;
+    return { content: [{ type: 'text' as const, text: `Message sent to ${dest}.` }] };
   },
 );
 
