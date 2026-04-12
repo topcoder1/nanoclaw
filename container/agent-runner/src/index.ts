@@ -33,6 +33,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  verbose?: boolean;
 }
 
 interface ContainerOutput {
@@ -477,6 +478,38 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Append model escalation instructions to the system prompt
+  const escalationInstruction = `\n\n## Model Escalation
+You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` agent (Opus) using the Agent tool.
+
+**Escalate to deep-work when:**
+- Multi-file code changes, refactors, or new features touching 2+ files
+- Debugging that requires hypothesis testing across multiple files
+- PR creation or code review
+- Security analysis
+- Architecture or design decisions
+
+**Handle directly (do NOT escalate):**
+- Simple Q&A, status checks, greetings
+- Single-file edits that are straightforward
+- Scheduling, reminders, routine tool use
+- Email triage and simple replies
+- Reading files, searching code, running commands
+
+**When escalating:**
+1. Send a brief acknowledgment to the user via \`send_message\` (e.g. "Looking into the auth middleware...")
+2. Dispatch to the \`deep-work\` agent with a clear, complete prompt describing the task
+3. Relay the agent's result to the user`;
+  globalClaudeMd = globalClaudeMd
+    ? globalClaudeMd + escalationInstruction
+    : escalationInstruction;
+
+  // When verbose mode is on, append thinking instruction to the system prompt
+  if (containerInput.verbose) {
+    const thinkingInstruction = `\n\n## Verbose Mode (Active)\nBefore each response, include a brief 1-2 sentence summary of your reasoning approach as a blockquote. Format:\n> Considering X, checking Y...\n\nKeep the thinking summary concise — one or two lines max. Then continue with your normal response. Do NOT use this for trivial responses (greetings, confirmations). Only include it when there is genuine reasoning or decision-making to surface.`;
+    globalClaudeMd += thinkingInstruction;
+  }
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -508,6 +541,7 @@ async function runQuery(
           }
         : undefined,
       allowedTools: [
+        'Agent',
         'Bash',
         'Read',
         'Write',
@@ -529,6 +563,28 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
       ],
+      agents: {
+        'deep-work': {
+          description:
+            'Use for complex tasks requiring deep reasoning: multi-file code changes, debugging, PR creation/review, security analysis, architecture decisions. Do NOT use for simple Q&A, scheduling, single-file edits, or routine tool use.',
+          model: 'opus' as const,
+          tools: [
+            'Bash',
+            'Read',
+            'Write',
+            'Edit',
+            'Glob',
+            'Grep',
+            'WebSearch',
+            'WebFetch',
+            'TodoWrite',
+            'mcp__nanoclaw__*',
+            'mcp__gmail__*',
+          ],
+          prompt:
+            'You are a deep reasoning agent handling complex development and analysis tasks. Think through problems carefully — check cross-file impacts, consider edge cases, verify assumptions. Your output will be relayed to the user. Write your response as if speaking directly to them.',
+        },
+      },
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,

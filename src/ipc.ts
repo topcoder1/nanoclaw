@@ -5,7 +5,13 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  setGroupVerbose,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -186,6 +192,8 @@ export async function processTaskIpc(
       subject: string;
       sender: string;
     }>;
+    // For toggle_verbose
+    enabled?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -535,6 +543,38 @@ export async function processTaskIpc(
       logger.info(
         { emailCount, sourceGroup, agentJid },
         'Email trigger enqueued for agent processing',
+      );
+      break;
+    }
+
+    case 'toggle_verbose': {
+      if (!data.chatJid) {
+        logger.warn({ sourceGroup }, 'toggle_verbose: missing chatJid');
+        break;
+      }
+      // Only allow toggling for own group, or main can toggle any
+      const targetJidVerbose = data.chatJid;
+      const targetGroupVerbose = registeredGroups[targetJidVerbose];
+      if (
+        !targetGroupVerbose ||
+        (!isMain && targetGroupVerbose.folder !== sourceGroup)
+      ) {
+        logger.warn(
+          { sourceGroup, targetJid: targetJidVerbose },
+          'Unauthorized toggle_verbose attempt blocked',
+        );
+        break;
+      }
+      const newVerbose =
+        data.enabled !== undefined
+          ? data.enabled
+          : !targetGroupVerbose.verbose;
+      setGroupVerbose(targetJidVerbose, newVerbose);
+      // Update in-memory state
+      targetGroupVerbose.verbose = newVerbose;
+      logger.info(
+        { chatJid: targetJidVerbose, verbose: newVerbose, sourceGroup },
+        'Verbose mode toggled via IPC',
       );
       break;
     }

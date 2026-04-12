@@ -496,6 +496,46 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'toggle_verbose',
+  'Toggle verbose mode for this group. When on, responses include a brief thinking summary before the answer. When off, responses are direct. Returns the new state.',
+  {
+    enabled: z
+      .boolean()
+      .optional()
+      .describe(
+        'Explicitly set verbose on (true) or off (false). Omit to toggle.',
+      ),
+  },
+  async (args) => {
+    const data = {
+      type: 'toggle_verbose',
+      chatJid,
+      groupFolder,
+      enabled: args.enabled,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const stateLabel =
+      args.enabled === undefined
+        ? 'toggled'
+        : args.enabled
+          ? 'enabled'
+          : 'disabled';
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Verbose mode ${stateLabel}. The change takes effect on the next message.`,
+        },
+      ],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

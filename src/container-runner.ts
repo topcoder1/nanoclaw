@@ -52,6 +52,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  verbose?: boolean;
 }
 
 export interface ContainerOutput {
