@@ -497,9 +497,18 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
 - Reading files, searching code, running commands
 
 **When escalating:**
-1. Send a brief acknowledgment to the user via \`send_message\` (e.g. "Looking into the auth middleware...")
+1. Send a brief acknowledgment to the user via \`send_message\` — always include "⚡ Opus" so the user knows the model switched. Example: "⚡ Opus — investigating the auth middleware..."
 2. Dispatch to the \`deep-work\` agent with a clear, complete prompt describing the task
-3. Relay the agent's result to the user`;
+3. Relay the agent's result to the user
+
+**When handling directly (no escalation):**
+- Just respond normally. No model label needed — the user knows Sonnet is the default.
+
+**Progress reporting for multi-step work:**
+- For tasks with multiple independent subtasks (e.g. fixing 5 repos), send incremental progress via \`send_message\` as each subtask completes. Don't wait for all to finish.
+- Format: "✅ 1/5 — fixed auth bug in repo-x (PR #123)" as each one lands.
+- If a subtask fails, report immediately: "❌ Failed: repo-y — GitHub auth error (details...)"
+- When all done, send a summary.`;
   globalClaudeMd = globalClaudeMd
     ? globalClaudeMd + escalationInstruction
     : escalationInstruction;
@@ -666,6 +675,31 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
       }
     }
 
+    // Extract progress info from subagent task_progress messages
+    // to keep the live status line updated during parallel agent work.
+    if (
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'task_progress'
+    ) {
+      try {
+        const tp = message as {
+          tool_name?: string;
+          task_id?: string;
+        };
+        if (tp.tool_name) {
+          const label = formatToolLabel(tp.tool_name);
+          writeOutput({
+            status: 'success',
+            result: null,
+            newSessionId,
+            progressLabel: `⚡ ${label}`,
+          });
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
@@ -683,6 +717,33 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
       log(
         `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
       );
+
+      // Forward subagent failures to the user immediately via IPC
+      if (tn.status === 'failed' && tn.summary) {
+        const truncatedSummary =
+          tn.summary.length > 200
+            ? tn.summary.slice(0, 200) + '...'
+            : tn.summary;
+        const errorIpc = {
+          type: 'message',
+          chatJid: containerInput.chatJid,
+          text: `❌ Subagent failed: ${truncatedSummary}`,
+          groupFolder: containerInput.groupFolder,
+          timestamp: new Date().toISOString(),
+        };
+        const ipcDir = '/workspace/ipc/messages';
+        try {
+          fs.mkdirSync(ipcDir, { recursive: true });
+          const filename = `${Date.now()}-err-${Math.random().toString(36).slice(2, 6)}.json`;
+          const tmpPath = path.join(ipcDir, `${filename}.tmp`);
+          fs.writeFileSync(tmpPath, JSON.stringify(errorIpc));
+          fs.renameSync(tmpPath, path.join(ipcDir, filename));
+        } catch (err) {
+          log(
+            `Failed to write error IPC: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
 
     if (message.type === 'result') {
