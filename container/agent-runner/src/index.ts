@@ -572,6 +572,10 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
+        'mcp__gmail-personal__*',
+        'mcp__gmail-whoisxml__*',
+        'mcp__gmail-attaxion__*',
+        'mcp__gmail-dev__*',
       ],
       agents: {
         'deep-work': {
@@ -590,6 +594,10 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
             'TodoWrite',
             'mcp__nanoclaw__*',
             'mcp__gmail__*',
+            'mcp__gmail-personal__*',
+            'mcp__gmail-whoisxml__*',
+            'mcp__gmail-attaxion__*',
+            'mcp__gmail-dev__*',
           ],
           prompt:
             'You are a deep reasoning agent handling complex development and analysis tasks. Think through problems carefully — check cross-file impacts, consider edge cases, verify assumptions. Your output will be relayed to the user. Write your response as if speaking directly to them.',
@@ -599,38 +607,49 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      mcpServers: (() => {
+        const servers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-          env: {
-            // Pin credential paths explicitly. The @gongrzhe/server-gmail-autoauth-mcp
-            // package defaults to ${HOME}/.gmail-mcp, which works in the steady state
-            // but breaks if HOME is unset or if the package version changes its
-            // default location. These two env vars are documented in the package
-            // (dist/index.js lines 21-22 read process.env.GMAIL_OAUTH_PATH and
-            // process.env.GMAIL_CREDENTIALS_PATH directly) and short-circuit the
-            // homedir() lookup entirely.
-            //
-            // NOTE: The upstream package is hard-coded to a SINGLE account directory
-            // — it cannot read .gmail-mcp-jonathan or .gmail-mcp-attaxion. Those
-            // mounts exist for forward compatibility with a future per-account
-            // launcher, but today only the personal account is reachable from this
-            // MCP server instance.
-            GMAIL_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-            GMAIL_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
-          },
-        },
-      },
+        };
+
+        // Register a Gmail MCP server per account that has credentials mounted.
+        // Each gets its own server name so the agent can distinguish accounts.
+        const gmailAccounts = [
+          { name: 'gmail-personal', dir: '.gmail-mcp' },
+          { name: 'gmail-whoisxml', dir: '.gmail-mcp-jonathan' },
+          { name: 'gmail-attaxion', dir: '.gmail-mcp-attaxion' },
+          { name: 'gmail-dev', dir: '.gmail-mcp-dev' },
+        ];
+        for (const acct of gmailAccounts) {
+          const credsPath = `/home/node/${acct.dir}/credentials.json`;
+          const oauthPath = `/home/node/${acct.dir}/gcp-oauth.keys.json`;
+          if (fs.existsSync(credsPath)) {
+            servers[acct.name] = {
+              command: 'npx',
+              args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+              env: {
+                GMAIL_OAUTH_PATH: oauthPath,
+                GMAIL_CREDENTIALS_PATH: credsPath,
+              },
+            };
+            log(`Gmail account ${acct.name} registered (${acct.dir})`);
+          }
+        }
+        // Backwards compat: also register as plain "gmail" pointing to personal
+        if (servers['gmail-personal']) {
+          servers['gmail'] = servers['gmail-personal'];
+        }
+
+        return servers;
+      })(),
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
