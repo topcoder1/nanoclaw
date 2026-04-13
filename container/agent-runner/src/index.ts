@@ -151,12 +151,52 @@ function log(message: string): void {
 /**
  * Human-friendly one-liner for a tool name, used in live progress updates.
  * Avoids leaking raw SDK names like `mcp__superpilot__get_triaged_emails`.
+ *
+ * When `toolInput` is provided, tool-specific details are extracted:
+ * - Bash: uses the `description` field (e.g. "Running tests")
+ * - MCP tools: prefixes with the server name for context
  */
-function formatToolLabel(toolName: string): string {
-  // Strip MCP prefixes: mcp__server__toolname → toolname
-  const stripped = toolName.replace(/^mcp__[^_]+__/, '');
-  // snake_case/camelCase → Title Case
-  const words = stripped
+function formatToolLabel(
+  toolName: string,
+  toolInput?: Record<string, unknown>,
+): string {
+  // Bash: prefer the description field authored by the agent
+  if (toolName === 'Bash' && toolInput?.description) {
+    return String(toolInput.description);
+  }
+
+  // MCP tools: extract server name for context (mcp__gmail-personal__search_emails)
+  const mcpMatch = toolName.match(/^mcp__([^_]+(?:-[^_]+)*)__(.+)$/);
+  if (mcpMatch) {
+    const server = mcpMatch[1];
+    const tool = mcpMatch[2];
+    const toolWords = tool
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/_/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    const prettyTool = toolWords
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+    // Use the heuristic map for known MCP tool names
+    const mcpMap: Record<string, string> = {
+      'Search Emails': 'Searching emails',
+      'Read Email': 'Reading email',
+      'Send Email': 'Drafting email',
+      'Get Triaged Emails': 'Fetching triaged emails',
+      'Get Thread Summary': 'Summarizing thread',
+      'Generate Reply': 'Generating reply',
+      'Search Kb': 'Searching KB',
+      'Upload To Kb': 'Saving to KB',
+      'Get Awaiting Reply': 'Fetching awaiting replies',
+      'Send Message': 'Sending message',
+    };
+    const action = mcpMap[prettyTool] || prettyTool;
+    return `${action} (${server})`;
+  }
+
+  // Built-in tools: snake_case/camelCase → Title Case
+  const words = toolName
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/_/g, ' ')
     .split(/\s+/)
@@ -164,7 +204,6 @@ function formatToolLabel(toolName: string): string {
   const pretty = words
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ');
-  // Heuristic verbs for common tools — "Read" is clearer than "Read Email".
   const map: Record<string, string> = {
     Read: 'Reading file',
     Write: 'Writing file',
@@ -174,16 +213,6 @@ function formatToolLabel(toolName: string): string {
     Grep: 'Searching code',
     'Task Create': 'Creating task',
     'Task List': 'Listing tasks',
-    'Search Emails': 'Searching Gmail',
-    'Read Email': 'Reading email',
-    'Send Email': 'Drafting email',
-    'Get Triaged Emails': 'Fetching triaged emails',
-    'Get Thread Summary': 'Summarizing thread',
-    'Generate Reply': 'Generating reply',
-    'Search Kb': 'Searching KB',
-    'Upload To Kb': 'Saving to KB',
-    'Get Awaiting Reply': 'Fetching awaiting replies',
-    'Send Message': 'Sending message',
   };
   return map[pretty] || pretty;
 }
@@ -713,14 +742,22 @@ You run as Sonnet for speed. For complex tasks, delegate to the \`deep-work\` ag
       // tool makes the spinner feel alive instead of stalled.
       try {
         const asstMsg = message as {
-          message?: { content?: Array<{ type?: string; name?: string }> };
+          message?: {
+            content?: Array<{
+              type?: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            }>;
+          };
         };
         const blocks = asstMsg.message?.content || [];
-        const toolNames = blocks
-          .filter((b) => b?.type === 'tool_use' && typeof b.name === 'string')
-          .map((b) => b.name as string);
-        if (toolNames.length > 0) {
-          const label = toolNames.map(formatToolLabel).join(' · ');
+        const toolBlocks = blocks.filter(
+          (b) => b?.type === 'tool_use' && typeof b.name === 'string',
+        );
+        if (toolBlocks.length > 0) {
+          const label = toolBlocks
+            .map((b) => formatToolLabel(b.name as string, b.input))
+            .join(' · ');
           writeOutput({
             status: 'success',
             result: null,

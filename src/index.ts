@@ -674,6 +674,16 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
+            // Acknowledge receipt so the user knows their message wasn't lost.
+            // The agent is already busy — this ack bridges the gap until it responds.
+            channel
+              .sendMessage(
+                chatJid,
+                '↳ Got it — queued behind current task.',
+              )
+              .catch((err) =>
+                logger.warn({ chatJid, err }, 'Failed to send pipe ack'),
+              );
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
