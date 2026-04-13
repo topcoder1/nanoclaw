@@ -73,7 +73,7 @@ mkdir -p ~/.config/nanoclaw/signal-cli
 
 docker run -d --name signal-api \
   --restart unless-stopped \
-  -p 18080:8080 \
+  -p 127.0.0.1:18080:8080 \
   -v $HOME/.config/nanoclaw/signal-cli:/home/.local/share/signal-cli \
   -e MODE=native \
   bbernhard/signal-cli-rest-api

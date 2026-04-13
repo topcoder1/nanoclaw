@@ -23,12 +23,21 @@ interface DataMessage {
   groupInfo?: { groupId: string; type: string };
 }
 
+interface SyncMessage {
+  sentMessage?: DataMessage & {
+    destination?: string;
+    destinationNumber?: string;
+    destinationUuid?: string;
+  };
+}
+
 interface SignalEnvelope {
   source?: string;
   sourceNumber?: string;
   sourceName?: string;
   timestamp: number;
   dataMessage?: DataMessage;
+  syncMessage?: SyncMessage;
 }
 
 interface SignalPayload {
@@ -80,6 +89,9 @@ export class SignalChannel implements Channel {
         logger.warn({ status: res.status }, 'Signal: poll returned non-OK');
       } else {
         const payloads = (await res.json()) as SignalPayload[];
+        if (payloads.length > 0) {
+          logger.info({ count: payloads.length }, 'Signal: poll received messages');
+        }
         for (const payload of payloads) {
           this.handleEnvelope(payload);
         }
@@ -94,17 +106,44 @@ export class SignalChannel implements Channel {
     const envelope = data.envelope;
     if (!envelope) return;
 
-    const dataMsg = envelope.dataMessage;
+    // Messages from others arrive as dataMessage.
+    // Messages sent from our own phone arrive as syncMessage.sentMessage.
+    const dataMsg =
+      envelope.dataMessage ?? envelope.syncMessage?.sentMessage ?? null;
+
+    logger.info(
+      {
+        hasDataMessage: !!envelope.dataMessage,
+        hasSyncMessage: !!envelope.syncMessage,
+        hasSentMessage: !!envelope.syncMessage?.sentMessage,
+        resolvedDataMsg: !!dataMsg,
+        source: envelope.sourceNumber,
+      },
+      'Signal: processing envelope',
+    );
+
     if (!dataMsg) return;
+
+    const isSyncMessage = !envelope.dataMessage && !!envelope.syncMessage;
 
     const sourceNumber = envelope.sourceNumber ?? envelope.source ?? '';
     const sourceName = envelope.sourceName ?? '';
-    const timestamp = String(envelope.timestamp);
+    const timestamp = new Date(envelope.timestamp).toISOString();
 
+    // For sync messages (sent from our phone), the chat target is the destination,
+    // not the source (which is always us). For "Note to Self", destination = source.
     const isGroup = Boolean(dataMsg.groupInfo?.groupId);
-    const chatJid = isGroup
-      ? `sig:group:${dataMsg.groupInfo!.groupId}`
-      : `sig:${sourceNumber}`;
+    let chatJid: string;
+    if (isGroup) {
+      chatJid = `sig:group:${dataMsg.groupInfo!.groupId}`;
+    } else if (isSyncMessage && 'destinationNumber' in dataMsg) {
+      const dest =
+        (dataMsg as { destinationNumber?: string }).destinationNumber ??
+        sourceNumber;
+      chatJid = `sig:${dest}`;
+    } else {
+      chatJid = `sig:${sourceNumber}`;
+    }
 
     this.opts.onChatMetadata(
       chatJid,
@@ -115,12 +154,21 @@ export class SignalChannel implements Channel {
     );
 
     const content = this.extractContent(dataMsg);
+    logger.info(
+      { chatJid, content, message: dataMsg.message },
+      'Signal: extracted content',
+    );
     if (content === null) return;
 
     const groups = this.opts.registeredGroups();
-    if (!(chatJid in groups)) return;
+    const registered = chatJid in groups;
+    logger.info(
+      { chatJid, registered, groupCount: Object.keys(groups).length },
+      'Signal: group check',
+    );
+    if (!registered) return;
 
-    const is_from_me = sourceNumber === this.phoneNumber;
+    const is_from_me = isSyncMessage || sourceNumber === this.phoneNumber;
 
     this.opts.onMessage(chatJid, {
       id: `${envelope.timestamp}-${sourceNumber}`,
@@ -129,7 +177,7 @@ export class SignalChannel implements Channel {
       sender_name: sourceName,
       content,
       timestamp,
-      is_from_me,
+      is_from_me: is_from_me,
     });
   }
 
