@@ -25,9 +25,7 @@ describe('Knowledge Store', () => {
 
     const facts = getAllFacts();
     expect(facts).toHaveLength(1);
-    expect(facts[0].text).toBe(
-      'User prefers dark mode for all applications',
-    );
+    expect(facts[0].text).toBe('User prefers dark mode for all applications');
     expect(facts[0].domain).toBe('preferences');
   });
 

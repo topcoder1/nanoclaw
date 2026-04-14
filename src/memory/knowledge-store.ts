@@ -62,13 +62,7 @@ export function storeFact(fact: StoreFactInput): number {
       `INSERT INTO knowledge_facts (text, domain, group_id, source, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(
-      fact.text,
-      fact.domain || '',
-      fact.groupId || '',
-      fact.source,
-      now,
-    );
+    .run(fact.text, fact.domain || '', fact.groupId || '', fact.source, now);
 
   logger.debug(
     { rowid: result.lastInsertRowid, domain: fact.domain, source: fact.source },
@@ -82,10 +76,7 @@ export function storeFact(fact: StoreFactInput): number {
  * Query facts using FTS5 full-text search.
  * Returns matching facts ranked by relevance.
  */
-export function queryFacts(
-  query: string,
-  opts?: QueryFactsOpts,
-): Fact[] {
+export function queryFacts(query: string, opts?: QueryFactsOpts): Fact[] {
   const db = getDb();
   const limit = opts?.limit ?? 10;
 

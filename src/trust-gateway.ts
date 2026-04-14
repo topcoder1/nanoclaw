@@ -378,7 +378,9 @@ async function handleWebhook(
 ): Promise<void> {
   // Authenticate via shared secret
   if (!WEBHOOK_SECRET) {
-    json(res, 503, { error: 'Webhook endpoint not configured (no WEBHOOK_SECRET)' });
+    json(res, 503, {
+      error: 'Webhook endpoint not configured (no WEBHOOK_SECRET)',
+    });
     return;
   }
 
@@ -408,10 +410,7 @@ async function handleWebhook(
   };
   eventBus.emit('webhook.received', webhookEvent);
 
-  logger.info(
-    { webhookSource, keys: Object.keys(data) },
-    'Webhook received',
-  );
+  logger.info({ webhookSource, keys: Object.keys(data) }, 'Webhook received');
 
   json(res, 200, { status: 'accepted' });
 }

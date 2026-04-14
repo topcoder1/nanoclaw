@@ -157,7 +157,9 @@ function generateCatchUpSummary(groupId: string): string {
   const errors = events.filter((e) => e.event_type === 'system.error');
   if (errors.length > 0) {
     lines.push('');
-    lines.push(`\u{26A0}\u{FE0F} *${errors.length} error(s)* \u2014 check logs.`);
+    lines.push(
+      `\u{26A0}\u{FE0F} *${errors.length} error(s)* \u2014 check logs.`,
+    );
   }
 
   // Pending approvals

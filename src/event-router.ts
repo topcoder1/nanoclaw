@@ -75,9 +75,7 @@ export function matchPattern(value: unknown, pattern: string): boolean {
   if (pattern === '*') return true;
   const strValue = String(value);
   if (pattern.startsWith('*') && pattern.endsWith('*') && pattern.length > 2) {
-    return strValue
-      .toLowerCase()
-      .includes(pattern.slice(1, -1).toLowerCase());
+    return strValue.toLowerCase().includes(pattern.slice(1, -1).toLowerCase());
   }
   if (pattern.startsWith('*')) {
     return strValue.toLowerCase().endsWith(pattern.slice(1).toLowerCase());
@@ -124,10 +122,7 @@ export function eventMatchesRule(
  * Get a nested value from an object using dot notation.
  * e.g. getNestedValue({a: {b: 1}}, "a.b") => 1
  */
-function getNestedValue(
-  obj: Record<string, unknown>,
-  path: string,
-): unknown {
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   const parts = path.split('.');
   let current: unknown = obj;
   for (const part of parts) {
@@ -142,11 +137,7 @@ function getNestedValue(
 
 export interface EventRouterDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  enqueueTask?: (
-    chatJid: string,
-    prompt: string,
-    groupFolder: string,
-  ) => void;
+  enqueueTask?: (chatJid: string, prompt: string, groupFolder: string) => void;
   registeredGroups: () => Record<
     string,
     { folder: string; name: string; isMain?: boolean }

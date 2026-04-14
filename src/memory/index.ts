@@ -15,7 +15,11 @@ export {
   deleteFact,
   getAllFacts,
 } from './knowledge-store.js';
-export type { Fact, StoreFactInput, QueryFactsOpts } from './knowledge-store.js';
+export type {
+  Fact,
+  StoreFactInput,
+  QueryFactsOpts,
+} from './knowledge-store.js';
 
 export {
   initOutcomeStore,

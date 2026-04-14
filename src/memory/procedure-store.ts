@@ -68,10 +68,7 @@ export function saveProcedure(proc: Procedure): void {
   }
 
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-  logger.debug(
-    { name: proc.name, path: filePath },
-    'Saved procedure',
-  );
+  logger.debug({ name: proc.name, path: filePath }, 'Saved procedure');
 }
 
 /**
@@ -138,9 +135,7 @@ export function updateProcedureStats(
   }
 
   try {
-    const data = JSON.parse(
-      fs.readFileSync(filePath, 'utf-8'),
-    ) as Procedure;
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Procedure;
     if (success) {
       data.success_count = (data.success_count || 0) + 1;
     } else {
@@ -161,10 +156,7 @@ export function updateProcedureStats(
 /**
  * Delete a procedure by name.
  */
-export function deleteProcedure(
-  name: string,
-  groupId?: string,
-): boolean {
+export function deleteProcedure(name: string, groupId?: string): boolean {
   const filePath = procedurePath(name, groupId);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);

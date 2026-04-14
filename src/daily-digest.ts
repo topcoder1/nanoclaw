@@ -65,10 +65,7 @@ function formatEventTypeLabel(type: string): string {
  * Generate the daily digest text.
  * Exported for testing.
  */
-export function generateDigest(
-  mainGroupJid: string,
-  now?: number,
-): string {
+export function generateDigest(mainGroupJid: string, now?: number): string {
   const currentTime = now ?? Date.now();
   const since = currentTime - DIGEST_WINDOW_MS;
 
@@ -96,7 +93,9 @@ export function generateDigest(
   // Errors (highlight if any)
   const errors = events.filter((e) => e.event_type === 'system.error');
   if (errors.length > 0) {
-    lines.push(`\u{26A0}\u{FE0F} *${errors.length} error(s)* occurred \u2014 check logs for details.`);
+    lines.push(
+      `\u{26A0}\u{FE0F} *${errors.length} error(s)* occurred \u2014 check logs for details.`,
+    );
     lines.push('');
   }
 
@@ -110,15 +109,15 @@ export function generateDigest(
   }
 
   // Email highlights
-  const emailEvents = events.filter(
-    (e) => e.event_type === 'email.received',
-  );
+  const emailEvents = events.filter((e) => e.event_type === 'email.received');
   if (emailEvents.length > 0) {
     const totalEmails = emailEvents.reduce((sum, e) => {
       const count = e.payload.count;
       return sum + (typeof count === 'number' ? count : 0);
     }, 0);
-    lines.push(`\u{1F4E7} *${totalEmails} email(s)* processed across ${emailEvents.length} batch(es).`);
+    lines.push(
+      `\u{1F4E7} *${totalEmails} email(s)* processed across ${emailEvents.length} batch(es).`,
+    );
     lines.push('');
   }
 

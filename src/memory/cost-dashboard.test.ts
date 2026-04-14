@@ -27,7 +27,7 @@ describe('Cost Dashboard', () => {
       group_folder: 'main',
       started_at: now,
       duration_ms: 5000,
-      estimated_cost_usd: 0.10,
+      estimated_cost_usd: 0.1,
     });
     logSessionCost({
       session_type: 'interactive',
@@ -41,7 +41,7 @@ describe('Cost Dashboard', () => {
       group_folder: 'main',
       started_at: now,
       duration_ms: 10000,
-      estimated_cost_usd: 0.20,
+      estimated_cost_usd: 0.2,
     });
 
     const breakdown = getCostBreakdown(
@@ -49,9 +49,7 @@ describe('Cost Dashboard', () => {
     );
     expect(breakdown).toHaveLength(2);
 
-    const interactive = breakdown.find(
-      (b) => b.session_type === 'interactive',
-    );
+    const interactive = breakdown.find((b) => b.session_type === 'interactive');
     expect(interactive).toBeDefined();
     expect(interactive!.total_cost).toBeCloseTo(0.15, 2);
     expect(interactive!.task_count).toBe(2);
@@ -64,7 +62,7 @@ describe('Cost Dashboard', () => {
       group_folder: 'main',
       started_at: now,
       duration_ms: 5000,
-      estimated_cost_usd: 4.20,
+      estimated_cost_usd: 4.2,
     });
 
     const report = formatCostReport(7);

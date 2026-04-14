@@ -117,10 +117,7 @@ describe('executeTrustCommand', () => {
   });
 
   it('what_did_i_miss returns quiet message when no events', () => {
-    const result = executeTrustCommand(
-      { type: 'what_did_i_miss' },
-      'group1',
-    );
+    const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
     expect(result).toContain('What you missed');
     expect(result).toContain('All quiet');
   });
@@ -140,10 +137,7 @@ describe('executeTrustCommand', () => {
       payload: {},
     });
 
-    const result = executeTrustCommand(
-      { type: 'what_did_i_miss' },
-      'group1',
-    );
+    const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
     expect(result).toContain('What you missed');
     expect(result).toContain('Messages received: 1');
     expect(result).toContain('Tasks completed: 1');

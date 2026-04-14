@@ -182,11 +182,18 @@ describe('formatNotification', () => {
 describe('processEvent', () => {
   let deps: EventRouterDeps;
   let sendMessage: (jid: string, text: string) => Promise<void>;
-  let enqueueTask: (chatJid: string, prompt: string, groupFolder: string) => void;
+  let enqueueTask: (
+    chatJid: string,
+    prompt: string,
+    groupFolder: string,
+  ) => void;
 
   beforeEach(() => {
-    sendMessage = vi.fn<(jid: string, text: string) => Promise<void>>().mockResolvedValue(undefined);
-    enqueueTask = vi.fn<(chatJid: string, prompt: string, groupFolder: string) => void>();
+    sendMessage = vi
+      .fn<(jid: string, text: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    enqueueTask =
+      vi.fn<(chatJid: string, prompt: string, groupFolder: string) => void>();
     deps = {
       sendMessage,
       enqueueTask,

@@ -85,9 +85,7 @@ describe('Procedure Store', () => {
   });
 
   it('group-specific procedure takes priority over global', () => {
-    saveProcedure(
-      makeProcedure({ name: 'global_ver', trigger: 'do thing' }),
-    );
+    saveProcedure(makeProcedure({ name: 'global_ver', trigger: 'do thing' }));
     saveProcedure(
       makeProcedure({
         name: 'group_ver',

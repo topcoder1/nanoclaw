@@ -118,7 +118,10 @@ export function executeAssistantCommand(command: AssistantCommand): string {
  */
 function handleTeachCommand(description: string): string {
   // Parse the description into a procedure name and steps
-  const lines = description.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = description
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const trigger = lines[0];
   const name = trigger
     .toLowerCase()
