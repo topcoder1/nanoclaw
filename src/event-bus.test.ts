@@ -12,7 +12,11 @@ vi.mock('./logger.js', () => ({
 }));
 
 import { EventBus } from './event-bus.js';
-import type { MessageInboundEvent, SystemErrorEvent, SystemStartupEvent } from './events.js';
+import type {
+  MessageInboundEvent,
+  SystemErrorEvent,
+  SystemStartupEvent,
+} from './events.js';
 
 describe('EventBus', () => {
   let bus: EventBus;

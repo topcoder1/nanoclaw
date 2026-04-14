@@ -1,6 +1,11 @@
 import { EventEmitter } from 'events';
 import { logger } from './logger.js';
-import type { EventMap, EventType, NanoClawEvent, SystemErrorEvent } from './events.js';
+import type {
+  EventMap,
+  EventType,
+  NanoClawEvent,
+  SystemErrorEvent,
+} from './events.js';
 
 type EventHandler<T extends NanoClawEvent> = (event: T) => void;
 
@@ -12,14 +17,21 @@ export class EventBus {
     this.emitter.setMaxListeners(50);
   }
 
-  on<K extends EventType>(type: K, handler: EventHandler<EventMap[K]>): () => void {
+  on<K extends EventType>(
+    type: K,
+    handler: EventHandler<EventMap[K]>,
+  ): () => void {
     const wrappedHandler = (event: EventMap[K]) => {
       try {
         handler(event);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error(
-          { eventType: type, handler: handler.name || 'anonymous', error: errorMsg },
+          {
+            eventType: type,
+            handler: handler.name || 'anonymous',
+            error: errorMsg,
+          },
           'Event handler threw — caught by error boundary',
         );
         // Guard against infinite recursion: don't emit system.error for system.error handlers
@@ -43,7 +55,10 @@ export class EventBus {
   }
 
   emit<K extends EventType>(type: K, event: EventMap[K]): void {
-    logger.debug({ eventType: type, source: event.source, groupId: event.groupId }, 'Event emitted');
+    logger.debug(
+      { eventType: type, source: event.source, groupId: event.groupId },
+      'Event emitted',
+    );
     for (const handler of this.anyHandlers) {
       try {
         handler(event);

@@ -11,9 +11,18 @@ vi.mock('./logger.js', () => ({
 }));
 
 import { _initTestDatabase, _closeDatabase } from './db.js';
-import { logEvent, queryEvents, pruneOldEvents, startEventLog } from './event-log.js';
+import {
+  logEvent,
+  queryEvents,
+  pruneOldEvents,
+  startEventLog,
+} from './event-log.js';
 import { EventBus } from './event-bus.js';
-import type { NanoClawEvent, MessageInboundEvent, TaskCompleteEvent } from './events.js';
+import type {
+  NanoClawEvent,
+  MessageInboundEvent,
+  TaskCompleteEvent,
+} from './events.js';
 
 describe('event-log', () => {
   beforeEach(() => {
@@ -41,7 +50,11 @@ describe('event-log', () => {
     expect(results[0].event_type).toBe('message.inbound');
     expect(results[0].source).toBe('channel');
     expect(results[0].group_id).toBe('group-1');
-    expect(results[0].payload).toEqual({ chatJid: 'test@jid', channel: 'whatsapp', messageCount: 1 });
+    expect(results[0].payload).toEqual({
+      chatJid: 'test@jid',
+      channel: 'whatsapp',
+      messageCount: 1,
+    });
     expect(results[0].timestamp).toBe(now);
     expect(results[0].id).toBeTypeOf('number');
   });
@@ -49,8 +62,18 @@ describe('event-log', () => {
   it('queryEvents filters by time range', () => {
     const base = 1000000;
     logEvent({ type: 'a', source: 's', timestamp: base, payload: { n: 1 } });
-    logEvent({ type: 'b', source: 's', timestamp: base + 1000, payload: { n: 2 } });
-    logEvent({ type: 'c', source: 's', timestamp: base + 2000, payload: { n: 3 } });
+    logEvent({
+      type: 'b',
+      source: 's',
+      timestamp: base + 1000,
+      payload: { n: 2 },
+    });
+    logEvent({
+      type: 'c',
+      source: 's',
+      timestamp: base + 2000,
+      payload: { n: 3 },
+    });
 
     // Only the middle event
     const results = queryEvents({ since: base + 500, until: base + 1500 });
@@ -60,9 +83,24 @@ describe('event-log', () => {
 
   it('queryEvents filters by type', () => {
     const now = Date.now();
-    logEvent({ type: 'message.inbound', source: 'channel', timestamp: now, payload: {} });
-    logEvent({ type: 'task.complete', source: 'executor', timestamp: now + 1, payload: {} });
-    logEvent({ type: 'message.inbound', source: 'channel', timestamp: now + 2, payload: {} });
+    logEvent({
+      type: 'message.inbound',
+      source: 'channel',
+      timestamp: now,
+      payload: {},
+    });
+    logEvent({
+      type: 'task.complete',
+      source: 'executor',
+      timestamp: now + 1,
+      payload: {},
+    });
+    logEvent({
+      type: 'message.inbound',
+      source: 'channel',
+      timestamp: now + 2,
+      payload: {},
+    });
 
     const results = queryEvents({ since: now - 1000, type: 'task.complete' });
     expect(results).toHaveLength(1);
@@ -71,9 +109,27 @@ describe('event-log', () => {
 
   it('queryEvents filters by groupId', () => {
     const now = Date.now();
-    logEvent({ type: 'a', source: 's', groupId: 'alpha', timestamp: now, payload: {} });
-    logEvent({ type: 'b', source: 's', groupId: 'beta', timestamp: now + 1, payload: {} });
-    logEvent({ type: 'c', source: 's', groupId: 'alpha', timestamp: now + 2, payload: {} });
+    logEvent({
+      type: 'a',
+      source: 's',
+      groupId: 'alpha',
+      timestamp: now,
+      payload: {},
+    });
+    logEvent({
+      type: 'b',
+      source: 's',
+      groupId: 'beta',
+      timestamp: now + 1,
+      payload: {},
+    });
+    logEvent({
+      type: 'c',
+      source: 's',
+      groupId: 'alpha',
+      timestamp: now + 2,
+      payload: {},
+    });
 
     const results = queryEvents({ since: now - 1000, groupId: 'alpha' });
     expect(results).toHaveLength(2);
@@ -99,8 +155,18 @@ describe('event-log', () => {
     const recentTime = now - 1000; // 1 second ago
 
     logEvent({ type: 'old', source: 's', timestamp: oldTime, payload: {} });
-    logEvent({ type: 'old2', source: 's', timestamp: oldTime + 1, payload: {} });
-    logEvent({ type: 'recent', source: 's', timestamp: recentTime, payload: {} });
+    logEvent({
+      type: 'old2',
+      source: 's',
+      timestamp: oldTime + 1,
+      payload: {},
+    });
+    logEvent({
+      type: 'recent',
+      source: 's',
+      timestamp: recentTime,
+      payload: {},
+    });
 
     // Prune with 30-day retention
     const deleted = pruneOldEvents(30 * 24 * 60 * 60 * 1000);
@@ -140,7 +206,12 @@ describe('event-log', () => {
 
   it('logEvent handles events without groupId', () => {
     const now = Date.now();
-    logEvent({ type: 'system.startup', source: 'orchestrator', timestamp: now, payload: { channels: [] } });
+    logEvent({
+      type: 'system.startup',
+      source: 'orchestrator',
+      timestamp: now,
+      payload: { channels: [] },
+    });
 
     const results = queryEvents({ since: now - 1000 });
     expect(results).toHaveLength(1);

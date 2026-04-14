@@ -90,7 +90,10 @@ export class SignalChannel implements Channel {
       } else {
         const payloads = (await res.json()) as SignalPayload[];
         if (payloads.length > 0) {
-          logger.info({ count: payloads.length }, 'Signal: poll received messages');
+          logger.info(
+            { count: payloads.length },
+            'Signal: poll received messages',
+          );
         }
         for (const payload of payloads) {
           this.handleEnvelope(payload);

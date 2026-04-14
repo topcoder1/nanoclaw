@@ -41,7 +41,12 @@ describe('Event Flow Integration', () => {
       source: 'executor',
       groupId: 'g1',
       timestamp: 2,
-      payload: { taskId: 't1', groupJid: 'g1', priority: 'interactive' as const, queuePosition: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        priority: 'interactive' as const,
+        queuePosition: 0,
+      },
     });
 
     bus.emit('task.started', {
@@ -49,7 +54,12 @@ describe('Event Flow Integration', () => {
       source: 'executor',
       groupId: 'g1',
       timestamp: 3,
-      payload: { taskId: 't1', groupJid: 'g1', containerName: 'c1', slotIndex: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        containerName: 'c1',
+        slotIndex: 0,
+      },
     });
 
     bus.emit('task.progress', {
@@ -73,7 +83,12 @@ describe('Event Flow Integration', () => {
       source: 'executor',
       groupId: 'g1',
       timestamp: 6,
-      payload: { taskId: 't1', groupJid: 'g1', status: 'success', durationMs: 5000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        status: 'success',
+        durationMs: 5000,
+      },
     });
 
     expect(events).toEqual([
@@ -153,7 +168,12 @@ describe('Event Flow Integration', () => {
       type: 'task.complete',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'g1', status: 'success', durationMs: 1000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        status: 'success',
+        durationMs: 1000,
+      },
     });
 
     expect(completeHandler).toHaveBeenCalledTimes(1);
