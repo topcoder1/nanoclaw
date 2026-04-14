@@ -388,9 +388,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Short one-liners (< 80 chars) don't need turn counts and elapsed time.
         let outText = text;
         if (text.length >= 80) {
-          const elapsedSec = Math.round(
-            (Date.now() - responseStartMs) / 1000,
-          );
+          const elapsedSec = Math.round((Date.now() - responseStartMs) / 1000);
           const parts: string[] = [];
           if (result.numTurns != null) parts.push(`${result.numTurns} turns`);
           parts.push(`${elapsedSec}s`);

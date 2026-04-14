@@ -512,7 +512,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    const piped = queue.sendMessage('group1@g.us', 'review Ryan\'s email');
+    const piped = queue.sendMessage('group1@g.us', "review Ryan's email");
     expect(piped).toBe(false);
 
     // Message is queued via enqueueMessageCheck (what index.ts does on false)
