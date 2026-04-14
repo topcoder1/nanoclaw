@@ -1,8 +1,9 @@
 # NanoClaw Scope Expansion: From Personal Assistant to AI Agent Framework
 
 **Date:** 2026-04-13
-**Status:** Revised after CEO review. Pending eng review + implementation planning.
+**Status:** CEO + Eng reviewed. Ready for implementation planning.
 **CEO Review:** SCOPE EXPANSION mode. 9 proposals, 8 accepted, 1 deferred (LLM abstraction).
+**Eng Review:** 6 issues found, 0 unresolved. 3 critical gaps addressed (infrastructure crash recovery).
 
 ## Vision
 
@@ -106,13 +107,17 @@ message.inbound → executor.task.queued → executor.task.started
 **Codebase changes:**
 - New `src/event-bus.ts` — typed EventEmitter wrapper with error boundary
 - `src/index.ts` refactored: polling loop → event-driven dispatcher
-- `src/group-queue.ts` → replaced by event-based task queue in executor pool
+- `src/group-queue.ts` → refactored into ExecutorPool (preserve existing concurrency, idle detection, task queuing logic; add warm pool, priority scheduling, event emission)
+
+**Migration prerequisite:** Before refactoring index.ts, write a characterization test suite that captures current behavior: message routing, session management, state recovery, group registration, scheduled task dispatch. The rewrite is done in a worktree branch. Tests verify the new event-driven implementation matches the old behavior before swapping.
 
 ## Layer 1: Parallel Execution Engine
 
 ### Problem
 
 Single-threaded message loop. One container runs at a time.
+
+**Note:** `src/group-queue.ts` (300 lines) already handles concurrency control (`MAX_CONCURRENT_CONTAINERS`), per-group state tracking (active, idle, pending), task queuing, and process management. Layer 1 refactors GroupQueue into ExecutorPool, preserving this battle-tested logic while adding warm pool and priority scheduling.
 
 ### Design
 
@@ -296,10 +301,34 @@ CREATE TABLE trust_levels (
 - `@Andy reset trust` — cold start everything
 - Denying any action immediately recalculates confidence
 
+### Trust gateway protocol
+
+The trust gateway is a TCP/HTTP service on the host (same pattern as the existing OneCLI proxy at `ONECLI_URL`). Containers connect via Docker bridge network. The protocol is synchronous request-response (not file-based IPC, which would add 2-4 second latency per tool call).
+
+```
+POST /trust/evaluate
+{
+  "action_class": "health.write",
+  "tool_name": "request_refill",
+  "description": "Request refill for Lisinopril on Alto",
+  "group_id": "telegram_main"
+}
+
+Response (auto-approved):
+{ "decision": "approved", "reason": "confidence 0.92 > threshold 0.80" }
+
+Response (needs user approval):
+{ "decision": "pending", "approval_id": "abc123", "timeout_s": 1800 }
+
+Poll: GET /trust/approval/abc123
+{ "decision": "approved" | "denied" | "timeout" }
+```
+
 ### Codebase changes
 
 - New `src/trust-engine.ts` — classification, evaluation, confidence tracking
-- Extend `src/ipc.ts` (nanoclaw MCP server) with trust gateway for write/transact tools
+- New `src/trust-gateway.ts` — HTTP server for trust evaluation (extends the OneCLI proxy pattern)
+- Extend container runner to pass `TRUST_GATEWAY_URL` to containers
 - New DB tables in `src/db.ts`
 - Trust events: `trust.request`, `trust.approved`, `trust.denied`, `trust.graduated`
 
@@ -463,7 +492,7 @@ Three-tier architecture:
 | **3. Outcome Store** | Action results, user feedback | SQLite | All groups |
 
 - **Tier 1** stays as-is — per-group CLAUDE.md files
-- **Tier 2** adopts **Mem0** (52.9K stars) as the recall engine. Configuration: local mode, SQLite backend, small ONNX embedding model (~100MB) for semantic search. Runs in-process. Agent sessions query at startup: "What do I know about this user's [relevant domain]?"
+- **Tier 2** adopts **Mem0** (52.9K stars) as the recall engine with **Qdrant** as the vector database (runs as a Docker container, ~100-200MB RAM). Mem0 extracts facts from conversations and stores them as embeddings. Agent sessions query at startup: "What do I know about this user's [relevant domain]?" Qdrant chosen over sqlite-vec for superior semantic query quality (9/10 vs 7/10).
 - **Tier 3** is novel — the outcome store.
 
 ### 6B: Outcome Tracking
@@ -563,7 +592,7 @@ Key constraints:
 
 ### Codebase changes
 
-- Integrate Mem0 (local mode, SQLite backend, ONNX embeddings ~100MB)
+- Integrate Mem0 with Qdrant vector database (Docker container)
 - New `src/memory/` directory — outcome store, memory query layer, procedure storage
 - New DB tables in `src/db.ts` for outcomes and procedures
 - Container agent system prompt updated to query Mem0 at session start and log outcomes at session end
@@ -613,3 +642,76 @@ Note: Layers 0+1 and 3 can be built in parallel (no dependencies between them). 
 4. 6+ messaging channels with always-on ambient operation
 
 **For extraction (later):** Separate framework from personal config, configurable assistant name, generic OAuth framework, `npx create-nanoclaw` packaging, getting-started docs.
+
+## Infrastructure Error Handling (Eng Review)
+
+Three critical gaps identified: infrastructure containers that crash need graceful degradation.
+
+| Component | Failure | Recovery | User Impact |
+|-----------|---------|----------|-------------|
+| Warm pool container crashes idle | Auto-recreate on next tick. Log warning. | Transparent. Next task uses cold start (slower, not broken). |
+| Browser sidecar crashes | Detect via CDP health check (every 30s). Auto-restart container. Invalidate active browser sessions. | Agent reports "browser temporarily unavailable, retrying." |
+| Qdrant container unavailable | Mem0 queries fall back to empty results. Log error. Agent operates without Tier 2 memory. | Agent loses cross-group knowledge. Per-group CLAUDE.md (Tier 1) still works. |
+
+All three follow the same pattern: detect, log, degrade gracefully, auto-recover. No infrastructure failure should crash the orchestrator or block message processing.
+
+## System Requirements
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| RAM | 8 GB | 16 GB |
+| Disk | 10 GB (container images) | 20 GB |
+| CPU | 4 cores | 8 cores |
+| Container runtime | Docker or Apple Container | Docker (for Compose support) |
+
+**Resource breakdown at peak (5 active agents):**
+
+| Component | RAM | Count | Total |
+|-----------|-----|-------|-------|
+| Orchestrator (Node.js) | ~200 MB | 1 | 200 MB |
+| Agent containers | ~200-400 MB | 5 | 1-2 GB |
+| Warm pool containers | ~200 MB | 2 | 400 MB |
+| Browser sidecar (Chromium) | ~400 MB | 1 | 400 MB |
+| Qdrant (vector DB) | ~200 MB | 1 | 200 MB |
+| **Total** | | | **2.2-3.2 GB** |
+
+## Test Strategy (Eng Review)
+
+### Prerequisites
+
+**Characterization test suite for index.ts** — before the event-driven rewrite, capture current behavior in tests: message routing, session management, state recovery, group registration, scheduled task dispatch. This is the safety net for the rewrite.
+
+### Unit tests per module
+
+| Module | Test file | Key test cases |
+|--------|-----------|---------------|
+| Event bus | `event-bus.test.ts` | Emission, subscription, error boundary, typed events |
+| Executor pool | `executor-pool.test.ts` | Concurrency, warm pool lifecycle, priority scheduling, fairness |
+| Trust engine | `trust-engine.test.ts` | Classification, confidence calc, graduation, decay, revocation, timeout |
+| Trust gateway | `trust-gateway.test.ts` | HTTP request-response, approval polling, timeout cancellation |
+| Verification | `verification.test.ts` | Source cross-reference, pre-action validation, confidence markers |
+| Memory (Mem0) | `memory/mem0.test.ts` | Fact extraction, query, Qdrant connection failure fallback |
+| Outcome store | `memory/outcomes.test.ts` | Log action, query by class, cost aggregation |
+| Procedures | `memory/procedures.test.ts` | Save, load, match by trigger, teach mode recording |
+| Watchers | `watchers/*.test.ts` | Calendar poll, browser watcher diff, webhook validation |
+
+### Integration tests (E2E)
+
+| Flow | What it tests |
+|------|--------------|
+| Proactive action | Event source → event bus → executor → trust → verify → execute → outcome |
+| Daily digest | Scheduled trigger → query events + outcomes + calendar → generate brief → send to channel |
+| Teach mode | User narrates → agent records → procedure saved → replay on next request |
+| Cross-channel relay | Main channel command → orchestrator → format → deliver to target channel |
+
+### Worktree parallelization
+
+Build Layer 0 first (shared dependency). Then:
+- **Lane A:** Layer 1 → Layer 2 (executor → browser)
+- **Lane B:** Layer 3 (trust engine, independent)
+
+Merge A+B. Then:
+- **Lane C:** Layers 5+6 (verification + learning)
+- **Lane D:** Layer 4 (proactive monitor)
+
+Conflict flag: Lanes A and B both touch `src/ipc.ts`. Merge carefully.
