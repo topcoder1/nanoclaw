@@ -528,7 +528,7 @@ describe('index.ts — characterization tests', () => {
         },
       ]);
       mockRunContainerAgent.mockImplementation(
-        async (
+        (async (
           _group: any,
           _input: any,
           _onProcess: any,
@@ -540,7 +540,7 @@ describe('index.ts — characterization tests', () => {
             newSessionId: 'sess-1',
           });
           return { status: 'success', newSessionId: 'sess-1' };
-        },
+        }) as any,
       );
 
       const result = await _processGroupMessages('group1@g.us');
@@ -571,7 +571,7 @@ describe('index.ts — characterization tests', () => {
         },
       ]);
       mockRunContainerAgent.mockImplementation(
-        async (
+        (async (
           _group: any,
           _input: any,
           _onProcess: any,
@@ -579,7 +579,7 @@ describe('index.ts — characterization tests', () => {
         ) => {
           await onOutput({ status: 'error', error: 'container crashed' });
           return { status: 'error', error: 'container crashed' };
-        },
+        }) as any,
       );
 
       const result = await _processGroupMessages('group1@g.us');
@@ -617,7 +617,7 @@ describe('index.ts — characterization tests', () => {
         },
       ]);
       mockRunContainerAgent.mockImplementation(
-        async (
+        (async (
           _group: any,
           _input: any,
           _onProcess: any,
@@ -631,7 +631,7 @@ describe('index.ts — characterization tests', () => {
           // Then: error
           await onOutput({ status: 'error', error: 'timeout' });
           return { status: 'error', error: 'timeout' };
-        },
+        }) as any,
       );
 
       const result = await _processGroupMessages('group1@g.us');

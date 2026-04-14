@@ -31,9 +31,7 @@ interface DequeueResult<T> {
  * Within each level, groups are served in round-robin order so no single group
  * can starve others at the same priority level.
  */
-export class PriorityQueue<
-  T extends { groupJid?: never } | { groupJid: never } | object = object,
-> {
+export class PriorityQueue<T = object> {
   // Per-priority bucket: each bucket is a Map<groupJid, Entry<T>[]>
   // The bucket also maintains a round-robin pointer (lastServedGroup) per
   // priority level so we rotate fairly.

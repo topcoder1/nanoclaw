@@ -31,12 +31,14 @@ async function post(path: string, body: Record<string, unknown>) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return { status: res.status, data: await res.json() };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { status: res.status, data: (await res.json()) as any };
 }
 
 async function get(path: string) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`);
-  return { status: res.status, data: await res.json() };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { status: res.status, data: (await res.json()) as any };
 }
 
 beforeEach(async () => {
