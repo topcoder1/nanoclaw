@@ -158,3 +158,12 @@ export const EMAIL_INTELLIGENCE_ENABLED =
     'true') !== 'false';
 
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+
+// Browser sidecar settings
+export const BROWSER_CDP_URL =
+  process.env.BROWSER_CDP_URL || 'ws://host.docker.internal:9222';
+export const BROWSER_MAX_CONTEXTS = Math.max(
+  1,
+  parseInt(process.env.BROWSER_MAX_CONTEXTS || '3', 10) || 3,
+);
+export const BROWSER_PROFILE_DIR = 'browser'; // relative to group folder

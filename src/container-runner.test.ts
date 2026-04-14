@@ -20,6 +20,7 @@ vi.mock('./config.js', () => ({
   SUPERPILOT_API_URL: 'http://localhost:8101',
   TIMEZONE: 'America/Los_Angeles',
   TRUST_GATEWAY_URL: 'http://host.docker.internal:10255',
+  BROWSER_CDP_URL: 'ws://host.docker.internal:9222',
 }));
 
 // Mock logger

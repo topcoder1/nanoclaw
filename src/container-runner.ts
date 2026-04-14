@@ -20,6 +20,7 @@ import {
   SUPERPILOT_MCP_URL,
   TIMEZONE,
   TRUST_GATEWAY_URL,
+  BROWSER_CDP_URL,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -536,6 +537,8 @@ async function buildContainerArgs(
   args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
   // Trust gateway — containers call this before executing write/transact ops
   args.push('-e', `TRUST_GATEWAY_URL=${TRUST_GATEWAY_URL}`);
+  // Browser sidecar — CDP endpoint for browser automation
+  args.push('-e', `BROWSER_CDP_URL=${BROWSER_CDP_URL}`);
   // readEnvFile() is needed because .env values are NOT loaded into process.env.
   const containerEnv = readEnvFile([
     'DISCORD_BOT_TOKEN',
