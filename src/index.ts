@@ -709,12 +709,20 @@ async function startMessageLoop(): Promise<void> {
           // in getMessagesSince() below (which would otherwise re-include them).
           const interceptedMessageIds = new Set<string>();
           const triggerPatternForCmd = getTriggerPattern(group.trigger);
+          const isMainGroup = group.isMain === true;
           for (const msg of [...groupMessages]) {
             const trimmedContent = msg.content.trim();
-            if (!triggerPatternForCmd.test(trimmedContent)) continue;
-            const strippedText = trimmedContent
-              .replace(triggerPatternForCmd, '')
-              .trim();
+            // Strip trigger prefix if present; for main groups also try raw text
+            let strippedText: string;
+            if (triggerPatternForCmd.test(trimmedContent)) {
+              strippedText = trimmedContent
+                .replace(triggerPatternForCmd, '')
+                .trim();
+            } else if (isMainGroup) {
+              strippedText = trimmedContent;
+            } else {
+              continue;
+            }
 
             // Trust commands: trust status, never auto-execute, reset trust, what did I miss
             const trustCmd = parseTrustCommand(strippedText);
@@ -755,7 +763,6 @@ async function startMessageLoop(): Promise<void> {
 
           if (groupMessages.length === 0) continue;
 
-          const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.
@@ -782,9 +789,10 @@ async function startMessageLoop(): Promise<void> {
             MAX_MESSAGES_PER_PROMPT,
           );
           // Filter out intercepted command messages so the agent doesn't see them
-          const filteredPending = interceptedMessageIds.size > 0
-            ? allPending.filter((m) => !interceptedMessageIds.has(m.id))
-            : allPending;
+          const filteredPending =
+            interceptedMessageIds.size > 0
+              ? allPending.filter((m) => !interceptedMessageIds.has(m.id))
+              : allPending;
           const messagesToSend =
             filteredPending.length > 0 ? filteredPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
