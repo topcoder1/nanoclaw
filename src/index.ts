@@ -71,10 +71,7 @@ import {
   formatApprovalPrompt,
   handlePotentialApprovalReply,
 } from './trust-approval-handler.js';
-import {
-  parseTrustCommand,
-  executeTrustCommand,
-} from './trust-commands.js';
+import { parseTrustCommand, executeTrustCommand } from './trust-commands.js';
 import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';

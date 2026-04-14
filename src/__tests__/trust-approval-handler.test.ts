@@ -41,9 +41,15 @@ describe('formatApprovalPrompt', () => {
   });
 
   it('uses correct emoji for operation types', () => {
-    expect(formatApprovalPrompt('id', 'info.read', 't', undefined, 30)).toContain('\u{1F50D}');
-    expect(formatApprovalPrompt('id', 'code.write', 't', undefined, 30)).toContain('\u{270F}');
-    expect(formatApprovalPrompt('id', 'finance.transact', 't', undefined, 30)).toContain('\u{26A1}');
+    expect(
+      formatApprovalPrompt('id', 'info.read', 't', undefined, 30),
+    ).toContain('\u{1F50D}');
+    expect(
+      formatApprovalPrompt('id', 'code.write', 't', undefined, 30),
+    ).toContain('\u{270F}');
+    expect(
+      formatApprovalPrompt('id', 'finance.transact', 't', undefined, 30),
+    ).toContain('\u{26A1}');
   });
 });
 
@@ -147,9 +153,7 @@ describe('handlePotentialApprovalReply', () => {
 
   it('does not match approval from different chat', () => {
     insertPendingApproval('ap-1', 'tg:999');
-    expect(handlePotentialApprovalReply('yes', 'tg:123', ['ap-1'])).toBe(
-      false,
-    );
+    expect(handlePotentialApprovalReply('yes', 'tg:123', ['ap-1'])).toBe(false);
   });
 
   it('ignores non-approval text', () => {
