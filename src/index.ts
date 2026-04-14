@@ -797,6 +797,10 @@ async function startMessageLoop(): Promise<void> {
             filteredPending.length > 0 ? filteredPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
+          // Before piping to active container, check if ALL remaining messages
+          // are commands. If so, handle them directly — no need to pipe or queue.
+          if (messagesToSend.length === 0) continue;
+
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },

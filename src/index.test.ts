@@ -527,21 +527,19 @@ describe('index.ts — characterization tests', () => {
           is_from_me: true,
         },
       ]);
-      mockRunContainerAgent.mockImplementation(
-        (async (
-          _group: any,
-          _input: any,
-          _onProcess: any,
-          onOutput: (o: any) => Promise<void>,
-        ) => {
-          await onOutput({
-            status: 'success',
-            result: 'Here is help',
-            newSessionId: 'sess-1',
-          });
-          return { status: 'success', newSessionId: 'sess-1' };
-        }) as any,
-      );
+      mockRunContainerAgent.mockImplementation((async (
+        _group: any,
+        _input: any,
+        _onProcess: any,
+        onOutput: (o: any) => Promise<void>,
+      ) => {
+        await onOutput({
+          status: 'success',
+          result: 'Here is help',
+          newSessionId: 'sess-1',
+        });
+        return { status: 'success', newSessionId: 'sess-1' };
+      }) as any);
 
       const result = await _processGroupMessages('group1@g.us');
 
@@ -570,17 +568,15 @@ describe('index.ts — characterization tests', () => {
           timestamp: '2024-01-01T02:00:00Z',
         },
       ]);
-      mockRunContainerAgent.mockImplementation(
-        (async (
-          _group: any,
-          _input: any,
-          _onProcess: any,
-          onOutput: (o: any) => Promise<void>,
-        ) => {
-          await onOutput({ status: 'error', error: 'container crashed' });
-          return { status: 'error', error: 'container crashed' };
-        }) as any,
-      );
+      mockRunContainerAgent.mockImplementation((async (
+        _group: any,
+        _input: any,
+        _onProcess: any,
+        onOutput: (o: any) => Promise<void>,
+      ) => {
+        await onOutput({ status: 'error', error: 'container crashed' });
+        return { status: 'error', error: 'container crashed' };
+      }) as any);
 
       const result = await _processGroupMessages('group1@g.us');
 
@@ -616,23 +612,21 @@ describe('index.ts — characterization tests', () => {
           timestamp: '2024-01-01T02:00:00Z',
         },
       ]);
-      mockRunContainerAgent.mockImplementation(
-        (async (
-          _group: any,
-          _input: any,
-          _onProcess: any,
-          onOutput: (o: any) => Promise<void>,
-        ) => {
-          // First: successful output (gets sent to user)
-          await onOutput({
-            status: 'success',
-            result: 'Here is a partial response',
-          });
-          // Then: error
-          await onOutput({ status: 'error', error: 'timeout' });
-          return { status: 'error', error: 'timeout' };
-        }) as any,
-      );
+      mockRunContainerAgent.mockImplementation((async (
+        _group: any,
+        _input: any,
+        _onProcess: any,
+        onOutput: (o: any) => Promise<void>,
+      ) => {
+        // First: successful output (gets sent to user)
+        await onOutput({
+          status: 'success',
+          result: 'Here is a partial response',
+        });
+        // Then: error
+        await onOutput({ status: 'error', error: 'timeout' });
+        return { status: 'error', error: 'timeout' };
+      }) as any);
 
       const result = await _processGroupMessages('group1@g.us');
 
