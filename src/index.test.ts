@@ -137,12 +137,22 @@ vi.mock('./gmail-token-refresh.js', () => ({
 }));
 vi.mock('./task-scheduler.js', () => ({ startSchedulerLoop: vi.fn() }));
 
-// OneCLI SDK
+// OneCLI SDK — use a module-level array to capture ensureAgent calls.
+// vi.mock factories are hoisted, so we use vi.hoisted() for shared state.
+const { onecliCalls } = vi.hoisted(() => ({
+  onecliCalls: [] as Array<{ name: string; identifier: string }>,
+}));
+
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: class {
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
+    ensureAgent = vi.fn((arg: { name: string; identifier: string }) => {
+      onecliCalls.push(arg);
+      return Promise.resolve({
+        name: arg.name,
+        identifier: arg.identifier,
+        created: true,
+      });
+    });
   },
 }));
 
@@ -186,7 +196,6 @@ import {
   getAllSessions,
   getAllRegisteredGroups,
   getMessagesSince,
-  getLastBotMessageTimestamp,
   setRegisteredGroup,
   logSessionCost,
   getAllTasks,
@@ -220,6 +229,7 @@ const mockResolveGroupFolderPath = vi.mocked(resolveGroupFolderPath);
 describe('index.ts — characterization tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    onecliCalls.length = 0;
     _setRegisteredGroups({});
     // Reset default mock returns
     mockGetRouterState.mockReturnValue(undefined);
@@ -361,6 +371,45 @@ describe('index.ts — characterization tests', () => {
         '/tmp/nanoclaw-test-groups/new-group/CLAUDE.md',
         expect.any(String),
       );
+    });
+
+    it('ensures OneCLI agent for non-main groups', async () => {
+      const group: RegisteredGroup = {
+        name: 'Sales Team',
+        folder: 'sales_team',
+        trigger: '@TestBot',
+        added_at: '2024-01-01',
+      };
+
+      _registerGroup('sales@g.us', group);
+
+      // ensureAgent is fire-and-forget (no await in production code),
+      // so flush the microtask queue to let the promise resolve.
+      await vi.waitFor(() => {
+        expect(onecliCalls).toHaveLength(1);
+      });
+
+      expect(onecliCalls[0]).toEqual({
+        name: 'Sales Team',
+        identifier: 'sales-team', // folder lowercased, underscores → hyphens
+      });
+    });
+
+    it('skips OneCLI agent creation for main groups', async () => {
+      const group: RegisteredGroup = {
+        name: 'Main',
+        folder: 'main',
+        trigger: '@TestBot',
+        added_at: '2024-01-01',
+        isMain: true,
+      };
+
+      _registerGroup('main@g.us', group);
+
+      // Give any fire-and-forget promises a chance to settle
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(onecliCalls).toHaveLength(0);
     });
 
     it('rejects registration with invalid folder path', () => {
