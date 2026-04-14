@@ -152,6 +152,46 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_event_log_type_time ON event_log(event_type, timestamp);
     CREATE INDEX IF NOT EXISTS idx_event_log_group_time ON event_log(group_id, timestamp);
+
+    CREATE TABLE IF NOT EXISTS trust_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_class TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      description TEXT,
+      decision TEXT NOT NULL,
+      outcome TEXT,
+      group_id TEXT NOT NULL,
+      timestamp DATETIME NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trust_actions_class ON trust_actions(action_class, group_id);
+    CREATE INDEX IF NOT EXISTS idx_trust_actions_time ON trust_actions(timestamp);
+
+    CREATE TABLE IF NOT EXISTS trust_levels (
+      action_class TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      approvals INTEGER NOT NULL DEFAULT 0,
+      denials INTEGER NOT NULL DEFAULT 0,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      threshold REAL NOT NULL DEFAULT 0.8,
+      auto_execute INTEGER NOT NULL DEFAULT 1,
+      last_updated DATETIME NOT NULL,
+      PRIMARY KEY (action_class, group_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS trust_approvals (
+      id TEXT PRIMARY KEY,
+      action_class TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      description TEXT,
+      group_id TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME NOT NULL,
+      resolved_at DATETIME,
+      expires_at DATETIME NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trust_approvals_status ON trust_approvals(status, expires_at);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -1119,4 +1159,179 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Trust engine DB functions ---
+
+export interface TrustAction {
+  id?: number;
+  action_class: string;
+  domain: string;
+  operation: string;
+  description?: string;
+  decision: string;
+  outcome?: string;
+  group_id: string;
+  timestamp: string;
+}
+
+export interface TrustLevel {
+  action_class: string;
+  group_id: string;
+  approvals: number;
+  denials: number;
+  confidence: number;
+  threshold: number;
+  auto_execute: boolean;
+  last_updated: string;
+}
+
+export interface TrustApproval {
+  id: string;
+  action_class: string;
+  tool_name: string;
+  description?: string;
+  group_id: string;
+  chat_jid: string;
+  status: 'pending' | 'approved' | 'denied' | 'timeout';
+  created_at: string;
+  resolved_at?: string;
+  expires_at: string;
+}
+
+export function insertTrustAction(action: Omit<TrustAction, 'id'>): void {
+  db.prepare(
+    `INSERT INTO trust_actions (action_class, domain, operation, description, decision, outcome, group_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    action.action_class,
+    action.domain,
+    action.operation,
+    action.description ?? null,
+    action.decision,
+    action.outcome ?? null,
+    action.group_id,
+    action.timestamp,
+  );
+}
+
+export function getTrustLevel(
+  actionClass: string,
+  groupId: string,
+): TrustLevel | undefined {
+  const row = db
+    .prepare(
+      `SELECT action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated
+       FROM trust_levels WHERE action_class = ? AND group_id = ?`,
+    )
+    .get(actionClass, groupId) as
+    | (Omit<TrustLevel, 'auto_execute'> & { auto_execute: number })
+    | undefined;
+  if (!row) return undefined;
+  return { ...row, auto_execute: row.auto_execute === 1 };
+}
+
+export function upsertTrustLevel(level: TrustLevel): void {
+  db.prepare(
+    `INSERT INTO trust_levels (action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(action_class, group_id) DO UPDATE SET
+       approvals = excluded.approvals,
+       denials = excluded.denials,
+       confidence = excluded.confidence,
+       threshold = excluded.threshold,
+       auto_execute = excluded.auto_execute,
+       last_updated = excluded.last_updated`,
+  ).run(
+    level.action_class,
+    level.group_id,
+    level.approvals,
+    level.denials,
+    level.confidence,
+    level.threshold,
+    level.auto_execute ? 1 : 0,
+    level.last_updated,
+  );
+}
+
+export function getAllTrustLevels(groupId: string): TrustLevel[] {
+  const rows = db
+    .prepare(
+      `SELECT action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated
+       FROM trust_levels WHERE group_id = ? ORDER BY action_class`,
+    )
+    .all(groupId) as Array<
+    Omit<TrustLevel, 'auto_execute'> & { auto_execute: number }
+  >;
+  return rows.map((r) => ({ ...r, auto_execute: r.auto_execute === 1 }));
+}
+
+export function resetTrustLevels(groupId: string): void {
+  db.prepare(`DELETE FROM trust_levels WHERE group_id = ?`).run(groupId);
+  db.prepare(
+    `UPDATE trust_approvals SET status = 'timeout', resolved_at = ? WHERE group_id = ? AND status = 'pending'`,
+  ).run(new Date().toISOString(), groupId);
+}
+
+export function setTrustAutoExecute(
+  actionClass: string,
+  groupId: string,
+  autoExecute: boolean,
+  threshold: number,
+): void {
+  db.prepare(
+    `INSERT INTO trust_levels (action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated)
+     VALUES (?, ?, 0, 0, 0.0, ?, ?, ?)
+     ON CONFLICT(action_class, group_id) DO UPDATE SET
+       auto_execute = excluded.auto_execute,
+       threshold = excluded.threshold,
+       last_updated = excluded.last_updated`,
+  ).run(
+    actionClass,
+    groupId,
+    threshold,
+    autoExecute ? 1 : 0,
+    new Date().toISOString(),
+  );
+}
+
+export function insertTrustApproval(approval: TrustApproval): void {
+  db.prepare(
+    `INSERT INTO trust_approvals (id, action_class, tool_name, description, group_id, chat_jid, status, created_at, resolved_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    approval.id,
+    approval.action_class,
+    approval.tool_name,
+    approval.description ?? null,
+    approval.group_id,
+    approval.chat_jid,
+    approval.status,
+    approval.created_at,
+    approval.resolved_at ?? null,
+    approval.expires_at,
+  );
+}
+
+export function getTrustApproval(id: string): TrustApproval | undefined {
+  return db
+    .prepare(`SELECT * FROM trust_approvals WHERE id = ?`)
+    .get(id) as TrustApproval | undefined;
+}
+
+export function resolveTrustApproval(
+  id: string,
+  status: 'approved' | 'denied' | 'timeout',
+): void {
+  db.prepare(
+    `UPDATE trust_approvals SET status = ?, resolved_at = ? WHERE id = ?`,
+  ).run(status, new Date().toISOString(), id);
+}
+
+export function getExpiredTrustApprovals(): TrustApproval[] {
+  return db
+    .prepare(
+      `SELECT * FROM trust_approvals WHERE status = 'pending' AND expires_at < ?`,
+    )
+    .all(new Date().toISOString()) as TrustApproval[];
 }
