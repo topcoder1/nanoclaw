@@ -20,6 +20,8 @@ vi.mock('./config.js', () => ({
   SCHEDULER_POLL_INTERVAL: 60000,
   TIMEZONE: 'America/Los_Angeles',
   DAILY_BUDGET_USD: 50,
+  MAX_CONCURRENT_CONTAINERS: 3,
+  WARM_POOL_SIZE: 0,
 }));
 
 // Logger

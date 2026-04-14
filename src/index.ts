@@ -49,7 +49,7 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import { GroupQueue } from './group-queue.js';
+import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
@@ -75,7 +75,11 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
-import type { MessageInboundEvent, MessageOutboundEvent, SystemStartupEvent } from './events.js';
+import type {
+  MessageInboundEvent,
+  MessageOutboundEvent,
+  SystemStartupEvent,
+} from './events.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -87,7 +91,8 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
-const queue = new GroupQueue();
+const queue = new ExecutorPool();
+queue.initWarmPool();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -258,7 +263,7 @@ export { runAgent as _runAgent };
 
 /**
  * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
+ * Called by the ExecutorPool when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
@@ -414,7 +419,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           source: 'router',
           groupId: chatJid,
           timestamp: Date.now(),
-          payload: { chatJid, channel: channel.name, text: outText.slice(0, 200) },
+          payload: {
+            chatJid,
+            channel: channel.name,
+            text: outText.slice(0, 200),
+          },
         });
         outputSentToUser = true;
       }
@@ -1117,7 +1126,7 @@ async function main(): Promise<void> {
     source: 'orchestrator',
     timestamp: Date.now(),
     payload: {
-      channels: channels.map(c => c.name),
+      channels: channels.map((c) => c.name),
       groupCount: Object.keys(registeredGroups).length,
     },
   });
