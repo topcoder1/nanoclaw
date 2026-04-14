@@ -3,6 +3,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { eventBus } from './event-bus.js';
+import type {
+  TaskQueuedEvent,
+  TaskStartedEvent,
+  TaskCompleteEvent,
+} from './events.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -75,6 +81,19 @@ export class GroupQueue {
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
+      const queuedEvent: TaskQueuedEvent = {
+        type: 'task.queued',
+        source: 'executor',
+        groupId: groupJid,
+        timestamp: Date.now(),
+        payload: {
+          taskId: `msg-${groupJid}-${Date.now()}`,
+          groupJid,
+          priority: 'interactive',
+          queuePosition: this.waitingGroups.length,
+        },
+      };
+      eventBus.emit('task.queued', queuedEvent);
       logger.debug(
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
@@ -204,14 +223,32 @@ export class GroupQueue {
     state.pendingMessages = false;
     this.activeCount++;
 
+    const taskId = `msg-${groupJid}-${Date.now()}`;
+    const startMs = Date.now();
+
+    const startedEvent: TaskStartedEvent = {
+      type: 'task.started',
+      source: 'executor',
+      groupId: groupJid,
+      timestamp: startMs,
+      payload: {
+        taskId,
+        groupJid,
+        containerName: '',
+        slotIndex: this.activeCount - 1,
+      },
+    };
+    eventBus.emit('task.started', startedEvent);
+
     logger.debug(
       { groupJid, reason, activeCount: this.activeCount },
       'Starting container for group',
     );
 
+    let success = false;
     try {
       if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid);
+        success = await this.processMessagesFn(groupJid);
         if (success) {
           state.retryCount = 0;
         } else {
@@ -222,6 +259,20 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      const completeEvent: TaskCompleteEvent = {
+        type: 'task.complete',
+        source: 'executor',
+        groupId: groupJid,
+        timestamp: Date.now(),
+        payload: {
+          taskId,
+          groupJid,
+          status: success ? 'success' : 'error',
+          durationMs: Date.now() - startMs,
+        },
+      };
+      eventBus.emit('task.complete', completeEvent);
+
       state.active = false;
       state.process = null;
       state.containerName = null;
@@ -239,16 +290,48 @@ export class GroupQueue {
     state.runningTaskId = task.id;
     this.activeCount++;
 
+    const startMs = Date.now();
+
+    const startedEvent: TaskStartedEvent = {
+      type: 'task.started',
+      source: 'executor',
+      groupId: groupJid,
+      timestamp: startMs,
+      payload: {
+        taskId: task.id,
+        groupJid,
+        containerName: '',
+        slotIndex: this.activeCount - 1,
+      },
+    };
+    eventBus.emit('task.started', startedEvent);
+
     logger.debug(
       { groupJid, taskId: task.id, activeCount: this.activeCount },
       'Running queued task',
     );
 
+    let taskSuccess = true;
     try {
       await task.fn();
     } catch (err) {
+      taskSuccess = false;
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      const completeEvent: TaskCompleteEvent = {
+        type: 'task.complete',
+        source: 'executor',
+        groupId: groupJid,
+        timestamp: Date.now(),
+        payload: {
+          taskId: task.id,
+          groupJid,
+          status: taskSuccess ? 'success' : 'error',
+          durationMs: Date.now() - startMs,
+        },
+      };
+      eventBus.emit('task.complete', completeEvent);
+
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;

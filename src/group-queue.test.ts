@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+import { eventBus } from './event-bus.js';
+import type { NanoClawEvent } from './events.js';
 import { GroupQueue } from './group-queue.js';
 
 // Mock config to control concurrency limit
@@ -27,6 +29,7 @@ describe('GroupQueue', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    eventBus.removeAllListeners();
     queue = new GroupQueue();
   });
 
@@ -430,6 +433,123 @@ describe('GroupQueue', () => {
     expect(result).toBe(false);
 
     resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Event emission ---
+
+  it('emits task.started and task.complete for runForGroup', async () => {
+    const events: NanoClawEvent[] = [];
+    const unsub = eventBus.onAny((e) => events.push(e));
+
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    unsub();
+
+    const started = events.filter((e) => e.type === 'task.started');
+    const complete = events.filter((e) => e.type === 'task.complete');
+
+    expect(started).toHaveLength(1);
+    expect(started[0].groupId).toBe('group1@g.us');
+    expect((started[0].payload as any).groupJid).toBe('group1@g.us');
+
+    expect(complete).toHaveLength(1);
+    expect(complete[0].groupId).toBe('group1@g.us');
+    expect((complete[0].payload as any).status).toBe('success');
+    expect((complete[0].payload as any).durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('emits task.complete with error status when processMessages returns false', async () => {
+    const events: NanoClawEvent[] = [];
+    const unsub = eventBus.onAny((e) => events.push(e));
+
+    const processMessages = vi.fn(async () => false);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    unsub();
+
+    const complete = events.filter((e) => e.type === 'task.complete');
+    expect(complete).toHaveLength(1);
+    expect((complete[0].payload as any).status).toBe('error');
+  });
+
+  it('emits task.started and task.complete for runTask', async () => {
+    const events: NanoClawEvent[] = [];
+    const unsub = eventBus.onAny((e) => events.push(e));
+
+    const taskFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'my-task', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    unsub();
+
+    const started = events.filter((e) => e.type === 'task.started');
+    const complete = events.filter((e) => e.type === 'task.complete');
+
+    expect(started).toHaveLength(1);
+    expect((started[0].payload as any).taskId).toBe('my-task');
+    expect((started[0].payload as any).groupJid).toBe('group1@g.us');
+
+    expect(complete).toHaveLength(1);
+    expect((complete[0].payload as any).taskId).toBe('my-task');
+    expect((complete[0].payload as any).status).toBe('success');
+  });
+
+  it('emits task.complete with error status when task throws', async () => {
+    const events: NanoClawEvent[] = [];
+    const unsub = eventBus.onAny((e) => events.push(e));
+
+    const taskFn = vi.fn(async () => {
+      throw new Error('task failed');
+    });
+    queue.enqueueTask('group1@g.us', 'fail-task', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    unsub();
+
+    const complete = events.filter((e) => e.type === 'task.complete');
+    expect(complete).toHaveLength(1);
+    expect((complete[0].payload as any).taskId).toBe('fail-task');
+    expect((complete[0].payload as any).status).toBe('error');
+  });
+
+  it('emits task.queued when message is queued at capacity', async () => {
+    const events: NanoClawEvent[] = [];
+    const unsub = eventBus.onAny((e) => events.push(e));
+
+    const completionCallbacks: Array<() => void> = [];
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots (MAX_CONCURRENT_CONTAINERS = 2)
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Third group should trigger task.queued
+    queue.enqueueMessageCheck('group3@g.us');
+
+    unsub();
+
+    const queued = events.filter((e) => e.type === 'task.queued');
+    expect(queued).toHaveLength(1);
+    expect((queued[0].payload as any).groupJid).toBe('group3@g.us');
+    expect((queued[0].payload as any).priority).toBe('interactive');
+    expect((queued[0].payload as any).queuePosition).toBeGreaterThan(0);
+
+    // Cleanup
+    completionCallbacks.forEach((cb) => cb());
     await vi.advanceTimersByTimeAsync(10);
   });
 
