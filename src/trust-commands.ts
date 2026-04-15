@@ -5,6 +5,7 @@
 
 import {
   getAllTrustLevels,
+  getDb,
   getPendingTrustApprovalIds,
   resetTrustLevels,
   setTrustAutoExecute,
@@ -18,7 +19,8 @@ export type TrustCommand =
   | { type: 'status' }
   | { type: 'never_auto'; actionClass: ActionClass }
   | { type: 'reset' }
-  | { type: 'what_did_i_miss' };
+  | { type: 'what_did_i_miss' }
+  | { type: 'dismiss_item'; itemId: string };
 
 /** Parse a trigger-stripped message into a trust command, or null. */
 export function parseTrustCommand(text: string): TrustCommand | null {
@@ -48,6 +50,11 @@ export function parseTrustCommand(text: string): TrustCommand | null {
     /^what['']?s\s+new/i.test(lower)
   ) {
     return { type: 'what_did_i_miss' };
+  }
+
+  const dismissMatch = lower.match(/^dismiss\s+(.+)$/);
+  if (dismissMatch) {
+    return { type: 'dismiss_item', itemId: dismissMatch[1].trim() };
   }
 
   return null;
@@ -100,7 +107,20 @@ export function executeTrustCommand(
     case 'what_did_i_miss': {
       return generateCatchUpSummary(groupId);
     }
+
+    case 'dismiss_item': {
+      markProcessedItemDismissed(command.itemId);
+      return `✅ Dismissed: \`${command.itemId}\``;
+    }
   }
+}
+
+function markProcessedItemDismissed(itemId: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO processed_items (item_id, source, processed_at, action_taken)
+     VALUES (?, 'dismiss', ?, 'dismissed')`,
+  ).run(itemId, new Date().toISOString());
 }
 
 /**

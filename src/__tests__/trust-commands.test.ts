@@ -48,6 +48,13 @@ describe('parseTrustCommand', () => {
     expect(parseTrustCommand('hello')).toBeNull();
   });
 
+  it('parses "dismiss" command', () => {
+    expect(parseTrustCommand('dismiss email:thread_abc')).toEqual({
+      type: 'dismiss_item',
+      itemId: 'email:thread_abc',
+    });
+  });
+
   it('parses "what did I miss"', () => {
     expect(parseTrustCommand('what did I miss')).toEqual({
       type: 'what_did_i_miss',

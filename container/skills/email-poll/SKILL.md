@@ -24,6 +24,10 @@ Every 5 minutes via cron: `*/5 * * * *`
 
 3. For each email returned:
    - Skip if already in processed_items (idempotency check)
+   - Before classifying, check if the user already replied:
+     - Call get_triaged_emails for the thread and check if any message has `from:me`
+     - If `from:me` exists in the thread, skip this email (already handled)
+     - If the email is no longer in inbox (archived), skip it
    - Follow the Email Intelligence processing flow from CLAUDE.md
    - Classify as AUTO / PROPOSE / ESCALATE
    - Act accordingly
