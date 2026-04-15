@@ -146,16 +146,12 @@ export async function runVercelQuery(
       input.groupFolder,
     );
 
-    // Build tools object for Vercel AI SDK. The ipcTools use zod v4 schemas
-    // while the AI SDK expects zod v3 schemas in its ToolParameters type.
-    // We cast via `any` since the schemas are structurally compatible at runtime
-    // and the AI SDK converts them to JSON Schema internally.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tools: Record<string, any> = {};
     for (const [name, def] of Object.entries(ipcTools)) {
       tools[name] = {
         description: def.description,
-        parameters: def.parameters,
+        inputSchema: def.parameters,
         execute: def.execute,
       };
     }
