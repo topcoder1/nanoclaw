@@ -139,6 +139,23 @@ vi.mock('./learning/procedure-match-integration.js', () => ({
   handleMessageWithProcedureCheck: vi.fn().mockResolvedValue(false),
 }));
 
+// LLM provider resolution
+vi.mock('./llm/provider.js', () => ({
+  resolveModel: vi.fn().mockReturnValue({
+    provider: 'anthropic',
+    model: null,
+    providerBaseUrl: null,
+  }),
+  getEscalationModel: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock('./llm/escalation.js', () => ({
+  scoreComplexity: vi.fn().mockReturnValue({
+    shouldEscalate: false,
+    score: 0,
+  }),
+}));
+
 // Other side-effect modules
 vi.mock('./browser/session-manager.js', () => ({
   BrowserSessionManager: vi.fn().mockImplementation(() => ({
