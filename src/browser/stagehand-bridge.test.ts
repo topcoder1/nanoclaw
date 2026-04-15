@@ -37,7 +37,7 @@ const mockSessionManager = {
   getContext: vi.fn(() => mockContext),
 };
 
-import { StagehandBridge, type StagehandRequest } from './stagehand-bridge.js';
+import { StagehandBridge } from './stagehand-bridge.js';
 
 describe('StagehandBridge', () => {
   let bridge: StagehandBridge;

@@ -45,10 +45,9 @@ const mockClient = {
 };
 
 vi.mock('./playwright-client.js', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   PlaywrightClient: vi.fn(function () {
     return mockClient;
-  } as any),
+  }),
 }));
 
 import { BrowserSessionManager } from './session-manager.js';
@@ -138,7 +137,8 @@ describe('BrowserSessionManager (pool-based)', () => {
 
       const mgr = new BrowserSessionManager(undefined, {
         profileKey: Buffer.alloc(32, 'a'),
-        resolveProfileDir: (groupId) => path.join(tmpGroupsDir, groupId, 'browser'),
+        resolveProfileDir: (groupId) =>
+          path.join(tmpGroupsDir, groupId, 'browser'),
       });
 
       await mgr.acquireContext('test-group');
