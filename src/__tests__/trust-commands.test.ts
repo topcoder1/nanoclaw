@@ -123,6 +123,15 @@ describe('executeTrustCommand', () => {
     expect(statusResult).toContain('cold start');
   });
 
+  it('dismiss_item marks item as dismissed in processed_items', () => {
+    const result = executeTrustCommand(
+      { type: 'dismiss_item', itemId: 'email:thread_123' },
+      'group1',
+    );
+    expect(result).toContain('Dismissed');
+    expect(result).toContain('email:thread_123');
+  });
+
   it('what_did_i_miss returns quiet message when no events', () => {
     const result = executeTrustCommand({ type: 'what_did_i_miss' }, 'group1');
     expect(result).toContain('What you missed');
