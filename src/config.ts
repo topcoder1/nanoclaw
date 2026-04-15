@@ -176,6 +176,20 @@ export const BROWSER_ACQUIRE_TIMEOUT_MS =
   parseInt(process.env.BROWSER_ACQUIRE_TIMEOUT || '30000', 10) || 30_000;
 export const BROWSER_PROFILE_DIR = 'browser';
 
+// Calendar poller settings
+export const CALENDAR_POLL_INTERVAL = parseInt(
+  process.env.CALENDAR_POLL_INTERVAL || '300000',
+  10,
+);
+export const CALENDAR_LOOKAHEAD_MS = parseInt(
+  process.env.CALENDAR_LOOKAHEAD_MS || '86400000',
+  10,
+);
+export const CALENDAR_HOLD_BUFFER_MS = parseInt(
+  process.env.CALENDAR_HOLD_BUFFER_MS || '300000',
+  10,
+);
+
 export interface QuietHoursConfig {
   enabled: boolean;
   start: string;

@@ -436,6 +436,28 @@ export interface LearnFeedbackReceivedEvent extends NanoClawEvent {
   };
 }
 
+// --- Calendar events ---
+
+export interface CalendarSyncedEvent extends NanoClawEvent {
+  type: 'calendar.synced';
+  source: 'calendar-poller';
+  payload: {
+    eventsFound: number;
+    lookaheadMs: number;
+  };
+}
+
+export interface ThreadCorrelatedEvent extends NanoClawEvent {
+  type: 'thread.correlated';
+  source: 'thread-correlator';
+  payload: {
+    threadId: string;
+    itemId: string;
+    linkType: string;
+    confidence: number;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -477,6 +499,8 @@ export interface EventMap {
   'item.resolved': ItemResolvedEvent;
   'item.stale': ItemStaleEvent;
   'digest.sent': DigestSentEvent;
+  'calendar.synced': CalendarSyncedEvent;
+  'thread.correlated': ThreadCorrelatedEvent;
 }
 
 export type EventType = keyof EventMap;
