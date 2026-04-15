@@ -3,6 +3,8 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import type { StagehandBridge } from './browser/stagehand-bridge.js';
+import { isDestructiveIntent } from './browser/stagehand-bridge.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
@@ -15,6 +17,9 @@ import {
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+import { addRule } from './learning/rules-engine.js';
+import { addTrace } from './learning/procedure-recorder.js';
+import { inferActionClasses } from './learning/outcome-enricher.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -35,6 +40,21 @@ export interface IpcDeps {
     prompt: string,
     onResult: (text: string) => Promise<void>,
   ) => void;
+  // Browser automation
+  stagehandBridge?: StagehandBridge;
+  trustGateway?: {
+    evaluate: (req: {
+      toolName: string;
+      actionClass: string;
+      description: string;
+      groupId: string;
+    }) => Promise<{ decision: 'approved' | 'denied' }>;
+  };
+  browserTrustState?: {
+    readGranted: boolean;
+    readGrantedAt: number;
+    groupId: string;
+  };
 }
 
 let ipcWatcherRunning = false;
@@ -197,6 +217,10 @@ export async function processTaskIpc(
     }>;
     // For toggle_verbose
     enabled?: boolean;
+    // For browser_act/extract/observe
+    instruction?: string;
+    schema?: unknown;
+    _responseFile?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -599,6 +623,94 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'browser_act':
+    case 'browser_extract':
+    case 'browser_observe': {
+      if (!deps.stagehandBridge) {
+        logger.warn(
+          { sourceGroup },
+          `${data.type}: stagehand bridge not available`,
+        );
+        break;
+      }
+
+      const instruction = data.instruction as string;
+      const toolType = data.type as string;
+
+      // Trust check: determine action class based on tool type and intent
+      let actionClass =
+        toolType === 'browser_act' ? 'services.write' : 'info.read';
+
+      // Escalate destructive browser_act instructions to services.transact
+      if (toolType === 'browser_act' && isDestructiveIntent(instruction)) {
+        actionClass = 'services.transact';
+      }
+
+      // Session-level trust: reads only need one approval per browser session (1hr TTL)
+      const grantAge =
+        Date.now() - (deps.browserTrustState?.readGrantedAt ?? 0);
+      const grantValid =
+        deps.browserTrustState?.readGranted && grantAge < 3_600_000;
+      const needsTrustCheck = actionClass !== 'info.read' || !grantValid;
+
+      if (needsTrustCheck && deps.trustGateway) {
+        const trustResult = await deps.trustGateway.evaluate({
+          toolName: toolType,
+          actionClass,
+          description: instruction,
+          groupId: sourceGroup,
+        });
+
+        if (trustResult.decision === 'denied') {
+          const rejection = {
+            success: false,
+            error: 'Action denied by trust engine',
+          };
+          const respFile = data._responseFile;
+          if (respFile && typeof respFile === 'string') {
+            const safeDir = path.join(DATA_DIR, 'ipc', sourceGroup);
+            const resolved = path.resolve(respFile);
+            if (resolved.startsWith(safeDir + path.sep)) {
+              fs.writeFileSync(resolved, JSON.stringify(rejection));
+            } else {
+              logger.error(
+                { sourceGroup, path: respFile },
+                'Blocked _responseFile path traversal',
+              );
+            }
+          }
+          break;
+        }
+
+        // Cache read-level trust grant for this session
+        if (actionClass === 'info.read' && deps.browserTrustState) {
+          deps.browserTrustState.readGranted = true;
+          deps.browserTrustState.readGrantedAt = Date.now();
+        }
+      }
+
+      const result = await deps.stagehandBridge.handleRequest({
+        type: toolType.replace('browser_', '') as 'act' | 'extract' | 'observe',
+        instruction,
+        groupId: sourceGroup,
+        schema: data.schema as Record<string, unknown> | undefined,
+      });
+
+      if (data._responseFile && typeof data._responseFile === 'string') {
+        const safeDir = path.join(DATA_DIR, 'ipc', sourceGroup);
+        const resolved = path.resolve(data._responseFile);
+        if (resolved.startsWith(safeDir + path.sep)) {
+          fs.writeFileSync(resolved, JSON.stringify(result));
+        } else {
+          logger.error(
+            { sourceGroup, path: data._responseFile },
+            'Blocked _responseFile path traversal',
+          );
+        }
+      }
+      break;
+    }
+
     case 'toggle_verbose': {
       if (!data.chatJid) {
         logger.warn({ sourceGroup }, 'toggle_verbose: missing chatJid');
@@ -629,7 +741,57 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'learn_feedback': {
+      const feedbackData = data as typeof data & {
+        feedback?: string;
+        groupId?: string;
+      };
+      if (feedbackData.feedback) {
+        const actionClasses = inferActionClasses(feedbackData.feedback);
+        addRule({
+          rule: feedbackData.feedback,
+          source: 'user_feedback',
+          actionClasses: actionClasses.length > 0 ? actionClasses : ['general'],
+          groupId: feedbackData.groupId ?? sourceGroup,
+          confidence: 0.9,
+          evidenceCount: 1,
+        });
+        logger.info(
+          { groupId: feedbackData.groupId ?? sourceGroup },
+          'learn_feedback IPC processed',
+        );
+      }
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+
+  // Trace IPC actions for procedure recording
+  if (data.taskId) {
+    const traceableTypes = new Set([
+      'browser_navigate',
+      'browser_act',
+      'browser_extract',
+      'browser_observe',
+      'schedule_task',
+      'cancel_task',
+      'relay_message',
+      'email_trigger',
+    ]);
+    if (traceableTypes.has(data.type)) {
+      addTrace(sourceGroup, data.taskId, {
+        type: data.type,
+        timestamp: Date.now(),
+        inputSummary: (
+          data.instruction ??
+          data.prompt ??
+          data.text ??
+          data.type
+        ).slice(0, 200),
+        result: 'success',
+      });
+    }
   }
 }

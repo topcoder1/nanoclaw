@@ -161,9 +161,17 @@ export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 // Browser sidecar settings
 export const BROWSER_CDP_URL =
-  process.env.BROWSER_CDP_URL || 'ws://host.docker.internal:9222';
+  process.env.BROWSER_CDP_URL || 'ws://browser-sidecar:9222';
 export const BROWSER_MAX_CONTEXTS = Math.max(
   1,
-  parseInt(process.env.BROWSER_MAX_CONTEXTS || '3', 10) || 3,
+  parseInt(process.env.BROWSER_MAX_CONTEXTS || '5', 10) || 5,
 );
-export const BROWSER_PROFILE_DIR = 'browser'; // relative to group folder
+export const BROWSER_MAX_PAGES = Math.max(
+  1,
+  parseInt(process.env.BROWSER_MAX_PAGES || '2', 10) || 2,
+);
+export const BROWSER_IDLE_TIMEOUT_MS =
+  parseInt(process.env.BROWSER_IDLE_TIMEOUT || '600000', 10) || 600_000;
+export const BROWSER_ACQUIRE_TIMEOUT_MS =
+  parseInt(process.env.BROWSER_ACQUIRE_TIMEOUT || '30000', 10) || 30_000;
+export const BROWSER_PROFILE_DIR = 'browser';

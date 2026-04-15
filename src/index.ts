@@ -29,7 +29,12 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  ensureDockerNetwork,
+  ensureBrowserSidecar,
+  stopBrowserSidecar,
 } from './container-runtime.js';
+import { BrowserSessionManager } from './browser/session-manager.js';
+import { StagehandBridge } from './browser/stagehand-bridge.js';
 import {
   deleteRouterState,
   getAllChats,
@@ -88,6 +93,8 @@ import {
 import { runDailyDigest } from './daily-digest.js';
 import { startEventRouter } from './event-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { initLearningSystem, buildRulesBlock } from './learning/index.js';
+import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { eventBus } from './event-bus.js';
@@ -315,6 +322,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
+
+  // Check for matching learned procedures before full agent run
+  const procedureHandled = await handleMessageWithProcedureCheck(
+    prompt,
+    chatJid,
+    (p) => runAgent(group, p, chatJid),
+    async (jid, text) => {
+      const ch = findChannel(channels, jid);
+      if (ch) await ch.sendMessage(jid, text);
+    },
+    (fn) => queue.enqueueTask(chatJid, `proc-${Date.now()}`, fn),
+  );
+  if (procedureHandled) {
+    // Advance cursor past these messages since procedure handled them
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    deleteRouterState(`pending_cursor:${chatJid}`);
+    return true;
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -554,10 +581,13 @@ async function runAgent(
   };
 
   try {
+    const rulesBlock = buildRulesBlock(prompt, group.folder);
+    const enrichedPrompt = rulesBlock ? `${prompt}\n\n${rulesBlock}` : prompt;
+
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: enrichedPrompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -623,6 +653,55 @@ async function runAgent(
         ? realCostUsd
         : (durationMs / 10_000) * 0.01,
     });
+
+    // Parse agent lesson for learning system
+    if (output.result) {
+      const lessonMatch = output.result.match(
+        /"_lesson"\s*:\s*"([^"]{1,400})"/,
+      );
+      if (lessonMatch) {
+        const { addRule } = await import('./learning/rules-engine.js');
+        const { inferActionClasses } =
+          await import('./learning/outcome-enricher.js');
+        const lessonText = lessonMatch[1];
+        addRule({
+          rule: lessonText,
+          source: 'agent_reported',
+          actionClasses: inferActionClasses(lessonText),
+          groupId: group.folder,
+          confidence: 0.3,
+          evidenceCount: 1,
+        });
+      }
+    }
+
+    // Parse agent procedure for learning system
+    if (output.result) {
+      const procMatch = output.result.match(
+        /"_procedure"\s*:\s*(\{[\s\S]*?\})/,
+      );
+      if (procMatch) {
+        try {
+          const agentProc = JSON.parse(
+            procMatch[1],
+          ) as import('./learning/procedure-recorder.js').AgentProcedure;
+          const { finalizeTrace } =
+            await import('./learning/procedure-recorder.js');
+          finalizeTrace(
+            group.folder,
+            `agent-${group.folder}-${startMs}`,
+            true,
+            agentProc,
+          );
+        } catch {
+          logger.warn(
+            { groupId: group.folder },
+            'Failed to parse _procedure block from agent output',
+          );
+        }
+      }
+    }
+
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
@@ -866,6 +945,8 @@ function recoverPendingMessages(): void {
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
+  ensureDockerNetwork('nanoclaw');
+  ensureBrowserSidecar();
   cleanupOrphans();
 }
 
@@ -885,11 +966,21 @@ async function main(): Promise<void> {
 
   restoreRemoteControl();
 
+  const browserSessionManager = new BrowserSessionManager();
+  const stagehandBridge = new StagehandBridge(browserSessionManager);
+  const browserTrustState = {
+    readGranted: false,
+    readGrantedAt: 0,
+    groupId: '',
+  };
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
+    stopBrowserSidecar();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1180,6 +1271,8 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    stagehandBridge,
+    browserTrustState,
   });
   // Start trust gateway (containers call this before write/transact ops)
   startTrustGateway(TRUST_GATEWAY_PORT);
@@ -1206,6 +1299,17 @@ async function main(): Promise<void> {
       });
     },
     registeredGroups: () => registeredGroups,
+  });
+
+  // Learning system: rules engine + procedure recorder
+  initLearningSystem(eventBus, {
+    getRegisteredGroups: () => registeredGroups,
+    sendMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      await channel.sendMessage(jid, text);
+    },
+    enqueueTask: (jid, taskId, fn) => queue.enqueueTask(jid, taskId, fn),
   });
 
   // Outcome logging: track task completion outcomes for learning
