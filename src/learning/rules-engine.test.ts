@@ -117,11 +117,11 @@ describe('pruneStaleRules', () => {
 describe('deleteRule', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('deletes rule by id from both tables', () => {
+  it('deletes rule by id (trigger handles FTS cleanup)', () => {
     const mockRun = vi.fn();
     mockDb.prepare.mockReturnValue({ run: mockRun });
     deleteRule('rule-id-1');
-    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(mockRun).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -2,14 +2,19 @@ import type { EventBus } from '../event-bus.js';
 import { logger } from '../logger.js';
 import { queryOutcomes } from '../memory/outcome-store.js';
 import type { RegisteredGroup } from '../types.js';
-import { detectFeedback, saveFeedbackAsRule } from './feedback-capture.js';
 import { buildRulesBlock } from './outcome-enricher.js';
-import { addTrace, finalizeTrace, startTrace } from './procedure-recorder.js';
+import {
+  addTrace,
+  finalizeTrace,
+  pruneOrphanedTraces,
+  startTrace,
+} from './procedure-recorder.js';
 import {
   addRule,
   decayConfidence,
   initRulesStore,
   pruneStaleRules,
+  queryRules,
 } from './rules-engine.js';
 
 export interface LearningDeps {
@@ -44,39 +49,25 @@ export function initLearningSystem(bus: EventBus, deps: LearningDeps): void {
     }
   });
 
-  bus.on('message.inbound', (event) => {
-    const groupId = event.groupId ?? event.payload.chatJid;
-    const lastBotTs = lastBotMessageTs[groupId] ?? 0;
-
-    // message.inbound payload doesn't carry raw text — skip feedback detection
-    // when no text is available. Feedback capture is a best-effort layer.
-    if (!lastBotTs) return;
-
-    const feedback = detectFeedback('', lastBotTs, groupId);
-    if (feedback) {
-      const ruleId = saveFeedbackAsRule(feedback, groupId);
-      bus.emit('learn.feedback_received', {
-        type: 'learn.feedback_received',
-        source: 'learning',
-        groupId,
-        timestamp: Date.now(),
-        payload: { ruleId, feedback: feedback.text, groupId },
-      });
-    }
-  });
+  // Feedback capture: relies on IPC learn_feedback path since message.inbound
+  // payload doesn't carry raw message text. Event bus subscription omitted.
 
   bus.on('message.outbound', (event) => {
     const groupId = event.groupId ?? event.payload.chatJid;
     lastBotMessageTs[groupId] = Date.now();
   });
 
-  setInterval(() => {
-    const pruned = pruneStaleRules();
-    const decayed = decayConfidence();
-    if (pruned > 0 || decayed > 0) {
-      logger.info({ pruned, decayed }, 'Learning maintenance run');
-    }
-  }, 24 * 60 * 60 * 1000);
+  setInterval(
+    () => {
+      const pruned = pruneStaleRules();
+      const decayed = decayConfidence();
+      const orphans = pruneOrphanedTraces();
+      if (pruned > 0 || decayed > 0 || orphans > 0) {
+        logger.info({ pruned, decayed, orphanedTraces: orphans }, 'Learning maintenance run');
+      }
+    },
+    24 * 60 * 60 * 1000,
+  );
 }
 
 function analyzeOutcomePatterns(groupId: string): void {
@@ -87,7 +78,8 @@ function analyzeOutcomePatterns(groupId: string): void {
     limit: 100,
   });
 
-  const failuresByClass: Record<string, { errors: string[]; count: number }> = {};
+  const failuresByClass: Record<string, { errors: string[]; count: number }> =
+    {};
   for (const o of outcomes) {
     if (o.result === 'failure' && o.error) {
       if (!failuresByClass[o.action_class]) {
@@ -100,6 +92,12 @@ function analyzeOutcomePatterns(groupId: string): void {
 
   for (const [actionClass, data] of Object.entries(failuresByClass)) {
     if (data.count < 2) continue;
+
+    const existing = queryRules([actionClass], groupId, 10);
+    const hasExisting = existing.some(
+      (r) => r.source === 'outcome_pattern' && r.rule.includes(actionClass),
+    );
+    if (hasExisting) continue;
 
     const topError = data.errors[0].slice(0, 120);
     const rule = `Recurring failure in ${actionClass}: ${topError}`;
@@ -114,6 +112,9 @@ function analyzeOutcomePatterns(groupId: string): void {
       evidenceCount: data.count,
     });
 
-    logger.debug({ actionClass, count: data.count, groupId }, 'Outcome pattern rule created');
+    logger.debug(
+      { actionClass, count: data.count, groupId },
+      'Outcome pattern rule created',
+    );
   }
 }

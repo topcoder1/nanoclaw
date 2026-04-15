@@ -678,12 +678,12 @@ async function runAgent(
     // Parse agent procedure for learning system
     if (output.result) {
       const procMatch = output.result.match(
-        /"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/,
+        /"_procedure"\s*:\s*(\{[\s\S]*?\})/,
       );
       if (procMatch) {
         try {
           const agentProc = JSON.parse(
-            `{${procMatch[1]}}`,
+            procMatch[1],
           ) as import('./learning/procedure-recorder.js').AgentProcedure;
           const { finalizeTrace } =
             await import('./learning/procedure-recorder.js');
@@ -694,9 +694,9 @@ async function runAgent(
             agentProc,
           );
         } catch {
-          logger.debug(
+          logger.warn(
             { groupId: group.folder },
-            'Failed to parse _procedure block',
+            'Failed to parse _procedure block from agent output',
           );
         }
       }

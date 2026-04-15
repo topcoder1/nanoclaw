@@ -22,19 +22,40 @@ function traceKey(groupId: string, taskId: string): string {
   return `${groupId}::${taskId}`;
 }
 
+const MAX_TRACE_AGE_MS = 60 * 60 * 1000; // 1 hour
+
 export function startTrace(groupId: string, taskId: string): void {
   traceBuffer.set(traceKey(groupId, taskId), []);
   logger.debug({ groupId, taskId }, 'Trace started');
 }
 
-export function addTrace(groupId: string, taskId: string, action: TracedAction): void {
+export function pruneOrphanedTraces(): number {
+  const cutoff = Date.now() - MAX_TRACE_AGE_MS;
+  let pruned = 0;
+  for (const [key, actions] of traceBuffer.entries()) {
+    if (actions.length === 0 || actions[0].timestamp < cutoff) {
+      traceBuffer.delete(key);
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+export function addTrace(
+  groupId: string,
+  taskId: string,
+  action: TracedAction,
+): void {
   const key = traceKey(groupId, taskId);
   const buf = traceBuffer.get(key);
   if (!buf) return;
   buf.push(action);
 }
 
-function stepsOverlap(existing: ProcedureStep[], candidate: ProcedureStep[]): number {
+function stepsOverlap(
+  existing: ProcedureStep[],
+  candidate: ProcedureStep[],
+): number {
   if (existing.length === 0 || candidate.length === 0) return 0;
   const existingActions = new Set(existing.map((s) => s.action));
   const matches = candidate.filter((s) => existingActions.has(s.action)).length;
@@ -56,7 +77,10 @@ export function finalizeTrace(
     return;
   }
   if (actions.length < 2) {
-    logger.debug({ groupId, taskId, actionCount: actions.length }, 'Trace too short, skipping');
+    logger.debug(
+      { groupId, taskId, actionCount: actions.length },
+      'Trace too short, skipping',
+    );
     return;
   }
 
@@ -68,7 +92,9 @@ export function finalizeTrace(
 
   if (agentProcedure) {
     const traceActionTypes = new Set(actions.map((a) => a.type));
-    const validAgentSteps = agentProcedure.steps.filter((s) => traceActionTypes.has(s.action));
+    const validAgentSteps = agentProcedure.steps.filter((s) =>
+      traceActionTypes.has(s.action),
+    );
     const extraTraceSteps = actions
       .filter((a) => !agentProcedure.steps.some((s) => s.action === a.type))
       .map((a) => ({ action: a.type, details: a.inputSummary.slice(0, 100) }));
@@ -77,7 +103,10 @@ export function finalizeTrace(
     trigger = agentProcedure.trigger;
     description = agentProcedure.description;
   } else {
-    steps = actions.map((a) => ({ action: a.type, details: a.inputSummary.slice(0, 100) }));
+    steps = actions.map((a) => ({
+      action: a.type,
+      details: a.inputSummary.slice(0, 100),
+    }));
     name = `procedure-${groupId}-${Date.now()}`;
     trigger = steps.map((s) => s.action).join(', ');
     description = `Auto-recorded procedure with ${steps.length} steps`;
@@ -87,18 +116,35 @@ export function finalizeTrace(
   if (existing) {
     const overlap = stepsOverlap(existing.steps, steps);
     if (overlap >= 0.7) {
-      saveProcedure({ ...existing, success_count: existing.success_count + 1, updated_at: now });
-      logger.debug({ name: existing.name, groupId }, 'Procedure success_count incremented');
+      saveProcedure({
+        ...existing,
+        success_count: existing.success_count + 1,
+        updated_at: now,
+      });
+      logger.debug(
+        { name: existing.name, groupId },
+        'Procedure success_count incremented',
+      );
       return;
     }
     name = `${name}-v${Date.now()}`;
   }
 
   const proc: Procedure = {
-    name, trigger, description, steps,
-    success_count: 1, failure_count: 0, auto_execute: false,
-    created_at: now, updated_at: now, groupId,
+    name,
+    trigger,
+    description,
+    steps,
+    success_count: 1,
+    failure_count: 0,
+    auto_execute: false,
+    created_at: now,
+    updated_at: now,
+    groupId,
   };
   saveProcedure(proc);
-  logger.info({ name, trigger, groupId, stepCount: steps.length }, 'Procedure saved');
+  logger.info(
+    { name, trigger, groupId, stepCount: steps.length },
+    'Procedure saved',
+  );
 }

@@ -15,7 +15,10 @@ export interface LearnedRule {
   lastMatchedAt: string;
 }
 
-export type AddRuleInput = Omit<LearnedRule, 'id' | 'createdAt' | 'lastMatchedAt'>;
+export type AddRuleInput = Omit<
+  LearnedRule,
+  'id' | 'createdAt' | 'lastMatchedAt'
+>;
 
 interface RuleRow {
   id: string;
@@ -97,7 +100,10 @@ export function addRule(input: AddRuleInput): string {
     now,
   );
 
-  logger.debug({ id, source: input.source, groupId: input.groupId }, 'Rule added');
+  logger.debug(
+    { id, source: input.source, groupId: input.groupId },
+    'Rule added',
+  );
   return id;
 }
 
@@ -109,7 +115,9 @@ export function queryRules(
   const db = getDb();
   const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
-  const classFilter = actionClasses.map(() => 'action_classes LIKE ?').join(' OR ');
+  const classFilter = actionClasses
+    .map(() => 'action_classes LIKE ?')
+    .join(' OR ');
   const sql = classFilter
     ? `SELECT * FROM learned_rules
        WHERE (group_id = ? OR group_id IS NULL)
@@ -134,12 +142,17 @@ export function queryRules(
 export function markMatched(ruleId: string): void {
   const db = getDb();
   const now = new Date().toISOString();
-  db.prepare(`UPDATE learned_rules SET last_matched_at = ? WHERE id = ?`).run(now, ruleId);
+  db.prepare(`UPDATE learned_rules SET last_matched_at = ? WHERE id = ?`).run(
+    now,
+    ruleId,
+  );
 }
 
 export function pruneStaleRules(): number {
   const db = getDb();
-  const result = db.prepare(`DELETE FROM learned_rules WHERE confidence < 0.1`).run();
+  const result = db
+    .prepare(`DELETE FROM learned_rules WHERE confidence < 0.1`)
+    .run();
   const count = result.changes;
   if (count > 0) logger.info({ count }, 'Pruned stale rules');
   return count;
@@ -147,11 +160,6 @@ export function pruneStaleRules(): number {
 
 export function deleteRule(id: string): void {
   const db = getDb();
-  db
-    .prepare(
-      `DELETE FROM learned_rules_fts WHERE rowid = (SELECT rowid FROM learned_rules WHERE id = ?)`,
-    )
-    .run(id);
   db.prepare(`DELETE FROM learned_rules WHERE id = ?`).run(id);
 }
 

@@ -6,7 +6,6 @@ export const ACTION_CLASS_KEYWORDS: Record<string, string[]> = {
   gmail: ['email.read', 'email.send'],
   inbox: ['email.read', 'email.send'],
   message: ['email.read', 'email.send'],
-  PR: ['github.read', 'github.write'],
   'pull request': ['github.read', 'github.write'],
   github: ['github.read', 'github.write'],
   repo: ['github.read', 'github.write'],
@@ -35,7 +34,10 @@ export function inferActionClasses(message: string): string[] {
   return Array.from(found);
 }
 
-export function buildRulesBlock(message: string, groupId: string): string | null {
+export function buildRulesBlock(
+  message: string,
+  groupId: string,
+): string | null {
   const actionClasses = inferActionClasses(message);
   const rules = queryRules(actionClasses, groupId, 5);
   if (rules.length === 0) return null;
@@ -53,6 +55,9 @@ export function buildRulesBlock(message: string, groupId: string): string | null
   for (const rule of rules.slice(0, lines.length)) {
     markMatched(rule.id);
   }
-  logger.debug({ groupId, ruleCount: lines.length }, 'Injecting learned rules into prompt');
+  logger.debug(
+    { groupId, ruleCount: lines.length },
+    'Injecting learned rules into prompt',
+  );
   return header + lines.join('\n');
 }

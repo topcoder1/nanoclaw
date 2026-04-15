@@ -53,7 +53,7 @@ describe('initLearningSystem', () => {
     expect(mockInitRulesStore).toHaveBeenCalledOnce();
   });
 
-  it('subscribes to task.started, task.complete, and message.inbound events', () => {
+  it('subscribes to task.started, task.complete, and message.outbound events', () => {
     const bus = new EventBus();
     const onSpy = vi.spyOn(bus, 'on');
 
@@ -66,7 +66,7 @@ describe('initLearningSystem', () => {
     const subscribedEvents = onSpy.mock.calls.map((c) => c[0]);
     expect(subscribedEvents).toContain('task.started');
     expect(subscribedEvents).toContain('task.complete');
-    expect(subscribedEvents).toContain('message.inbound');
+    expect(subscribedEvents).toContain('message.outbound');
   });
 
   it('wires task.started to startTrace', async () => {
