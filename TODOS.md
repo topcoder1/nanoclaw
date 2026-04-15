@@ -12,6 +12,7 @@
 
 **Effort:** L
 **Priority:** P2
+**Status:** ✅ Shipped
 **Depends on:** Phase 1 (threads table, tracked_items with thread_id)
 
 ### Proactive Scheduling Intelligence
@@ -24,6 +25,7 @@
 
 **Effort:** L
 **Priority:** P3
+**Status:** ✅ Shipped
 **Depends on:** Phase 3 (context-aware delivery), Phase 5 (learning loop)
 
 ### SSE-Triggered Classification
@@ -36,6 +38,7 @@
 
 **Effort:** M
 **Priority:** P2
+**Status:** ✅ Shipped
 **Depends on:** Phase 1 (src/classification.ts in orchestrator)
 
 ### Delegation Trust Taxonomy
@@ -48,4 +51,5 @@
 
 **Effort:** S
 **Priority:** P2
+**Status:** ✅ Shipped
 **Depends on:** None (design work, blocks Phase 3 implementation)
