@@ -14,7 +14,9 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
   TRUST_GATEWAY_PORT,
+  PROACTIVE_SUGGESTION_INTERVAL,
 } from './config.js';
+import { generateSuggestion } from './proactive-suggestions.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -129,6 +131,7 @@ import type {
   MessageInboundEvent,
   MessageOutboundEvent,
   SystemStartupEvent,
+  ProactiveSuggestionEvent,
 } from './events.js';
 
 // Re-export for backwards compatibility during refactor
@@ -139,6 +142,8 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let proactiveSuggestionTimer: ReturnType<typeof setInterval> | null = null;
+let lastSuggestionAt = 0;
 
 const channels: Channel[] = [];
 const queue = new ExecutorPool();
@@ -1040,6 +1045,10 @@ async function main(): Promise<void> {
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
     stopCalendarPoller();
+    if (proactiveSuggestionTimer) {
+      clearInterval(proactiveSuggestionTimer);
+      proactiveSuggestionTimer = null;
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1372,6 +1381,51 @@ async function main(): Promise<void> {
     enqueueTask: (jid, taskId, fn) => queue.enqueueTask(jid, taskId, fn),
   });
 
+  // Proactive scheduling suggestions
+  function startProactiveSuggestionCheck(): void {
+    proactiveSuggestionTimer = setInterval(() => {
+      try {
+        const now = Date.now();
+        if (now - lastSuggestionAt < PROACTIVE_SUGGESTION_INTERVAL) return;
+
+        const suggestion = generateSuggestion('main', now);
+        if (!suggestion) return;
+
+        lastSuggestionAt = now;
+
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
+        );
+        if (telegramJid) {
+          const channel = findChannel(channels, telegramJid);
+          if (channel) {
+            channel.sendMessage(telegramJid, suggestion.message).catch((err) => {
+              logger.warn({ err: String(err) }, 'Failed to send proactive suggestion');
+            });
+          }
+        }
+
+        const event: ProactiveSuggestionEvent = {
+          type: 'proactive.suggestion',
+          source: 'scheduling-advisor',
+          timestamp: now,
+          payload: {
+            groupName: 'main',
+            suggestion: suggestion.message,
+            pendingCount: suggestion.pendingCount,
+            nextGapAt: suggestion.nextGapAt,
+            urgencyScore: suggestion.urgencyScore,
+          },
+        };
+        eventBus.emit('proactive.suggestion', event);
+      } catch (err) {
+        logger.warn({ err: String(err) }, 'Proactive suggestion check failed');
+      }
+    }, 60000);
+  }
+
+  startProactiveSuggestionCheck();
+
   // Outcome logging: track task completion outcomes for learning
   eventBus.on('task.complete', (event) => {
     logOutcome({
@@ -1430,7 +1484,10 @@ async function main(): Promise<void> {
                 summary: null,
               });
               channel.sendMessage(notifyJid, message).catch((err) => {
-                logger.warn({ err: String(err), itemId: item.itemId }, 'Failed to send push');
+                logger.warn(
+                  { err: String(err), itemId: item.itemId },
+                  'Failed to send push',
+                );
               });
             }
           }
