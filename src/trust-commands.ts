@@ -11,6 +11,7 @@ import {
 } from './db.js';
 import { generateOnDemandDigest } from './digest-engine.js';
 import { resetAdjustments } from './classification-adjustments.js';
+import { DELEGATION_GUARDRAIL_COUNT } from './config.js';
 import type { ActionClass } from './trust-engine.js';
 
 export type TrustCommand =
@@ -19,7 +20,8 @@ export type TrustCommand =
   | { type: 'reset' }
   | { type: 'what_did_i_miss' }
   | { type: 'dismiss_item'; itemId: string }
-  | { type: 'reset_learning' };
+  | { type: 'reset_learning' }
+  | { type: 'delegation_status' };
 
 /** Parse a trigger-stripped message into a trust command, or null. */
 export function parseTrustCommand(text: string): TrustCommand | null {
@@ -58,6 +60,10 @@ export function parseTrustCommand(text: string): TrustCommand | null {
   const dismissMatch = lower.match(/^dismiss\s+(.+)$/);
   if (dismissMatch) {
     return { type: 'dismiss_item', itemId: dismissMatch[1].trim() };
+  }
+
+  if (lower === 'delegation status') {
+    return { type: 'delegation_status' };
   }
 
   return null;
@@ -119,6 +125,25 @@ export function executeTrustCommand(
     case 'reset_learning': {
       resetAdjustments();
       return '🔄 Classification learning reset. All adjustments cleared — back to default rules.';
+    }
+
+    case 'delegation_status': {
+      const db = getDb();
+      const rows = db
+        .prepare('SELECT action_class, count, last_delegated_at FROM delegation_counters WHERE group_name = ? ORDER BY count DESC')
+        .all(groupId) as Array<{ action_class: string; count: number; last_delegated_at: number | null }>;
+
+      if (rows.length === 0) {
+        return '📊 DELEGATION STATUS\n\nNo delegations recorded yet. Use "Handle It" on push notifications to start building delegation trust.';
+      }
+
+      let output = '📊 DELEGATION STATUS\n\n';
+      for (const row of rows) {
+        const guardrailMet = row.count >= DELEGATION_GUARDRAIL_COUNT;
+        const status = guardrailMet ? '✅ Auto' : `🔒 ${row.count}/${DELEGATION_GUARDRAIL_COUNT}`;
+        output += `${row.action_class}: ${status}\n`;
+      }
+      return output;
     }
   }
 }
