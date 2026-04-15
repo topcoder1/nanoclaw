@@ -12,6 +12,10 @@ import {
   type TrackedItem,
 } from './tracked-items.js';
 
+function normalizeDigestTitle(title: string): string {
+  return title.replace(/^(re|fwd|fw):\s*/gi, '').trim();
+}
+
 export function generateMorningDashboard(groupName: string): string {
   const now = Date.now();
   const dateStr =
@@ -171,13 +175,37 @@ export function generateSmartDigest(groupName: string): string | null {
 
   if (fyi.length > 0) {
     lines.push('<b>━━ FYI ━━</b>');
-    const bySource = new Map<string, number>();
+
+    const threaded = new Map<string, TrackedItem[]>();
+    const unthreaded: TrackedItem[] = [];
     for (const item of fyi) {
+      if (item.thread_id) {
+        const group = threaded.get(item.thread_id) ?? [];
+        group.push(item);
+        threaded.set(item.thread_id, group);
+      } else {
+        unthreaded.push(item);
+      }
+    }
+
+    for (const items of threaded.values()) {
+      if (items.length > 1) {
+        const title = normalizeDigestTitle(items[0].title);
+        lines.push(`📬 ${title} (${items.length} items)`);
+      } else {
+        const item = items[0];
+        lines.push(`📬 ${item.source}: ${item.title}`);
+      }
+    }
+
+    const bySource = new Map<string, number>();
+    for (const item of unthreaded) {
       bySource.set(item.source, (bySource.get(item.source) || 0) + 1);
     }
     for (const [source, count] of bySource) {
       lines.push(`📬 ${count} ${source} item${count > 1 ? 's' : ''}`);
     }
+
     lines.push('');
 
     const fyiIds = fyi.filter((i) => i.state === 'queued').map((i) => i.id);
