@@ -1,3 +1,6 @@
+import { getEventsInRange } from './calendar-poller.js';
+import { CALENDAR_HOLD_BUFFER_MS } from './config.js';
+
 export type HoldType = 'meeting' | 'quiet_hours' | 'weekend' | 'rate_limit';
 
 export interface HoldCondition {
@@ -42,5 +45,21 @@ export class PushBuffer {
     const now = Date.now();
     this.conditions = this.conditions.filter((c) => c.expiresAt > now);
     return [...this.conditions];
+  }
+}
+
+export function refreshMeetingHolds(buffer: PushBuffer, now?: number): void {
+  const currentTime = now ?? Date.now();
+  const events = getEventsInRange(currentTime, currentTime + 1);
+
+  if (events.length > 0) {
+    const latestEnd = Math.max(...events.map((e) => e.end_time));
+    buffer.addCondition({
+      type: 'meeting',
+      label: `In meeting: ${events[0].title}`,
+      expiresAt: latestEnd + (CALENDAR_HOLD_BUFFER_MS ?? 300000),
+    });
+  } else {
+    buffer.clearCondition('meeting');
   }
 }
