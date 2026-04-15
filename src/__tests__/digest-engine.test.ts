@@ -277,22 +277,24 @@ describe('generateSmartDigest', () => {
   });
 });
 
-function makeItem(overrides: Partial<{
-  id: string;
-  source: string;
-  source_id: string;
-  state: string;
-  title: string;
-  thread_id: string | null;
-  detected_at: number;
-}>): Parameters<typeof insertTrackedItem>[0] {
+function makeItem(
+  overrides: Partial<{
+    id: string;
+    source: string;
+    source_id: string;
+    state: string;
+    title: string;
+    thread_id: string | null;
+    detected_at: number;
+  }>,
+): Parameters<typeof insertTrackedItem>[0] {
   return {
     id: overrides.id ?? 'item_default',
     source: overrides.source ?? 'gmail',
     source_id: overrides.source_id ?? 'default',
     group_name: 'main',
     state: (overrides.state ?? 'queued') as any,
-    classification: 'fyi' as any,
+    classification: 'digest',
     superpilot_label: null,
     trust_tier: null,
     title: overrides.title ?? 'Default Title',
@@ -302,7 +304,7 @@ function makeItem(overrides: Partial<{
     pushed_at: null,
     resolved_at: null,
     resolution_method: null,
-    classification_reason: { final: 'fyi' },
+    classification_reason: { final: 'digest' },
     metadata: null,
     digest_count: 0,
     telegram_message_id: null,
@@ -316,30 +318,36 @@ describe('generateSmartDigest with thread grouping', () => {
   it('groups items sharing a thread_id together in output', () => {
     const now = Date.now();
 
-    insertTrackedItem(makeItem({
-      id: 'item_thread_1',
-      source_id: 'gmail:t1',
-      state: 'queued',
-      title: 'RE: Project Alpha',
-      thread_id: 'thread_alpha',
-      detected_at: now - 1000,
-    }));
-    insertTrackedItem(makeItem({
-      id: 'item_thread_2',
-      source_id: 'gmail:t2',
-      state: 'queued',
-      title: 'FWD: Project Alpha Update',
-      thread_id: 'thread_alpha',
-      detected_at: now - 500,
-    }));
-    insertTrackedItem(makeItem({
-      id: 'item_solo',
-      source_id: 'gmail:t3',
-      state: 'queued',
-      title: 'Unrelated Email',
-      thread_id: null,
-      detected_at: now - 200,
-    }));
+    insertTrackedItem(
+      makeItem({
+        id: 'item_thread_1',
+        source_id: 'gmail:t1',
+        state: 'queued',
+        title: 'RE: Project Alpha',
+        thread_id: 'thread_alpha',
+        detected_at: now - 1000,
+      }),
+    );
+    insertTrackedItem(
+      makeItem({
+        id: 'item_thread_2',
+        source_id: 'gmail:t2',
+        state: 'queued',
+        title: 'FWD: Project Alpha Update',
+        thread_id: 'thread_alpha',
+        detected_at: now - 500,
+      }),
+    );
+    insertTrackedItem(
+      makeItem({
+        id: 'item_solo',
+        source_id: 'gmail:t3',
+        state: 'queued',
+        title: 'Unrelated Email',
+        thread_id: null,
+        detected_at: now - 200,
+      }),
+    );
 
     updateDigestState('main', { queued_count: 3 });
 

@@ -62,7 +62,10 @@ describe('storeCalendarEvents', () => {
     const original = makeEvent({ title: 'Original Title' });
     storeCalendarEvents([original]);
 
-    const updated = makeEvent({ title: 'Updated Title', end_time: 1700007200000 });
+    const updated = makeEvent({
+      title: 'Updated Title',
+      end_time: 1700007200000,
+    });
     storeCalendarEvents([updated]);
 
     const results = getUpcomingEvents(original.start_time - 1000, 10000000000);
@@ -73,8 +76,18 @@ describe('storeCalendarEvents', () => {
 
   it('stores multiple events in a single call', () => {
     const events = [
-      makeEvent({ id: 'evt-a', title: 'Event A', start_time: 1700000000000, end_time: 1700003600000 }),
-      makeEvent({ id: 'evt-b', title: 'Event B', start_time: 1700010000000, end_time: 1700013600000 }),
+      makeEvent({
+        id: 'evt-a',
+        title: 'Event A',
+        start_time: 1700000000000,
+        end_time: 1700003600000,
+      }),
+      makeEvent({
+        id: 'evt-b',
+        title: 'Event B',
+        start_time: 1700010000000,
+        end_time: 1700013600000,
+      }),
     ];
     storeCalendarEvents(events);
 
@@ -101,7 +114,7 @@ describe('getUpcomingEvents', () => {
     const inWindow = makeEvent({
       id: 'in-window',
       start_time: now + 1800000, // 30 min from now
-      end_time: now + 5400000,   // 90 min from now
+      end_time: now + 5400000, // 90 min from now
     });
 
     // Should be excluded: starts after lookahead
@@ -115,7 +128,7 @@ describe('getUpcomingEvents', () => {
     const active = makeEvent({
       id: 'active',
       start_time: now - 1800000, // started 30 min ago
-      end_time: now + 1800000,   // ends 30 min from now
+      end_time: now + 1800000, // ends 30 min from now
     });
 
     // Should be excluded: already ended
@@ -188,7 +201,14 @@ describe('getEventsInRange', () => {
       end_time: rangeEnd + 5000000,
     });
 
-    storeCalendarEvents([inside, overlapsStart, overlapsEnd, spans, before, after]);
+    storeCalendarEvents([
+      inside,
+      overlapsStart,
+      overlapsEnd,
+      spans,
+      before,
+      after,
+    ]);
 
     const results = getEventsInRange(rangeStart, rangeEnd);
     const ids = results.map((e) => e.id);
@@ -202,7 +222,10 @@ describe('getEventsInRange', () => {
   });
 
   it('returns empty array when no events overlap', () => {
-    const event = makeEvent({ start_time: 1700000000000, end_time: 1700003600000 });
+    const event = makeEvent({
+      start_time: 1700000000000,
+      end_time: 1700003600000,
+    });
     storeCalendarEvents([event]);
 
     const results = getEventsInRange(1800000000000, 1800003600000);

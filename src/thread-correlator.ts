@@ -19,9 +19,9 @@ export interface ThreadLink {
 function normalizeSubject(text: string): string {
   const prefixPattern = /^(re|fwd|fw)\s*:\s*/i;
   let normalized = text;
-  // Apply twice to handle nested prefixes like "RE: FWD: subject"
-  normalized = normalized.replace(prefixPattern, '');
-  normalized = normalized.replace(prefixPattern, '');
+  while (prefixPattern.test(normalized)) {
+    normalized = normalized.replace(prefixPattern, '');
+  }
   return normalized.trim().toLowerCase();
 }
 
@@ -68,9 +68,7 @@ export function correlateByAttendee(item: TrackedItem): ThreadLink[] {
   const links: ThreadLink[] = [];
 
   for (const evt of events) {
-    const matched = evt.attendees.some(
-      (a) => a.toLowerCase() === senderLower,
-    );
+    const matched = evt.attendees.some((a) => a.toLowerCase() === senderLower);
     if (!matched) continue;
 
     const link: ThreadLink = {

@@ -477,7 +477,8 @@ export function mergeThreads(
   targetThreadId: string,
 ): void {
   const db = getDb();
-  db.prepare(
-    'UPDATE tracked_items SET thread_id = ? WHERE thread_id = ?',
-  ).run(targetThreadId, sourceThreadId);
+  db.prepare('UPDATE tracked_items SET thread_id = ? WHERE thread_id = ?').run(
+    targetThreadId,
+    sourceThreadId,
+  );
 }

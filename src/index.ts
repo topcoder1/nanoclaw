@@ -87,7 +87,10 @@ import { startTrustGateway } from './trust-gateway.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
-import { correlateByAttendee, correlateBySubject } from './thread-correlator.js';
+import {
+  correlateByAttendee,
+  correlateBySubject,
+} from './thread-correlator.js';
 import {
   refreshGmailTokens,
   startGmailRefreshLoop,
@@ -1389,7 +1392,10 @@ async function main(): Promise<void> {
       correlateByAttendee(item);
       correlateBySubject(item, item.group_name);
     } catch (err) {
-      logger.warn({ err: String(err), itemId: event.payload.itemId }, 'Thread correlation failed');
+      logger.warn(
+        { err: String(err), itemId: event.payload.itemId },
+        'Thread correlation failed',
+      );
     }
   });
 

@@ -16,7 +16,13 @@ vi.mock('../config.js', () => ({
     staleAfterDigestCycles: 2,
     urgencyKeywords: ['urgent'],
     vipList: [],
-    quietHours: { enabled: false, start: '22:00', end: '07:00', weekendMode: false, escalateOverride: true },
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
     holdPushDuringMeetings: true,
     pushRateLimit: 3,
     pushRateWindowMs: 1800000,
@@ -30,7 +36,11 @@ vi.mock('../event-bus.js', () => ({
 
 import { storeCalendarEvents } from '../calendar-poller.js';
 import { correlateByAttendee } from '../thread-correlator.js';
-import { isInMeeting, suggestDeliveryTime, scoreUrgency } from '../scheduling-advisor.js';
+import {
+  isInMeeting,
+  suggestDeliveryTime,
+  scoreUrgency,
+} from '../scheduling-advisor.js';
 import { PushBuffer, refreshMeetingHolds } from '../push-buffer.js';
 import { insertTrackedItem, type TrackedItem } from '../tracked-items.js';
 
@@ -125,7 +135,7 @@ describe('thread scheduling integration', () => {
         id: 'evt-past',
         title: 'Past Meeting',
         start_time: now - 10800000, // started 3 hours ago
-        end_time: now - 7200000,    // ended 2 hours ago
+        end_time: now - 7200000, // ended 2 hours ago
         attendees: ['alice@company.com'],
         location: null,
         source_account: null,

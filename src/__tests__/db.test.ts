@@ -32,9 +32,20 @@ describe('calendar_events table', () => {
     db.prepare(
       `INSERT INTO calendar_events (id, title, start_time, end_time, attendees, location, source_account, fetched_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run('evt-1', 'Team Standup', 1700000000, 1700001800, '["alice@x.com","bob@x.com"]', 'Zoom', 'work@example.com', 1700009999);
+    ).run(
+      'evt-1',
+      'Team Standup',
+      1700000000,
+      1700001800,
+      '["alice@x.com","bob@x.com"]',
+      'Zoom',
+      'work@example.com',
+      1700009999,
+    );
 
-    const row = db.prepare(`SELECT * FROM calendar_events WHERE id = ?`).get('evt-1') as Record<string, unknown>;
+    const row = db
+      .prepare(`SELECT * FROM calendar_events WHERE id = ?`)
+      .get('evt-1') as Record<string, unknown>;
     expect(row).not.toBeNull();
     expect(row['id']).toBe('evt-1');
     expect(row['title']).toBe('Team Standup');
@@ -59,12 +70,18 @@ describe('calendar_events table', () => {
        ON CONFLICT(id) DO UPDATE SET title = excluded.title, start_time = excluded.start_time, end_time = excluded.end_time`,
     ).run('evt-2', 'Updated Title', 1700005000, 1700006800, '[]', 1700009999);
 
-    const row = db.prepare(`SELECT * FROM calendar_events WHERE id = ?`).get('evt-2') as Record<string, unknown>;
+    const row = db
+      .prepare(`SELECT * FROM calendar_events WHERE id = ?`)
+      .get('evt-2') as Record<string, unknown>;
     expect(row['title']).toBe('Updated Title');
     expect(row['start_time']).toBe(1700005000);
     expect(row['end_time']).toBe(1700006800);
 
-    const count = (db.prepare(`SELECT COUNT(*) as c FROM calendar_events`).get() as { c: number }).c;
+    const count = (
+      db.prepare(`SELECT COUNT(*) as c FROM calendar_events`).get() as {
+        c: number;
+      }
+    ).c;
     expect(count).toBe(1);
   });
 });
@@ -84,7 +101,9 @@ describe('thread_links table', () => {
        VALUES (?, ?, ?, ?, ?)`,
     ).run('thread-1', 'item-1', 'email', 0.95, 1700000000);
 
-    const row = db.prepare(`SELECT * FROM thread_links WHERE thread_id = ? AND item_id = ?`).get('thread-1', 'item-1') as Record<string, unknown>;
+    const row = db
+      .prepare(`SELECT * FROM thread_links WHERE thread_id = ? AND item_id = ?`)
+      .get('thread-1', 'item-1') as Record<string, unknown>;
     expect(row).not.toBeNull();
     expect(row['thread_id']).toBe('thread-1');
     expect(row['item_id']).toBe('item-1');

@@ -65,7 +65,8 @@ describe('findCalendarGaps', () => {
 
     const gapBetween = gaps.find(
       (g) =>
-        g.start === rangeStart + ONE_HOUR && g.end === rangeStart + 2 * ONE_HOUR,
+        g.start === rangeStart + ONE_HOUR &&
+        g.end === rangeStart + 2 * ONE_HOUR,
     );
     expect(gapBetween).toBeDefined();
     expect(gapBetween!.durationMs).toBe(ONE_HOUR);

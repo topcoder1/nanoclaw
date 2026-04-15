@@ -211,7 +211,10 @@ export function startCalendarPoller(): void {
       logger.error({ err }, 'Calendar poll error');
     });
   }, CALENDAR_POLL_INTERVAL);
-  logger.info({ intervalMs: CALENDAR_POLL_INTERVAL }, 'Calendar poller started');
+  logger.info(
+    { intervalMs: CALENDAR_POLL_INTERVAL },
+    'Calendar poller started',
+  );
 }
 
 /**
