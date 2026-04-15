@@ -193,6 +193,10 @@ export const DELEGATION_GUARDRAIL_COUNT = parseInt(
   process.env.DELEGATION_GUARDRAIL_COUNT || '10',
   10,
 );
+export const PROACTIVE_SUGGESTION_INTERVAL = parseInt(
+  process.env.PROACTIVE_SUGGESTION_INTERVAL || '900000',
+  10,
+);
 
 export interface QuietHoursConfig {
   enabled: boolean;

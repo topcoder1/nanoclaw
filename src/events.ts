@@ -458,6 +458,20 @@ export interface ThreadCorrelatedEvent extends NanoClawEvent {
   };
 }
 
+// --- Proactive scheduling events ---
+
+export interface ProactiveSuggestionEvent extends NanoClawEvent {
+  type: 'proactive.suggestion';
+  source: 'scheduling-advisor';
+  payload: {
+    groupName: string;
+    suggestion: string;
+    pendingCount: number;
+    nextGapAt: number | null;
+    urgencyScore: number;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -501,6 +515,7 @@ export interface EventMap {
   'digest.sent': DigestSentEvent;
   'calendar.synced': CalendarSyncedEvent;
   'thread.correlated': ThreadCorrelatedEvent;
+  'proactive.suggestion': ProactiveSuggestionEvent;
 }
 
 export type EventType = keyof EventMap;
