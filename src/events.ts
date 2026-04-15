@@ -314,7 +314,7 @@ export interface BrowserVisualChangedEvent extends NanoClawEvent {
 
 export interface ItemClassifiedEvent extends NanoClawEvent {
   type: 'item.classified';
-  source: 'classification';
+  source: 'classification' | 'sse-classifier';
   payload: {
     itemId: string;
     decision: 'push' | 'digest' | 'resolved';

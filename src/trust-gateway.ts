@@ -19,7 +19,10 @@ import {
   classifyTool,
   recordTrustDecision,
 } from './trust-engine.js';
-import { shouldRequireApproval, recordDelegation } from './delegation-tracker.js';
+import {
+  shouldRequireApproval,
+  recordDelegation,
+} from './delegation-tracker.js';
 import type { WebhookReceivedEvent } from './events.js';
 import {
   insertTrustApproval,
@@ -115,6 +118,11 @@ export function resolveApproval(
   );
 
   if (decision === 'approved') {
+    // Record delegation for handle_ tools so the guardrail counter increments
+    if (approval.tool_name.toLowerCase().startsWith('handle_')) {
+      recordDelegation(approval.group_id, approval.action_class);
+    }
+
     const approvedEvent: TrustApprovedEvent = {
       type: 'trust.approved',
       source: 'trust-gateway',
