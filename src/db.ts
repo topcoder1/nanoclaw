@@ -232,6 +232,30 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_threads_group ON threads(group_name, state);
 
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      attendees TEXT NOT NULL DEFAULT '[]',
+      location TEXT,
+      source_account TEXT,
+      fetched_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_time ON calendar_events(start_time, end_time);
+
+    CREATE TABLE IF NOT EXISTS thread_links (
+      thread_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      link_type TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_thread_links_item ON thread_links(item_id);
+
+    CREATE INDEX IF NOT EXISTS idx_tracked_thread ON tracked_items(thread_id);
+
     CREATE TABLE IF NOT EXISTS digest_state (
       group_name TEXT PRIMARY KEY,
       last_digest_at INTEGER,
