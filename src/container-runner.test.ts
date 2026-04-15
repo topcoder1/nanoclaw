@@ -351,6 +351,24 @@ describe('container-runner secret env-file security', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
   });
+
+  it('includes --network nanoclaw in container args', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const callCountBefore = spawnMock.mock.calls.length;
+
+    const onOutput = vi.fn(async () => {});
+    runContainerAgent(testGroup, testInput, () => {}, onOutput);
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(spawnMock.mock.calls.length).toBeGreaterThan(callCountBefore);
+    const spawnArgs: string[] =
+      spawnMock.mock.calls[spawnMock.mock.calls.length - 1][1];
+
+    const netIdx = spawnArgs.indexOf('--network');
+    expect(netIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[netIdx + 1]).toBe('nanoclaw');
+  });
 });
 
 describe('token cost daily reset', () => {

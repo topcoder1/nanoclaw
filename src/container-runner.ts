@@ -527,6 +527,9 @@ async function buildContainerArgs(
 }> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Connect to nanoclaw Docker network for sidecar access
+  args.push('--network', 'nanoclaw');
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
