@@ -64,3 +64,19 @@ else
   echo "{\"wakeAgent\": false}"
 fi
 ```
+
+## Data Bridge (ARCH-5, TENSION-1)
+
+This container skill writes raw SuperPilot labels and email metadata to the
+`tracked_items` table in the shared SQLite DB. The orchestrator process owns
+all classification decisions (push/digest/resolved).
+
+When writing to tracked_items, include:
+- source: 'gmail'
+- source_id: the Gmail thread_id
+- superpilot_label: the raw SuperPilot classification ('needs-attention', 'fyi', 'newsletter', 'transactional')
+- title: "{sender_name} — {subject}"
+- summary: first 200 chars of email body
+- metadata: JSON with sender email, account label, thread_id
+
+Do NOT make push/digest/resolved decisions. Write the raw data and let the orchestrator classify.
