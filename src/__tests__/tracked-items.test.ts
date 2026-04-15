@@ -30,6 +30,9 @@ import {
   getDigestState,
   updateDigestState,
   detectResolution,
+  parseCallbackData,
+  resolveItemByCallback,
+  getTrackedItemById,
   type TrackedItem,
   type Thread,
   type ResolutionSignal,
@@ -373,5 +376,67 @@ describe('detectResolution', () => {
       inInbox: true,
     };
     expect(detectResolution(signal)).toEqual({ resolved: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// callback handling
+// ---------------------------------------------------------------------------
+
+describe('callback handling', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  const cbSampleItem = {
+    id: 'email:thread_abc',
+    source: 'gmail',
+    source_id: 'thread_abc',
+    group_name: 'main',
+    state: 'detected' as const,
+    classification: null,
+    superpilot_label: 'needs-attention',
+    trust_tier: 'escalate',
+    title: 'Budget approval from Sarah',
+    summary: 'Need sign-off by EOD Wednesday',
+    thread_id: 'thread_abc',
+    detected_at: Date.now(),
+    pushed_at: null,
+    resolved_at: null,
+    resolution_method: null,
+    digest_count: 0,
+    telegram_message_id: null,
+    classification_reason: { superpilot: 'needs-attention', trust: 'escalate', final: 'push' as const },
+    metadata: { sender: 'sarah@example.com' },
+  };
+
+  it('parses callback data correctly', () => {
+    expect(parseCallbackData('approve:email:t1')).toEqual({ action: 'approve', itemId: 'email:t1' });
+    expect(parseCallbackData('dismiss:cal:e1')).toEqual({ action: 'dismiss', itemId: 'cal:e1' });
+    expect(parseCallbackData('snooze:email:t1')).toEqual({ action: 'snooze', itemId: 'email:t1' });
+    expect(parseCallbackData('handle:email:t1')).toEqual({ action: 'handle', itemId: 'email:t1' });
+    expect(parseCallbackData('invalid')).toBeNull();
+  });
+
+  it('resolves item on approve', () => {
+    insertTrackedItem({
+      ...cbSampleItem,
+      id: 'cb:t1',
+      state: 'pending',
+    });
+    resolveItemByCallback('cb:t1', 'approve');
+    const item = getTrackedItemById('cb:t1');
+    expect(item?.state).toBe('resolved');
+    expect(item?.resolution_method).toBe('manual:button');
+  });
+
+  it('resolves item on dismiss', () => {
+    insertTrackedItem({
+      ...cbSampleItem,
+      id: 'cb:t2',
+      state: 'pending',
+    });
+    resolveItemByCallback('cb:t2', 'dismiss');
+    const item = getTrackedItemById('cb:t2');
+    expect(item?.state).toBe('resolved');
   });
 });
