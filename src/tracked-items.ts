@@ -215,8 +215,11 @@ export function deserializeItem(row: Record<string, unknown>): TrackedItem {
   return {
     ...(row as unknown as TrackedItem),
     classification_reason:
-      typeof row['classification_reason'] === 'string' && row['classification_reason']
-        ? (JSON.parse(row['classification_reason'] as string) as ClassificationReason)
+      typeof row['classification_reason'] === 'string' &&
+      row['classification_reason']
+        ? (JSON.parse(
+            row['classification_reason'] as string,
+          ) as ClassificationReason)
         : null,
     metadata:
       typeof row['metadata'] === 'string' && row['metadata']
@@ -361,4 +364,55 @@ export function updateDigestState(
     updates.last_user_interaction ?? null,
     ...values,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Resolution detection
+// ---------------------------------------------------------------------------
+
+export interface ResolutionSignal {
+  source: string;
+  userReplied?: boolean;
+  inInbox?: boolean;
+  rsvpChanged?: boolean;
+  threadResolved?: boolean;
+  labelChanged?: boolean;
+}
+
+export interface ResolutionResult {
+  resolved: boolean;
+  method?: ResolutionMethod;
+  confidence?: 'high' | 'medium' | 'low';
+}
+
+export function detectResolution(signal: ResolutionSignal): ResolutionResult {
+  if (signal.source === 'gmail') {
+    if (signal.userReplied) {
+      return { resolved: true, method: 'auto:gmail_reply', confidence: 'high' };
+    }
+    if (signal.inInbox === false) {
+      return { resolved: true, method: 'auto:archived', confidence: 'high' };
+    }
+    if (signal.labelChanged) {
+      return {
+        resolved: true,
+        method: 'auto:label_changed',
+        confidence: 'high',
+      };
+    }
+  }
+
+  if (signal.source === 'calendar' && signal.rsvpChanged) {
+    return { resolved: true, method: 'auto:rsvp', confidence: 'high' };
+  }
+
+  if (signal.source === 'discord' && signal.threadResolved) {
+    return {
+      resolved: true,
+      method: 'auto:discord_resolved',
+      confidence: 'medium',
+    };
+  }
+
+  return { resolved: false };
 }

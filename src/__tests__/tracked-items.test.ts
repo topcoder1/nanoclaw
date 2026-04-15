@@ -29,8 +29,10 @@ import {
   getActiveThreads,
   getDigestState,
   updateDigestState,
+  detectResolution,
   type TrackedItem,
   type Thread,
+  type ResolutionSignal,
 } from '../tracked-items.js';
 
 // ---------------------------------------------------------------------------
@@ -170,25 +172,23 @@ describe('tracked_items DB operations', () => {
 
   it('rejects invalid state transition', () => {
     insertTrackedItem(makeItem());
-    expect(() =>
-      transitionItemState('item-1', 'detected', 'digested'),
-    ).toThrow('Invalid state transition');
+    expect(() => transitionItemState('item-1', 'detected', 'digested')).toThrow(
+      'Invalid state transition',
+    );
   });
 
   it('throws when item is not in expected from-state', () => {
     insertTrackedItem(makeItem());
     // Item is in 'detected', not 'pushed' — validateTransition passes
     // (pushed→pending is valid) but DB finds no row in state 'pushed'
-    expect(() =>
-      transitionItemState('item-1', 'pushed', 'pending'),
-    ).toThrow('State transition failed');
+    expect(() => transitionItemState('item-1', 'pushed', 'pending')).toThrow(
+      'State transition failed',
+    );
   });
 
   it('throws when item id does not exist in from-state', () => {
     insertTrackedItem(makeItem({ state: 'queued' }));
-    expect(() =>
-      transitionItemState('item-1', 'detected', 'pushed'),
-    ).toThrow();
+    expect(() => transitionItemState('item-1', 'detected', 'pushed')).toThrow();
   });
 
   it('finds item by source and source_id', () => {
@@ -268,9 +268,7 @@ describe('threads DB operations', () => {
 
   it('returns threads for specific group only', () => {
     upsertThread(makeThread({ group_name: 'main' }));
-    upsertThread(
-      makeThread({ id: 'thread-2', group_name: 'other' }),
-    );
+    upsertThread(makeThread({ id: 'thread-2', group_name: 'other' }));
     const threads = getActiveThreads('main');
     expect(threads).toHaveLength(1);
   });
@@ -313,5 +311,67 @@ describe('digest_state DB operations', () => {
     updateDigestState('main', { queued_count: 2 });
     const state = getDigestState('main');
     expect(state.last_user_interaction).toBe(9999);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectResolution
+// ---------------------------------------------------------------------------
+
+describe('detectResolution', () => {
+  it('detects gmail reply (from:me in thread)', () => {
+    const signal: ResolutionSignal = {
+      source: 'gmail',
+      userReplied: true,
+      inInbox: true,
+    };
+    expect(detectResolution(signal)).toEqual({
+      resolved: true,
+      method: 'auto:gmail_reply',
+      confidence: 'high',
+    });
+  });
+
+  it('detects archived email', () => {
+    const signal: ResolutionSignal = {
+      source: 'gmail',
+      userReplied: false,
+      inInbox: false,
+    };
+    expect(detectResolution(signal)).toEqual({
+      resolved: true,
+      method: 'auto:archived',
+      confidence: 'high',
+    });
+  });
+
+  it('detects calendar RSVP', () => {
+    const signal: ResolutionSignal = { source: 'calendar', rsvpChanged: true };
+    expect(detectResolution(signal)).toEqual({
+      resolved: true,
+      method: 'auto:rsvp',
+      confidence: 'high',
+    });
+  });
+
+  it('detects Discord thread resolved', () => {
+    const signal: ResolutionSignal = {
+      source: 'discord',
+      threadResolved: true,
+    };
+    expect(detectResolution(signal)).toEqual({
+      resolved: true,
+      method: 'auto:discord_resolved',
+      confidence: 'medium',
+    });
+  });
+
+  it('returns not resolved when no signal', () => {
+    const signal: ResolutionSignal = {
+      source: 'gmail',
+      userReplied: false,
+      inInbox: true,
+    };
+    expect(detectResolution(signal)).toEqual({ resolved: false });
   });
 });
