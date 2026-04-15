@@ -131,6 +131,10 @@ vi.mock('./budget.js', () => ({
 }));
 
 // Learning — procedure match integration (returns false so normal flow runs)
+vi.mock('./learning/index.js', () => ({
+  initLearningSystem: vi.fn(),
+  buildRulesBlock: vi.fn().mockReturnValue(null),
+}));
 vi.mock('./learning/procedure-match-integration.js', () => ({
   handleMessageWithProcedureCheck: vi.fn().mockResolvedValue(false),
 }));
