@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 vi.mock('../config.js', () => ({
   BROWSER_MAX_CONTEXTS: 3,
@@ -30,18 +33,22 @@ const mockClient = {
   connect: vi.fn(),
   disconnect: vi.fn(),
   isConnected: vi.fn(() => true),
-  newContext: vi.fn(() => Promise.resolve({
-    close: vi.fn(),
-    newPage: vi.fn(() => Promise.resolve({ close: vi.fn() })),
-    pages: vi.fn(() => []),
-    storageState: mockContext.storageState,
-  })),
+  newContext: vi.fn(() =>
+    Promise.resolve({
+      close: vi.fn(),
+      newPage: vi.fn(() => Promise.resolve({ close: vi.fn() })),
+      pages: vi.fn(() => []),
+      storageState: mockContext.storageState,
+    }),
+  ),
   setOnDisconnect: vi.fn(),
 };
 
 vi.mock('./playwright-client.js', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  PlaywrightClient: vi.fn(function () { return mockClient; } as any),
+  PlaywrightClient: vi.fn(function () {
+    return mockClient;
+  } as any),
 }));
 
 import { BrowserSessionManager } from './session-manager.js';
@@ -111,6 +118,35 @@ describe('BrowserSessionManager (pool-based)', () => {
       await manager.acquireContext('g2');
       await manager.shutdown();
       expect(manager.getActiveGroupIds()).toEqual([]);
+    });
+  });
+
+  describe('profile persistence', () => {
+    let tmpGroupsDir: string;
+
+    beforeEach(() => {
+      tmpGroupsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-groups-'));
+    });
+
+    afterEach(async () => {
+      fs.rmSync(tmpGroupsDir, { recursive: true, force: true });
+    });
+
+    it('saves storage state on releaseContext', async () => {
+      const groupDir = path.join(tmpGroupsDir, 'test-group', 'browser');
+      fs.mkdirSync(groupDir, { recursive: true });
+
+      const mgr = new BrowserSessionManager(undefined, {
+        profileKey: Buffer.alloc(32, 'a'),
+        resolveProfileDir: (groupId) => path.join(tmpGroupsDir, groupId, 'browser'),
+      });
+
+      await mgr.acquireContext('test-group');
+      const state = await mgr.releaseContext('test-group');
+
+      expect(state).not.toBeNull();
+      expect(mockContext.storageState).toHaveBeenCalled();
+      await mgr.shutdown();
     });
   });
 });

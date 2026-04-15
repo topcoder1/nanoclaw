@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { createPool, type Pool } from 'generic-pool';
 import type { BrowserContext } from 'playwright-core';
 import { PlaywrightClient } from './playwright-client.js';
@@ -7,6 +9,12 @@ import {
   BROWSER_ACQUIRE_TIMEOUT_MS,
 } from '../config.js';
 import { logger } from '../logger.js';
+import { encryptSingleFile, decryptSingleFile } from './profile-crypto.js';
+
+export interface ProfileOptions {
+  profileKey?: Buffer;
+  resolveProfileDir?: (groupId: string) => string;
+}
 
 export interface BrowserContextEvent {
   type: 'browser.context.created' | 'browser.context.closed';
@@ -21,15 +29,21 @@ export class BrowserSessionManager {
   private client: PlaywrightClient;
   private groupContexts = new Map<string, BrowserContext>();
   private handlers = new Map<string, EventHandler[]>();
+  private profileOptions: ProfileOptions;
 
-  constructor(client?: PlaywrightClient) {
+  constructor(client?: PlaywrightClient, profileOptions?: ProfileOptions) {
     this.client = client ?? new PlaywrightClient();
+    this.profileOptions = profileOptions ?? {};
 
     this.pool = createPool<BrowserContext>(
       {
         create: async () => this.client.newContext(),
         destroy: async (ctx) => {
-          try { await ctx.close(); } catch { /* already closed */ }
+          try {
+            await ctx.close();
+          } catch {
+            /* already closed */
+          }
         },
         validate: async (ctx) => {
           try {
@@ -56,16 +70,37 @@ export class BrowserSessionManager {
     const existing = this.groupContexts.get(groupId);
     if (existing) return existing;
 
-    const ctx = await this.pool.acquire();
+    // Load encrypted profile if available
+    let storageState: object | undefined;
+    if (this.profileOptions.profileKey && this.profileOptions.resolveProfileDir) {
+      const profileDir = this.profileOptions.resolveProfileDir(groupId);
+      const stateFile = path.join(profileDir, 'state.json');
+      if (fs.existsSync(stateFile)) {
+        try {
+          const decrypted = decryptSingleFile(stateFile, this.profileOptions.profileKey);
+          storageState = JSON.parse(decrypted.toString());
+          logger.info({ groupId }, 'Browser profile loaded from encrypted state');
+        } catch (err) {
+          logger.warn({ groupId, err }, 'Failed to decrypt browser profile, starting fresh');
+        }
+      }
+    }
+
+    // Always acquire from pool to enforce max limits
+    const poolCtx = await this.pool.acquire();
+
+    let ctx: BrowserContext;
+    if (storageState) {
+      await poolCtx.close();
+      ctx = await this.client.newContext({ storageState });
+    } else {
+      ctx = poolCtx;
+    }
+
     this.groupContexts.set(groupId, ctx);
 
     logger.info({ groupId }, 'Browser context acquired');
-    this.emit({
-      type: 'browser.context.created',
-      groupId,
-      timestamp: Date.now(),
-    });
-
+    this.emit({ type: 'browser.context.created', groupId, timestamp: Date.now() });
     return ctx;
   }
 
@@ -73,24 +108,29 @@ export class BrowserSessionManager {
     const ctx = this.groupContexts.get(groupId);
     if (!ctx) return null;
 
-    let storageState: object | null = null;
+    let state: object | null = null;
     try {
-      storageState = await ctx.storageState();
+      state = await ctx.storageState();
+
+      // Encrypt and save profile
+      if (state && this.profileOptions.profileKey && this.profileOptions.resolveProfileDir) {
+        const profileDir = this.profileOptions.resolveProfileDir(groupId);
+        fs.mkdirSync(profileDir, { recursive: true });
+        const stateFile = path.join(profileDir, 'state.json');
+        fs.writeFileSync(stateFile, JSON.stringify(state));
+        encryptSingleFile(stateFile, this.profileOptions.profileKey);
+        logger.info({ groupId }, 'Browser profile encrypted and saved');
+      }
     } catch (err) {
-      logger.warn({ groupId, err }, 'Failed to export storage state');
+      logger.warn({ groupId, err }, 'Failed to export/save storage state');
     }
 
     this.groupContexts.delete(groupId);
     await this.pool.release(ctx);
 
     logger.info({ groupId }, 'Browser context released');
-    this.emit({
-      type: 'browser.context.closed',
-      groupId,
-      timestamp: Date.now(),
-    });
-
-    return storageState;
+    this.emit({ type: 'browser.context.closed', groupId, timestamp: Date.now() });
+    return state;
   }
 
   getActiveGroupIds(): string[] {
@@ -115,7 +155,10 @@ export class BrowserSessionManager {
     await this.client.disconnect();
   }
 
-  on(eventType: BrowserContextEvent['type'], handler: EventHandler): () => void {
+  on(
+    eventType: BrowserContextEvent['type'],
+    handler: EventHandler,
+  ): () => void {
     const handlers = this.handlers.get(eventType) || [];
     handlers.push(handler);
     this.handlers.set(eventType, handlers);
@@ -132,7 +175,10 @@ export class BrowserSessionManager {
       try {
         handler(event);
       } catch (err) {
-        logger.error({ error: err, eventType: event.type }, 'Browser event handler threw');
+        logger.error(
+          { error: err, eventType: event.type },
+          'Browser event handler threw',
+        );
       }
     }
   }
