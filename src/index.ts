@@ -91,6 +91,7 @@ import {
   correlateByAttendee,
   correlateBySubject,
 } from './thread-correlator.js';
+import { classifyFromSSE } from './sse-classifier.js';
 import {
   refreshGmailTokens,
   startGmailRefreshLoop,
@@ -1396,6 +1397,52 @@ async function main(): Promise<void> {
         { err: String(err), itemId: event.payload.itemId },
         'Thread correlation failed',
       );
+    }
+  });
+
+  // SSE-triggered classification: classify emails inline without container
+  eventBus.on('email.received', (event) => {
+    try {
+      const emails = event.payload.emails as Array<{
+        thread_id: string;
+        account: string;
+        subject?: string;
+        sender?: string;
+      }>;
+
+      const results = classifyFromSSE(emails);
+
+      const pushItems = results.filter((r) => r.decision === 'push');
+      if (pushItems.length > 0) {
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
+        );
+        const notifyJid = telegramJid || Object.keys(registeredGroups)[0];
+
+        if (notifyJid) {
+          const channel = findChannel(channels, notifyJid);
+          if (channel) {
+            for (const item of pushItems) {
+              const message = formatPushMessage({
+                source: 'gmail',
+                title: item.subject,
+                sender: item.sender,
+                summary: null,
+              });
+              channel.sendMessage(notifyJid, message).catch((err) => {
+                logger.warn({ err: String(err), itemId: item.itemId }, 'Failed to send push');
+              });
+            }
+          }
+        }
+      }
+
+      logger.info(
+        { total: results.length, pushed: pushItems.length },
+        'SSE emails classified inline',
+      );
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'SSE inline classification failed');
     }
   });
 
