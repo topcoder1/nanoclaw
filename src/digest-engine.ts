@@ -1,6 +1,8 @@
 import { TIMEZONE, CHAT_INTERFACE_CONFIG } from './config.js';
 import { formatLocalTime } from './timezone.js';
 import { logger } from './logger.js';
+import { getDb } from './db.js';
+import { eventBus } from './event-bus.js';
 import {
   getTrackedItemsByState,
   getDigestState,
@@ -212,16 +214,24 @@ export function generateSmartDigest(groupName: string): string | null {
 export function generateOnDemandDigest(groupName: string): string {
   const now = Date.now();
   const state = getDigestState(groupName);
-  const since = state.last_user_interaction ?? (now - 6 * 60 * 60 * 1000);
+  const since = state.last_user_interaction ?? now - 6 * 60 * 60 * 1000;
 
-  const actionRequired = getTrackedItemsByState(groupName, ['pending', 'pushed'])
-    .filter(i => i.detected_at > since);
-  const resolved = getTrackedItemsByState(groupName, ['resolved'])
-    .filter(i => (i.resolved_at ?? 0) > since);
-  const fyi = getTrackedItemsByState(groupName, ['queued', 'digested'])
-    .filter(i => i.detected_at > since);
+  const actionRequired = getTrackedItemsByState(groupName, [
+    'pending',
+    'pushed',
+  ]).filter((i) => i.detected_at > since);
+  const resolved = getTrackedItemsByState(groupName, ['resolved']).filter(
+    (i) => (i.resolved_at ?? 0) > since,
+  );
+  const fyi = getTrackedItemsByState(groupName, ['queued', 'digested']).filter(
+    (i) => i.detected_at > since,
+  );
 
-  if (actionRequired.length === 0 && resolved.length === 0 && fyi.length === 0) {
+  if (
+    actionRequired.length === 0 &&
+    resolved.length === 0 &&
+    fyi.length === 0
+  ) {
     const sinceStr = formatLocalTime(new Date(since).toISOString(), TIMEZONE);
     return `All clear since ${sinceStr}. Nothing needs your attention.`;
   }
@@ -236,7 +246,9 @@ export function generateOnDemandDigest(groupName: string): string {
     for (const item of actionRequired) {
       const icon = item.trust_tier === 'escalate' ? '🔴' : '🟡';
       const age = formatAge(now - item.detected_at);
-      lines.push(`${icon} ${item.source}: ${item.title} (pushed ${age}, still pending)`);
+      lines.push(
+        `${icon} ${item.source}: ${item.title} (pushed ${age}, still pending)`,
+      );
     }
     lines.push('');
   }
@@ -244,7 +256,9 @@ export function generateOnDemandDigest(groupName: string): string {
   if (resolved.length > 0) {
     lines.push('<b>━━ RESOLVED ━━</b>');
     for (const item of resolved) {
-      const method = item.resolution_method?.replace('auto:', '').replace('manual:', '') || '';
+      const method =
+        item.resolution_method?.replace('auto:', '').replace('manual:', '') ||
+        '';
       lines.push(`✅ ${item.title}${method ? ` (${method})` : ''}`);
     }
     lines.push('');
@@ -263,7 +277,9 @@ export function generateOnDemandDigest(groupName: string): string {
   }
 
   lines.push('━━━━━━━━━━━━━━━━━━━━━━');
-  lines.push(`${actionRequired.length} item${actionRequired.length !== 1 ? 's' : ''} need${actionRequired.length === 1 ? 's' : ''} your attention.`);
+  lines.push(
+    `${actionRequired.length} item${actionRequired.length !== 1 ? 's' : ''} need${actionRequired.length === 1 ? 's' : ''} your attention.`,
+  );
 
   updateDigestState(groupName, {
     last_digest_at: now,
@@ -272,4 +288,51 @@ export function generateOnDemandDigest(groupName: string): string {
   });
 
   return lines.join('\n');
+}
+
+export function detectAndArchiveStale(
+  groupName: string,
+  staleThreshold: number,
+): TrackedItem[] {
+  const db = getDb();
+  const staleRows = db.prepare(
+    `SELECT * FROM tracked_items
+     WHERE group_name = ? AND state IN ('digested', 'pending') AND digest_count >= ?`
+  ).all(groupName, staleThreshold) as Array<Record<string, unknown>>;
+
+  const staleItems: TrackedItem[] = [];
+
+  for (const row of staleRows) {
+    const item = deserializeStaleItem(row);
+    try {
+      transitionItemState(item.id, item.state as any, 'stale', {
+        resolved_at: Date.now(),
+        resolution_method: 'stale',
+      });
+      staleItems.push(item);
+
+      eventBus.emit('item.stale', {
+        type: 'item.stale',
+        source: 'digest-engine',
+        timestamp: Date.now(),
+        payload: { itemId: item.id, digestCycles: item.digest_count },
+      });
+    } catch {
+      // Already transitioned
+    }
+  }
+
+  return staleItems;
+}
+
+function deserializeStaleItem(row: Record<string, unknown>): TrackedItem {
+  return {
+    ...row,
+    classification_reason: row.classification_reason
+      ? JSON.parse(row.classification_reason as string)
+      : null,
+    metadata: row.metadata
+      ? JSON.parse(row.metadata as string)
+      : null,
+  } as TrackedItem;
 }

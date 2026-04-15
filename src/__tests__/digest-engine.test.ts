@@ -35,9 +35,14 @@ vi.mock('../config.js', () => ({
   },
 }));
 
-import { _initTestDatabase, _closeDatabase } from '../db.js';
-import { insertTrackedItem, updateDigestState } from '../tracked-items.js';
-import { generateMorningDashboard, shouldFireDigest, generateSmartDigest } from '../digest-engine.js';
+import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
+import { insertTrackedItem, updateDigestState, getTrackedItemById } from '../tracked-items.js';
+import {
+  generateMorningDashboard,
+  shouldFireDigest,
+  generateSmartDigest,
+  detectAndArchiveStale,
+} from '../digest-engine.js';
 
 describe('generateMorningDashboard', () => {
   beforeEach(() => _initTestDatabase());
@@ -172,12 +177,18 @@ describe('shouldFireDigest', () => {
   });
 
   it('returns false when last digest was too recent', () => {
-    updateDigestState('main', { queued_count: 10, last_digest_at: Date.now() - 60000 });
+    updateDigestState('main', {
+      queued_count: 10,
+      last_digest_at: Date.now() - 60000,
+    });
     expect(shouldFireDigest('main')).toBe(false);
   });
 
   it('returns true when enough time has passed', () => {
-    updateDigestState('main', { queued_count: 5, last_digest_at: Date.now() - 8000000 });
+    updateDigestState('main', {
+      queued_count: 5,
+      last_digest_at: Date.now() - 8000000,
+    });
     expect(shouldFireDigest('main')).toBe(true);
   });
 });
@@ -215,7 +226,10 @@ describe('generateSmartDigest', () => {
       telegram_message_id: null,
     });
 
-    updateDigestState('main', { last_digest_at: now - 7200000, queued_count: 1 });
+    updateDigestState('main', {
+      last_digest_at: now - 7200000,
+      queued_count: 1,
+    });
 
     const result = generateSmartDigest('main');
     expect(result).toBeTruthy();
@@ -247,11 +261,82 @@ describe('generateSmartDigest', () => {
       telegram_message_id: null,
     });
 
-    updateDigestState('main', { last_digest_at: now - 7200000, queued_count: 1 });
+    updateDigestState('main', {
+      last_digest_at: now - 7200000,
+      queued_count: 1,
+    });
 
     const result = generateSmartDigest('main');
     expect(result).toBeTruthy();
     expect(result).toContain('STILL PENDING');
     expect(result).toContain('PR review request');
+  });
+});
+
+describe('staleness detection', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('marks items stale after threshold digest cycles', () => {
+    const now = Date.now();
+    insertTrackedItem({
+      id: 'stale:t1',
+      source: 'gmail',
+      source_id: 'st1',
+      group_name: 'main',
+      state: 'digested',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'Old email nobody handled',
+      summary: null,
+      thread_id: null,
+      detected_at: now - 86400000,
+      pushed_at: now - 86400000,
+      resolved_at: null,
+      resolution_method: null,
+      classification_reason: { final: 'push' },
+      metadata: null,
+      digest_count: 0,
+      telegram_message_id: null,
+    });
+
+    getDb().prepare('UPDATE tracked_items SET digest_count = 2 WHERE id = ?').run('stale:t1');
+
+    const staleItems = detectAndArchiveStale('main', 2);
+    expect(staleItems).toHaveLength(1);
+    expect(staleItems[0].id).toBe('stale:t1');
+
+    const item = getTrackedItemById('stale:t1');
+    expect(item?.state).toBe('stale');
+    expect(item?.resolution_method).toBe('stale');
+  });
+
+  it('does not mark items stale below threshold', () => {
+    const now = Date.now();
+    insertTrackedItem({
+      id: 'stale:t2',
+      source: 'gmail',
+      source_id: 'st2',
+      group_name: 'main',
+      state: 'digested',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'Recent email',
+      summary: null,
+      thread_id: null,
+      detected_at: now - 3600000,
+      pushed_at: now - 3600000,
+      resolved_at: null,
+      resolution_method: null,
+      classification_reason: { final: 'push' },
+      metadata: null,
+      digest_count: 0,
+      telegram_message_id: null,
+    });
+
+    const staleItems = detectAndArchiveStale('main', 2);
+    expect(staleItems).toHaveLength(0);
   });
 });
