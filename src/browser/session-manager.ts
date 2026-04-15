@@ -9,7 +9,11 @@ import {
   BROWSER_ACQUIRE_TIMEOUT_MS,
 } from '../config.js';
 import { logger } from '../logger.js';
-import { encryptSingleFile, decryptSingleFile } from './profile-crypto.js';
+import {
+  encryptBuffer,
+  encryptSingleFile,
+  decryptSingleFile,
+} from './profile-crypto.js';
 
 export interface ProfileOptions {
   profileKey?: Buffer;
@@ -47,7 +51,8 @@ export class BrowserSessionManager {
         },
         validate: async (ctx) => {
           try {
-            return ctx.pages !== undefined;
+            ctx.pages();
+            return true;
           } catch {
             return false;
           }
@@ -72,16 +77,28 @@ export class BrowserSessionManager {
 
     // Load encrypted profile if available
     let storageState: object | undefined;
-    if (this.profileOptions.profileKey && this.profileOptions.resolveProfileDir) {
+    if (
+      this.profileOptions.profileKey &&
+      this.profileOptions.resolveProfileDir
+    ) {
       const profileDir = this.profileOptions.resolveProfileDir(groupId);
       const stateFile = path.join(profileDir, 'state.json');
       if (fs.existsSync(stateFile)) {
         try {
-          const decrypted = decryptSingleFile(stateFile, this.profileOptions.profileKey);
+          const decrypted = decryptSingleFile(
+            stateFile,
+            this.profileOptions.profileKey,
+          );
           storageState = JSON.parse(decrypted.toString());
-          logger.info({ groupId }, 'Browser profile loaded from encrypted state');
+          logger.info(
+            { groupId },
+            'Browser profile loaded from encrypted state',
+          );
         } catch (err) {
-          logger.warn({ groupId, err }, 'Failed to decrypt browser profile, starting fresh');
+          logger.warn(
+            { groupId, err },
+            'Failed to decrypt browser profile, starting fresh',
+          );
         }
       }
     }
@@ -91,7 +108,7 @@ export class BrowserSessionManager {
 
     let ctx: BrowserContext;
     if (storageState) {
-      await poolCtx.close();
+      await this.pool.destroy(poolCtx);
       ctx = await this.client.newContext({ storageState });
     } else {
       ctx = poolCtx;
@@ -100,7 +117,11 @@ export class BrowserSessionManager {
     this.groupContexts.set(groupId, ctx);
 
     logger.info({ groupId }, 'Browser context acquired');
-    this.emit({ type: 'browser.context.created', groupId, timestamp: Date.now() });
+    this.emit({
+      type: 'browser.context.created',
+      groupId,
+      timestamp: Date.now(),
+    });
     return ctx;
   }
 
@@ -113,12 +134,19 @@ export class BrowserSessionManager {
       state = await ctx.storageState();
 
       // Encrypt and save profile
-      if (state && this.profileOptions.profileKey && this.profileOptions.resolveProfileDir) {
+      if (
+        state &&
+        this.profileOptions.profileKey &&
+        this.profileOptions.resolveProfileDir
+      ) {
         const profileDir = this.profileOptions.resolveProfileDir(groupId);
         fs.mkdirSync(profileDir, { recursive: true });
         const stateFile = path.join(profileDir, 'state.json');
-        fs.writeFileSync(stateFile, JSON.stringify(state));
-        encryptSingleFile(stateFile, this.profileOptions.profileKey);
+        const encrypted = encryptBuffer(
+          Buffer.from(JSON.stringify(state)),
+          this.profileOptions.profileKey,
+        );
+        fs.writeFileSync(stateFile, encrypted);
         logger.info({ groupId }, 'Browser profile encrypted and saved');
       }
     } catch (err) {
@@ -129,7 +157,11 @@ export class BrowserSessionManager {
     await this.pool.release(ctx);
 
     logger.info({ groupId }, 'Browser context released');
-    this.emit({ type: 'browser.context.closed', groupId, timestamp: Date.now() });
+    this.emit({
+      type: 'browser.context.closed',
+      groupId,
+      timestamp: Date.now(),
+    });
     return state;
   }
 
@@ -188,6 +220,9 @@ export class BrowserSessionManager {
       { activeContexts: this.groupContexts.size },
       'Browser sidecar disconnected — invalidating all contexts',
     );
+    for (const ctx of this.groupContexts.values()) {
+      this.pool.destroy(ctx).catch(() => {});
+    }
     this.groupContexts.clear();
   }
 }

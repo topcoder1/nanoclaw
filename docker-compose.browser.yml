@@ -20,7 +20,7 @@ services:
       - --port=9222
       - --host=0.0.0.0
     ports:
-      - "9222:9222"
+      - "127.0.0.1:9222:9222"
     volumes:
       - browser-data:/data
     restart: unless-stopped

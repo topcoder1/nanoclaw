@@ -176,13 +176,17 @@ describe('ensureDockerNetwork', () => {
 
   it('ignores "already exists" error', () => {
     const err = new Error('network with name nanoclaw already exists');
-    mockExecSync.mockImplementationOnce(() => { throw err; });
+    mockExecSync.mockImplementationOnce(() => {
+      throw err;
+    });
     expect(() => ensureDockerNetwork('nanoclaw')).not.toThrow();
   });
 
   it('re-throws non-duplicate errors', () => {
     const err = new Error('permission denied');
-    mockExecSync.mockImplementationOnce(() => { throw err; });
+    mockExecSync.mockImplementationOnce(() => {
+      throw err;
+    });
     expect(() => ensureDockerNetwork('nanoclaw')).toThrow('permission denied');
   });
 });
@@ -213,7 +217,9 @@ describe('stopBrowserSidecar', () => {
   });
 
   it('does not throw on failure', () => {
-    mockExecSync.mockImplementationOnce(() => { throw new Error('failed'); });
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('failed');
+    });
     expect(() => stopBrowserSidecar()).not.toThrow();
   });
 });

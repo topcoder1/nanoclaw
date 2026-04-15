@@ -152,7 +152,9 @@ describe('profile-crypto', () => {
     let key: Buffer;
 
     beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-crypto-single-'));
+      tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanoclaw-crypto-single-'),
+      );
       key = generateEncryptionKey();
     });
 
@@ -162,7 +164,9 @@ describe('profile-crypto', () => {
 
     it('encrypts and decrypts a single file', () => {
       const filePath = path.join(tmpDir, 'state.json');
-      const original = JSON.stringify({ cookies: [{ name: 'auth', value: 'abc' }] });
+      const original = JSON.stringify({
+        cookies: [{ name: 'auth', value: 'abc' }],
+      });
       fs.writeFileSync(filePath, original);
 
       encryptSingleFile(filePath, key);
@@ -184,7 +188,12 @@ describe('profile-crypto', () => {
       const filePath = path.join(tmpDir, 'state.json');
       const state = {
         cookies: [{ name: 'session', value: 'xyz', domain: '.example.com' }],
-        origins: [{ origin: 'https://example.com', localStorage: [{ name: 'key', value: 'val' }] }],
+        origins: [
+          {
+            origin: 'https://example.com',
+            localStorage: [{ name: 'key', value: 'val' }],
+          },
+        ],
       };
       fs.writeFileSync(filePath, JSON.stringify(state));
 

@@ -7,9 +7,9 @@ describe('compareScreenshots', () => {
     const height = 2;
     const pixels = Buffer.alloc(width * height * 4);
     for (let i = 0; i < pixels.length; i += 4) {
-      pixels[i] = 255;     // R
-      pixels[i + 1] = 0;   // G
-      pixels[i + 2] = 0;   // B
+      pixels[i] = 255; // R
+      pixels[i + 1] = 0; // G
+      pixels[i + 2] = 0; // B
       pixels[i + 3] = 255; // A
     }
 
@@ -24,8 +24,14 @@ describe('compareScreenshots', () => {
     const red = Buffer.alloc(width * height * 4);
     const blue = Buffer.alloc(width * height * 4);
     for (let i = 0; i < red.length; i += 4) {
-      red[i] = 255; red[i + 1] = 0; red[i + 2] = 0; red[i + 3] = 255;
-      blue[i] = 0; blue[i + 1] = 0; blue[i + 2] = 255; blue[i + 3] = 255;
+      red[i] = 255;
+      red[i + 1] = 0;
+      red[i + 2] = 0;
+      red[i + 3] = 255;
+      blue[i] = 0;
+      blue[i + 1] = 0;
+      blue[i + 2] = 255;
+      blue[i + 3] = 255;
     }
 
     const result = compareScreenshots(red, blue, width, height);

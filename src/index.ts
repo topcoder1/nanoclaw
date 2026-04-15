@@ -33,6 +33,8 @@ import {
   ensureBrowserSidecar,
   stopBrowserSidecar,
 } from './container-runtime.js';
+import { BrowserSessionManager } from './browser/session-manager.js';
+import { StagehandBridge } from './browser/stagehand-bridge.js';
 import {
   deleteRouterState,
   getAllChats,
@@ -890,10 +892,15 @@ async function main(): Promise<void> {
 
   restoreRemoteControl();
 
+  const browserSessionManager = new BrowserSessionManager();
+  const stagehandBridge = new StagehandBridge(browserSessionManager);
+  const browserTrustState = { readGranted: false, readGrantedAt: 0, groupId: '' };
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
     process.exit(0);
@@ -1186,6 +1193,8 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    stagehandBridge,
+    browserTrustState,
   });
   // Start trust gateway (containers call this before write/transact ops)
   startTrustGateway(TRUST_GATEWAY_PORT);

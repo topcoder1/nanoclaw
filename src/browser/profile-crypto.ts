@@ -114,6 +114,17 @@ export function decryptProfile(profileDir: string, key: Buffer): string {
 }
 
 /**
+ * Encrypt a plaintext buffer and return the ciphertext (IV || authTag || ciphertext).
+ */
+export function encryptBuffer(plaintext: Buffer, key: Buffer): Buffer {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]);
+}
+
+/**
  * Encrypt a single file in place.
  * Overwrites the file with: IV || authTag || ciphertext.
  */

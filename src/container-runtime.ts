@@ -124,10 +124,10 @@ export function ensureDockerNetwork(name: string): void {
 export function ensureBrowserSidecar(): void {
   const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
   try {
-    execSync(
-      `${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`,
-      { stdio: 'pipe', timeout: 30000 },
-    );
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`, {
+      stdio: 'pipe',
+      timeout: 30000,
+    });
     logger.info('Browser sidecar started');
   } catch (err) {
     logger.error({ err }, 'Failed to start browser sidecar');
@@ -139,10 +139,10 @@ export function ensureBrowserSidecar(): void {
 export function stopBrowserSidecar(): void {
   const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
   try {
-    execSync(
-      `${CONTAINER_RUNTIME_BIN} compose -f ${composePath} down`,
-      { stdio: 'pipe', timeout: 15000 },
-    );
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} down`, {
+      stdio: 'pipe',
+      timeout: 15000,
+    });
     logger.info('Browser sidecar stopped');
   } catch (err) {
     logger.warn({ err }, 'Failed to stop browser sidecar');

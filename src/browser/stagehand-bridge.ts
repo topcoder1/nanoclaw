@@ -16,9 +16,18 @@ export interface StagehandResponse {
 }
 
 const DESTRUCTIVE_PATTERNS = [
-  'delete', 'remove', 'cancel', 'unsubscribe',
-  'transfer', 'send money', 'pay', 'purchase', 'buy',
-  'submit order', 'confirm payment', 'place order',
+  'delete',
+  'remove',
+  'cancel',
+  'unsubscribe',
+  'transfer',
+  'send money',
+  'pay',
+  'purchase',
+  'buy',
+  'submit order',
+  'confirm payment',
+  'place order',
 ];
 
 export function isDestructiveIntent(instruction: string): boolean {
@@ -64,8 +73,9 @@ export class StagehandBridge {
         }
         case 'act': {
           return {
-            success: true,
-            action: `Executed: ${instruction}`,
+            success: false,
+            error:
+              'browser_act not yet implemented — Stagehand LLM integration pending',
           };
         }
         default:

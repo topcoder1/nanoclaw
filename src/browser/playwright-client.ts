@@ -34,13 +34,15 @@ export class PlaywrightClient {
     this.onDisconnect = handler;
   }
 
-  async newContext(
-    options?: { storageState?: string | object },
-  ): Promise<BrowserContext> {
+  async newContext(options?: {
+    storageState?: string | object;
+  }): Promise<BrowserContext> {
     if (!this.browser?.isConnected()) {
       await this.connect();
     }
-    return this.browser!.newContext(options as Parameters<Browser['newContext']>[0]);
+    return this.browser!.newContext(
+      options as Parameters<Browser['newContext']>[0],
+    );
   }
 
   async disconnect(): Promise<void> {

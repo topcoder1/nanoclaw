@@ -643,9 +643,12 @@ export async function processTaskIpc(
         actionClass = 'services.transact';
       }
 
-      // Session-level trust: reads only need one approval per browser session
-      const needsTrustCheck =
-        actionClass !== 'info.read' || !deps.browserTrustState?.readGranted;
+      // Session-level trust: reads only need one approval per browser session (1hr TTL)
+      const grantAge =
+        Date.now() - (deps.browserTrustState?.readGrantedAt ?? 0);
+      const grantValid =
+        deps.browserTrustState?.readGranted && grantAge < 3_600_000;
+      const needsTrustCheck = actionClass !== 'info.read' || !grantValid;
 
       if (needsTrustCheck && deps.trustGateway) {
         const trustResult = await deps.trustGateway.evaluate({
@@ -660,11 +663,18 @@ export async function processTaskIpc(
             success: false,
             error: 'Action denied by trust engine',
           };
-          if (
-            data._responseFile &&
-            typeof data._responseFile === 'string'
-          ) {
-            fs.writeFileSync(data._responseFile, JSON.stringify(rejection));
+          const respFile = data._responseFile;
+          if (respFile && typeof respFile === 'string') {
+            const safeDir = path.join(DATA_DIR, 'ipc', sourceGroup);
+            const resolved = path.resolve(respFile);
+            if (resolved.startsWith(safeDir + path.sep)) {
+              fs.writeFileSync(resolved, JSON.stringify(rejection));
+            } else {
+              logger.error(
+                { sourceGroup, path: respFile },
+                'Blocked _responseFile path traversal',
+              );
+            }
           }
           break;
         }
@@ -684,7 +694,16 @@ export async function processTaskIpc(
       });
 
       if (data._responseFile && typeof data._responseFile === 'string') {
-        fs.writeFileSync(data._responseFile, JSON.stringify(result));
+        const safeDir = path.join(DATA_DIR, 'ipc', sourceGroup);
+        const resolved = path.resolve(data._responseFile);
+        if (resolved.startsWith(safeDir + path.sep)) {
+          fs.writeFileSync(resolved, JSON.stringify(result));
+        } else {
+          logger.error(
+            { sourceGroup, path: data._responseFile },
+            'Blocked _responseFile path traversal',
+          );
+        }
       }
       break;
     }
