@@ -24,7 +24,9 @@ export function scoreComplexity(message: string): EscalationResult {
 
   // Check code keywords only in non-code-block portions
   const withoutCodeBlocks = message.replace(/```[\s\S]*?```/g, '');
-  if (/\b(function|class|import|export|const|let|var)\b/.test(withoutCodeBlocks)) {
+  if (
+    /\b(function|class|import|export|const|let|var)\b/.test(withoutCodeBlocks)
+  ) {
     score += 2;
     reasons.push('code keywords');
   }

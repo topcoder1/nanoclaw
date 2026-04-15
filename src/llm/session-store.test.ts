@@ -15,9 +15,8 @@ describe('session-store', () => {
   });
 
   it('saveSession creates session file and returns sessionId', async () => {
-    const { saveSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = [
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi there' },
@@ -35,17 +34,15 @@ describe('session-store', () => {
   });
 
   it('loadSession returns empty array for missing session', async () => {
-    const { loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = loadSession(tempDir, 'nonexistent-id');
     expect(messages).toEqual([]);
   });
 
   it('loadSession returns saved messages', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const original = [
       { role: 'user', content: 'test message' },
       { role: 'assistant', content: 'test response' },
@@ -56,9 +53,8 @@ describe('session-store', () => {
   });
 
   it('saveSession trims to last 100 messages', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = Array.from({ length: 120 }, (_, i) => ({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `message ${i}`,
@@ -70,9 +66,8 @@ describe('session-store', () => {
   });
 
   it('saveSession reuses existing sessionId', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const id = saveSession(tempDir, null, [{ role: 'user', content: 'first' }]);
     saveSession(tempDir, id, [
       { role: 'user', content: 'first' },

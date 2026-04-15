@@ -95,7 +95,9 @@ export async function embedText(
 
   const provider = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' });
   if (providerName !== 'openai') {
-    throw new Error(`Embedding only supported for openai, got: ${providerName}`);
+    throw new Error(
+      `Embedding only supported for openai, got: ${providerName}`,
+    );
   }
   const embeddingModel = provider.textEmbeddingModel(modelId);
 

@@ -595,7 +595,8 @@ async function runAgent(
       const complexity = scoreComplexity(prompt);
       if (complexity.shouldEscalate) {
         const llmConfig = group.containerConfig?.llm;
-        const escalationModel = llmConfig?.escalationModel ?? getEscalationModel(resolved.provider);
+        const escalationModel =
+          llmConfig?.escalationModel ?? getEscalationModel(resolved.provider);
         if (escalationModel) {
           finalModel = escalationModel;
           logger.info(

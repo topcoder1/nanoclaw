@@ -29,7 +29,10 @@ describe('resolveModel', () => {
       provider: 'openai',
       model: 'gpt-4o-mini',
     };
-    const result = resolveModel({ llm }, { provider: 'google', model: 'gemini-2.0-flash' });
+    const result = resolveModel(
+      { llm },
+      { provider: 'google', model: 'gemini-2.0-flash' },
+    );
     expect(result).toEqual({
       provider: 'google',
       model: 'gemini-2.0-flash',

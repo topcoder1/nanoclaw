@@ -47,7 +47,8 @@ It should return a string but it returns undefined. Fix the security vulnerabili
   });
 
   it('escalates messages with multiple file references and code keywords', () => {
-    const msg = 'Refactor src/index.ts, src/config.ts, src/types.ts to use the new import pattern';
+    const msg =
+      'Refactor src/index.ts, src/config.ts, src/types.ts to use the new import pattern';
     const result = scoreComplexity(msg);
     expect(result.shouldEscalate).toBe(true);
   });

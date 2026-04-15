@@ -17,9 +17,8 @@ describe('tool-bridge', () => {
   });
 
   it('buildIpcTools returns tool definitions with correct names', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'test-jid', 'test-group');
     expect(Object.keys(tools)).toContain('send_message');
     expect(Object.keys(tools)).toContain('schedule');
@@ -28,9 +27,8 @@ describe('tool-bridge', () => {
   });
 
   it('send_message tool writes JSON file to messages dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.send_message.execute(
       { text: 'hello world' },
@@ -49,9 +47,8 @@ describe('tool-bridge', () => {
   });
 
   it('schedule tool writes JSON file to tasks dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.schedule.execute(
       { when: '0 8 * * *', prompt: 'daily check', label: 'Morning check' },
@@ -69,9 +66,8 @@ describe('tool-bridge', () => {
   });
 
   it('learn_feedback tool writes to messages dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.learn_feedback.execute(
       { rule: 'Always check auth first', source: 'user_feedback' },
