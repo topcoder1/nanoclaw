@@ -63,7 +63,10 @@ export function initLearningSystem(bus: EventBus, deps: LearningDeps): void {
       const decayed = decayConfidence();
       const orphans = pruneOrphanedTraces();
       if (pruned > 0 || decayed > 0 || orphans > 0) {
-        logger.info({ pruned, decayed, orphanedTraces: orphans }, 'Learning maintenance run');
+        logger.info(
+          { pruned, decayed, orphanedTraces: orphans },
+          'Learning maintenance run',
+        );
       }
     },
     24 * 60 * 60 * 1000,

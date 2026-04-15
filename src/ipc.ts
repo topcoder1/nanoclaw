@@ -742,7 +742,10 @@ export async function processTaskIpc(
     }
 
     case 'learn_feedback': {
-      const feedbackData = data as typeof data & { feedback?: string; groupId?: string };
+      const feedbackData = data as typeof data & {
+        feedback?: string;
+        groupId?: string;
+      };
       if (feedbackData.feedback) {
         const actionClasses = inferActionClasses(feedbackData.feedback);
         addRule({
@@ -753,7 +756,10 @@ export async function processTaskIpc(
           confidence: 0.9,
           evidenceCount: 1,
         });
-        logger.info({ groupId: feedbackData.groupId ?? sourceGroup }, 'learn_feedback IPC processed');
+        logger.info(
+          { groupId: feedbackData.groupId ?? sourceGroup },
+          'learn_feedback IPC processed',
+        );
       }
       break;
     }
@@ -765,14 +771,25 @@ export async function processTaskIpc(
   // Trace IPC actions for procedure recording
   if (data.taskId) {
     const traceableTypes = new Set([
-      'browser_navigate', 'browser_act', 'browser_extract', 'browser_observe',
-      'schedule_task', 'cancel_task', 'relay_message', 'email_trigger',
+      'browser_navigate',
+      'browser_act',
+      'browser_extract',
+      'browser_observe',
+      'schedule_task',
+      'cancel_task',
+      'relay_message',
+      'email_trigger',
     ]);
     if (traceableTypes.has(data.type)) {
       addTrace(sourceGroup, data.taskId, {
         type: data.type,
         timestamp: Date.now(),
-        inputSummary: (data.instruction ?? data.prompt ?? data.text ?? data.type).slice(0, 200),
+        inputSummary: (
+          data.instruction ??
+          data.prompt ??
+          data.text ??
+          data.type
+        ).slice(0, 200),
         result: 'success',
       });
     }

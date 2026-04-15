@@ -10,7 +10,8 @@ const mockExecuteProcedure = vi.fn().mockResolvedValue(true);
 
 vi.mock('./procedure-matcher.js', () => ({
   checkProcedureMatch: (...args: unknown[]) => mockCheckProcedureMatch(...args),
-  formatProcedureOffer: (...args: unknown[]) => mockFormatProcedureOffer(...args),
+  formatProcedureOffer: (...args: unknown[]) =>
+    mockFormatProcedureOffer(...args),
   executeProcedure: (...args: unknown[]) => mockExecuteProcedure(...args),
 }));
 
@@ -64,7 +65,10 @@ describe('handleMessageWithProcedureCheck', () => {
 
     expect(handled).toBe(true);
     expect(mockExecuteProcedure).toHaveBeenCalled();
-    expect(mockSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining('learned procedure'));
+    expect(mockSendMessage).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('learned procedure'),
+    );
   });
 
   it('sends offer message when auto_execute is false', async () => {
@@ -80,7 +84,9 @@ describe('handleMessageWithProcedureCheck', () => {
       updated_at: new Date().toISOString(),
       groupId: 'g1',
     });
-    mockFormatProcedureOffer.mockReturnValue('I have a learned procedure... [Yes / Yes, always / No]');
+    mockFormatProcedureOffer.mockReturnValue(
+      'I have a learned procedure... [Yes / Yes, always / No]',
+    );
 
     const handled = await handleMessageWithProcedureCheck(
       'check PR status',
@@ -91,6 +97,9 @@ describe('handleMessageWithProcedureCheck', () => {
     );
 
     expect(handled).toBe(true);
-    expect(mockSendMessage).toHaveBeenCalledWith('g1', expect.stringContaining('learned procedure'));
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      'g1',
+      expect.stringContaining('learned procedure'),
+    );
   });
 });

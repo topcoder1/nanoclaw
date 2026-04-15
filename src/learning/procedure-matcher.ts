@@ -50,9 +50,15 @@ export async function executeProcedure(
   updateProcedureStats(procedure.name, success, groupId);
 
   if (!success) {
-    logger.warn({ name: procedure.name, groupId }, 'Procedure execution failed');
+    logger.warn(
+      { name: procedure.name, groupId },
+      'Procedure execution failed',
+    );
   } else {
-    logger.info({ name: procedure.name, groupId, durationMs }, 'Procedure executed');
+    logger.info(
+      { name: procedure.name, groupId, durationMs },
+      'Procedure executed',
+    );
   }
 
   return success;
@@ -67,9 +73,7 @@ export function promoteProcedure(
 
   for (const gid of allGroupIds) {
     const procs = listProcedures(gid);
-    const match = procs.find(
-      (p) => p.name === name && p.groupId === gid,
-    );
+    const match = procs.find((p) => p.name === name && p.groupId === gid);
     if (match) matchingGroups.push(match);
   }
 
@@ -89,7 +93,11 @@ export function promoteProcedure(
 
   saveProcedure(merged);
   logger.info(
-    { name, fromGroups: matchingGroups.map((p) => p.groupId), stepCount: merged.steps.length },
+    {
+      name,
+      fromGroups: matchingGroups.map((p) => p.groupId),
+      stepCount: merged.steps.length,
+    },
     'Procedure promoted to global scope',
   );
   return true;

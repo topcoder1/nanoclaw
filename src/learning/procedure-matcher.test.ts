@@ -13,7 +13,8 @@ vi.mock('../memory/procedure-store.js', () => ({
   findProcedure: (...args: unknown[]) => mockFindProcedure(...args),
   listProcedures: (...args: unknown[]) => mockListProcedures(...args),
   saveProcedure: (...args: unknown[]) => mockSaveProcedure(...args),
-  updateProcedureStats: (...args: unknown[]) => mockUpdateProcedureStats(...args),
+  updateProcedureStats: (...args: unknown[]) =>
+    mockUpdateProcedureStats(...args),
 }));
 
 import {
