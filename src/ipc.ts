@@ -3,6 +3,8 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import type { StagehandBridge } from './browser/stagehand-bridge.js';
+import { isDestructiveIntent } from './browser/stagehand-bridge.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
@@ -35,6 +37,21 @@ export interface IpcDeps {
     prompt: string,
     onResult: (text: string) => Promise<void>,
   ) => void;
+  // Browser automation
+  stagehandBridge?: StagehandBridge;
+  trustGateway?: {
+    evaluate: (req: {
+      toolName: string;
+      actionClass: string;
+      description: string;
+      groupId: string;
+    }) => Promise<{ decision: 'approved' | 'denied' }>;
+  };
+  browserTrustState?: {
+    readGranted: boolean;
+    readGrantedAt: number;
+    groupId: string;
+  };
 }
 
 let ipcWatcherRunning = false;
@@ -197,6 +214,10 @@ export async function processTaskIpc(
     }>;
     // For toggle_verbose
     enabled?: boolean;
+    // For browser_act/extract/observe
+    instruction?: string;
+    schema?: unknown;
+    _responseFile?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -596,6 +617,75 @@ export async function processTaskIpc(
         },
         'Message relayed to target group',
       );
+      break;
+    }
+
+    case 'browser_act':
+    case 'browser_extract':
+    case 'browser_observe': {
+      if (!deps.stagehandBridge) {
+        logger.warn(
+          { sourceGroup },
+          `${data.type}: stagehand bridge not available`,
+        );
+        break;
+      }
+
+      const instruction = data.instruction as string;
+      const toolType = data.type as string;
+
+      // Trust check: determine action class based on tool type and intent
+      let actionClass =
+        toolType === 'browser_act' ? 'services.write' : 'info.read';
+
+      // Escalate destructive browser_act instructions to services.transact
+      if (toolType === 'browser_act' && isDestructiveIntent(instruction)) {
+        actionClass = 'services.transact';
+      }
+
+      // Session-level trust: reads only need one approval per browser session
+      const needsTrustCheck =
+        actionClass !== 'info.read' || !deps.browserTrustState?.readGranted;
+
+      if (needsTrustCheck && deps.trustGateway) {
+        const trustResult = await deps.trustGateway.evaluate({
+          toolName: toolType,
+          actionClass,
+          description: instruction,
+          groupId: sourceGroup,
+        });
+
+        if (trustResult.decision === 'denied') {
+          const rejection = {
+            success: false,
+            error: 'Action denied by trust engine',
+          };
+          if (
+            data._responseFile &&
+            typeof data._responseFile === 'string'
+          ) {
+            fs.writeFileSync(data._responseFile, JSON.stringify(rejection));
+          }
+          break;
+        }
+
+        // Cache read-level trust grant for this session
+        if (actionClass === 'info.read' && deps.browserTrustState) {
+          deps.browserTrustState.readGranted = true;
+          deps.browserTrustState.readGrantedAt = Date.now();
+        }
+      }
+
+      const result = await deps.stagehandBridge.handleRequest({
+        type: toolType.replace('browser_', '') as 'act' | 'extract' | 'observe',
+        instruction,
+        groupId: sourceGroup,
+        schema: data.schema as Record<string, unknown> | undefined,
+      });
+
+      if (data._responseFile && typeof data._responseFile === 'string') {
+        fs.writeFileSync(data._responseFile, JSON.stringify(result));
+      }
       break;
     }
 
