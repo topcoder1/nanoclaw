@@ -112,3 +112,19 @@ export function decryptProfile(profileDir: string, key: Buffer): string {
 
   return tmpDir;
 }
+
+/**
+ * Encrypt a single file in place.
+ * Overwrites the file with: IV || authTag || ciphertext.
+ */
+export function encryptSingleFile(filePath: string, key: Buffer): void {
+  encryptFile(filePath, key);
+}
+
+/**
+ * Decrypt a single file, returning the plaintext buffer.
+ * The file on disk remains encrypted.
+ */
+export function decryptSingleFile(filePath: string, key: Buffer): Buffer {
+  return decryptFile(filePath, key);
+}

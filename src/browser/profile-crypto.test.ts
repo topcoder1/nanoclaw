@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -6,6 +6,8 @@ import {
   encryptProfile,
   decryptProfile,
   generateEncryptionKey,
+  encryptSingleFile,
+  decryptSingleFile,
 } from './profile-crypto.js';
 
 function makeTempDir(): string {
@@ -142,6 +144,55 @@ describe('profile-crypto', () => {
       expect(() => decryptProfile('/no/such/dir', key)).toThrow(
         'does not exist',
       );
+    });
+  });
+
+  describe('single-file operations', () => {
+    let tmpDir: string;
+    let key: Buffer;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-crypto-single-'));
+      key = generateEncryptionKey();
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('encrypts and decrypts a single file', () => {
+      const filePath = path.join(tmpDir, 'state.json');
+      const original = JSON.stringify({ cookies: [{ name: 'auth', value: 'abc' }] });
+      fs.writeFileSync(filePath, original);
+
+      encryptSingleFile(filePath, key);
+      const encrypted = fs.readFileSync(filePath);
+      expect(encrypted.toString()).not.toBe(original);
+
+      const decrypted = decryptSingleFile(filePath, key);
+      expect(decrypted.toString()).toBe(original);
+    });
+
+    it('throws on corrupted encrypted file', () => {
+      const filePath = path.join(tmpDir, 'bad.json');
+      fs.writeFileSync(filePath, 'not encrypted data that is too short');
+
+      expect(() => decryptSingleFile(filePath, key)).toThrow();
+    });
+
+    it('roundtrips JSON storage state', () => {
+      const filePath = path.join(tmpDir, 'state.json');
+      const state = {
+        cookies: [{ name: 'session', value: 'xyz', domain: '.example.com' }],
+        origins: [{ origin: 'https://example.com', localStorage: [{ name: 'key', value: 'val' }] }],
+      };
+      fs.writeFileSync(filePath, JSON.stringify(state));
+
+      encryptSingleFile(filePath, key);
+      const decrypted = decryptSingleFile(filePath, key);
+      const restored = JSON.parse(decrypted.toString());
+
+      expect(restored).toEqual(state);
     });
   });
 });
