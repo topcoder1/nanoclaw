@@ -129,19 +129,29 @@ export function shouldFireDigest(groupName: string): boolean {
 export function generateSmartDigest(groupName: string): string | null {
   const now = Date.now();
   const state = getDigestState(groupName);
-  const since = state.last_digest_at ?? state.last_dashboard_at ?? (now - 24 * 60 * 60 * 1000);
+  const since =
+    state.last_digest_at ??
+    state.last_dashboard_at ??
+    now - 24 * 60 * 60 * 1000;
 
-  const resolved = getTrackedItemsByState(groupName, ['resolved'])
-    .filter(i => (i.resolved_at ?? 0) > since);
-  const pending = getTrackedItemsByState(groupName, ['pending', 'pushed'])
-    .filter(i => i.detected_at < since || (now - i.detected_at) > 14400000);
+  const resolved = getTrackedItemsByState(groupName, ['resolved']).filter(
+    (i) => (i.resolved_at ?? 0) > since,
+  );
+  const pending = getTrackedItemsByState(groupName, [
+    'pending',
+    'pushed',
+  ]).filter((i) => i.detected_at < since || now - i.detected_at > 14400000);
   const fyi = getTrackedItemsByState(groupName, ['queued', 'digested']);
 
   if (resolved.length === 0 && pending.length === 0 && fyi.length === 0) {
     return null;
   }
 
-  const timeStr = formatLocalTime(new Date(now).toISOString(), TIMEZONE).split(',').pop()?.trim() || '';
+  const timeStr =
+    formatLocalTime(new Date(now).toISOString(), TIMEZONE)
+      .split(',')
+      .pop()
+      ?.trim() || '';
   const lines: string[] = [];
   lines.push(`📊 <b>DIGEST</b> — ${timeStr}`);
   lines.push('');
@@ -149,7 +159,9 @@ export function generateSmartDigest(groupName: string): string | null {
   if (resolved.length > 0) {
     lines.push('<b>━━ RESOLVED SINCE LAST CHECK ━━</b>');
     for (const item of resolved) {
-      const method = item.resolution_method?.replace('auto:', '').replace('manual:', '') || '';
+      const method =
+        item.resolution_method?.replace('auto:', '').replace('manual:', '') ||
+        '';
       lines.push(`✅ ${item.title}${method ? ` — ${method}` : ''}`);
     }
     lines.push('');
@@ -166,13 +178,15 @@ export function generateSmartDigest(groupName: string): string | null {
     }
     lines.push('');
 
-    const fyiIds = fyi.filter(i => i.state === 'queued').map(i => i.id);
+    const fyiIds = fyi.filter((i) => i.state === 'queued').map((i) => i.id);
     for (const id of fyiIds) {
       try {
         transitionItemState(id, 'queued', 'digested');
-      } catch { /* already transitioned */ }
+      } catch {
+        /* already transitioned */
+      }
     }
-    incrementDigestCount(fyi.map(i => i.id));
+    incrementDigestCount(fyi.map((i) => i.id));
   }
 
   if (pending.length > 0) {
@@ -190,6 +204,71 @@ export function generateSmartDigest(groupName: string): string | null {
   updateDigestState(groupName, {
     last_digest_at: now,
     queued_count: 0,
+  });
+
+  return lines.join('\n');
+}
+
+export function generateOnDemandDigest(groupName: string): string {
+  const now = Date.now();
+  const state = getDigestState(groupName);
+  const since = state.last_user_interaction ?? (now - 6 * 60 * 60 * 1000);
+
+  const actionRequired = getTrackedItemsByState(groupName, ['pending', 'pushed'])
+    .filter(i => i.detected_at > since);
+  const resolved = getTrackedItemsByState(groupName, ['resolved'])
+    .filter(i => (i.resolved_at ?? 0) > since);
+  const fyi = getTrackedItemsByState(groupName, ['queued', 'digested'])
+    .filter(i => i.detected_at > since);
+
+  if (actionRequired.length === 0 && resolved.length === 0 && fyi.length === 0) {
+    const sinceStr = formatLocalTime(new Date(since).toISOString(), TIMEZONE);
+    return `All clear since ${sinceStr}. Nothing needs your attention.`;
+  }
+
+  const sinceStr = formatLocalTime(new Date(since).toISOString(), TIMEZONE);
+  const lines: string[] = [];
+  lines.push(`📊 <b>CATCH-UP</b> — since ${sinceStr}`);
+  lines.push('');
+
+  if (actionRequired.length > 0) {
+    lines.push('<b>━━ ACTION REQUIRED ━━</b>');
+    for (const item of actionRequired) {
+      const icon = item.trust_tier === 'escalate' ? '🔴' : '🟡';
+      const age = formatAge(now - item.detected_at);
+      lines.push(`${icon} ${item.source}: ${item.title} (pushed ${age}, still pending)`);
+    }
+    lines.push('');
+  }
+
+  if (resolved.length > 0) {
+    lines.push('<b>━━ RESOLVED ━━</b>');
+    for (const item of resolved) {
+      const method = item.resolution_method?.replace('auto:', '').replace('manual:', '') || '';
+      lines.push(`✅ ${item.title}${method ? ` (${method})` : ''}`);
+    }
+    lines.push('');
+  }
+
+  if (fyi.length > 0) {
+    lines.push('<b>━━ FYI ━━</b>');
+    const bySource = new Map<string, number>();
+    for (const item of fyi) {
+      bySource.set(item.source, (bySource.get(item.source) || 0) + 1);
+    }
+    for (const [source, count] of bySource) {
+      lines.push(`📬 ${count} ${source} item${count > 1 ? 's' : ''}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━');
+  lines.push(`${actionRequired.length} item${actionRequired.length !== 1 ? 's' : ''} need${actionRequired.length === 1 ? 's' : ''} your attention.`);
+
+  updateDigestState(groupName, {
+    last_digest_at: now,
+    queued_count: 0,
+    last_user_interaction: now,
   });
 
   return lines.join('\n');

@@ -6,13 +6,10 @@
 import {
   getAllTrustLevels,
   getDb,
-  getPendingTrustApprovalIds,
   resetTrustLevels,
   setTrustAutoExecute,
 } from './db.js';
-import { queryEvents } from './event-log.js';
-import { TIMEZONE } from './config.js';
-import { formatLocalTime } from './timezone.js';
+import { generateOnDemandDigest } from './digest-engine.js';
 import type { ActionClass } from './trust-engine.js';
 
 export type TrustCommand =
@@ -105,7 +102,7 @@ export function executeTrustCommand(
     }
 
     case 'what_did_i_miss': {
-      return generateCatchUpSummary(groupId);
+      return generateOnDemandDigest(groupId);
     }
 
     case 'dismiss_item': {
@@ -121,75 +118,4 @@ function markProcessedItemDismissed(itemId: string): void {
     `INSERT OR REPLACE INTO processed_items (item_id, source, processed_at, action_taken)
      VALUES (?, 'dismiss', ?, 'dismissed')`,
   ).run(itemId, new Date().toISOString());
-}
-
-/**
- * Default lookback window for "what did I miss" (6 hours).
- * In the future this could use the actual last user message timestamp.
- */
-const CATCH_UP_WINDOW_MS = 6 * 60 * 60 * 1000;
-
-/**
- * Human-readable label for event types in the catch-up summary.
- */
-function eventTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    'message.inbound': 'Messages received',
-    'message.outbound': 'Messages sent',
-    'task.complete': 'Tasks completed',
-    'task.queued': 'Tasks queued',
-    'trust.request': 'Trust approvals requested',
-    'trust.approved': 'Trust actions approved',
-    'trust.denied': 'Trust actions denied',
-    'email.received': 'Emails processed',
-    'webhook.received': 'Webhooks received',
-    'system.error': 'System errors',
-  };
-  return labels[type] || type;
-}
-
-/**
- * Generate a catch-up summary of events since the last interaction.
- */
-function generateCatchUpSummary(groupId: string): string {
-  const since = Date.now() - CATCH_UP_WINDOW_MS;
-  const events = queryEvents({ since, limit: 500 });
-
-  const header = `\u{1F4DD} *What you missed*\n_Since ${formatLocalTime(new Date(since).toISOString(), TIMEZONE)}_\n`;
-
-  if (events.length === 0) {
-    return `${header}\nAll quiet \u2014 nothing happened while you were away.`;
-  }
-
-  // Count by type
-  const byType = new Map<string, number>();
-  for (const e of events) {
-    byType.set(e.event_type, (byType.get(e.event_type) || 0) + 1);
-  }
-
-  const lines: string[] = [header];
-
-  for (const [type, count] of byType) {
-    lines.push(`  \u{2022} ${eventTypeLabel(type)}: ${count}`);
-  }
-
-  // Highlight errors
-  const errors = events.filter((e) => e.event_type === 'system.error');
-  if (errors.length > 0) {
-    lines.push('');
-    lines.push(
-      `\u{26A0}\u{FE0F} *${errors.length} error(s)* \u2014 check logs.`,
-    );
-  }
-
-  // Pending approvals
-  const pendingApprovals = getPendingTrustApprovalIds(groupId);
-  if (pendingApprovals.length > 0) {
-    lines.push('');
-    lines.push(
-      `\u{1F510} *${pendingApprovals.length} pending approval(s)* awaiting your decision.`,
-    );
-  }
-
-  return lines.join('\n').trim();
 }
