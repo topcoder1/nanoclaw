@@ -127,3 +127,49 @@ describe('thread_links table', () => {
     }).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// delegation_counters table
+// ---------------------------------------------------------------------------
+
+describe('delegation_counters table', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('creates delegation_counters table with correct schema', () => {
+    const db = getDb();
+    const info = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE name = 'delegation_counters'",
+      )
+      .get() as { sql: string } | undefined;
+    expect(info).toBeDefined();
+    expect(info!.sql).toContain('group_name');
+    expect(info!.sql).toContain('action_class');
+    expect(info!.sql).toContain('count');
+  });
+
+  it('supports upsert on delegation_counters', () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO delegation_counters (group_name, action_class, count, last_delegated_at)
+       VALUES ('main', 'comms.write', 1, 1000)
+       ON CONFLICT(group_name, action_class)
+       DO UPDATE SET count = count + 1, last_delegated_at = 2000`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO delegation_counters (group_name, action_class, count, last_delegated_at)
+       VALUES ('main', 'comms.write', 1, 1000)
+       ON CONFLICT(group_name, action_class)
+       DO UPDATE SET count = count + 1, last_delegated_at = 2000`,
+    ).run();
+
+    const row = db
+      .prepare(
+        'SELECT count FROM delegation_counters WHERE group_name = ? AND action_class = ?',
+      )
+      .get('main', 'comms.write') as { count: number };
+    expect(row.count).toBe(2);
+  });
+});
