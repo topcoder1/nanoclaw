@@ -19,6 +19,7 @@ import {
   classifyTool,
   recordTrustDecision,
 } from './trust-engine.js';
+import { shouldRequireApproval, recordDelegation } from './delegation-tracker.js';
 import type { WebhookReceivedEvent } from './events.js';
 import {
   insertTrustApproval,
@@ -262,6 +263,22 @@ async function handleEvaluate(
 
   const result = evaluateTrust(toolName, groupId, selfClass);
   const resolvedClass = classifyTool(toolName, selfClass);
+
+  // Delegation guardrail: first N handle_ delegations require approval
+  const isDelegation = toolName.toLowerCase().startsWith('handle_');
+  if (isDelegation && result.decision === 'approved') {
+    if (shouldRequireApproval(groupId, resolvedClass)) {
+      logger.info(
+        { toolName, groupId, actionClass: resolvedClass },
+        'Delegation guardrail: requiring approval for early delegation',
+      );
+      // Override to needs_approval — fall through to approval creation below
+      result.decision = 'needs_approval';
+      result.reason = `delegation guardrail: fewer than threshold successful delegations for ${resolvedClass}`;
+    } else {
+      recordDelegation(groupId, resolvedClass);
+    }
+  }
 
   if (result.decision === 'approved') {
     // Auto-approved — log and return immediately

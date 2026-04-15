@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { classifyTool } from '../trust-engine.js';
 
 vi.mock('../logger.js', () => ({
   logger: {
@@ -62,5 +63,33 @@ describe('delegation-tracker', () => {
     recordDelegation('main', 'comms.write');
     resetDelegationCount('main', 'comms.write');
     expect(getDelegationCount('main', 'comms.write')).toBe(0);
+  });
+});
+
+describe('delegation guardrail integration with trust', () => {
+  beforeEach(() => _initTestDatabase());
+  afterEach(() => _closeDatabase());
+
+  it('handle_ tools are classified to reuse existing trust domains', () => {
+    const actionClass = classifyTool('handle_email_reply');
+    expect(actionClass).toBe('comms.write');
+
+    expect(shouldRequireApproval('main', actionClass)).toBe(true);
+
+    for (let i = 0; i < 10; i++) {
+      recordDelegation('main', actionClass);
+    }
+    expect(shouldRequireApproval('main', actionClass)).toBe(false);
+  });
+
+  it('transact delegations use higher threshold independently', () => {
+    const sendClass = classifyTool('handle_email_send');
+    expect(sendClass).toBe('comms.transact');
+
+    for (let i = 0; i < 10; i++) {
+      recordDelegation('main', 'comms.write');
+    }
+
+    expect(shouldRequireApproval('main', sendClass)).toBe(true);
   });
 });
