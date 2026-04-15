@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { runVercelQuery } from './vercel-runner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,6 +75,9 @@ interface ContainerInput {
   assistantName?: string;
   script?: string;
   verbose?: boolean;
+  provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
+  model?: string;
+  providerBaseUrl?: string;
 }
 
 interface ContainerOutput {
@@ -1043,6 +1047,15 @@ async function main(): Promise<void> {
     // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+  }
+
+  const provider = containerInput.provider ?? 'anthropic';
+
+  if (provider !== 'anthropic') {
+    log(`Using Vercel AI SDK (provider: ${provider}, model: ${containerInput.model ?? 'default'})`);
+    const result = await runVercelQuery(containerInput.prompt, containerInput);
+    writeOutput(result);
+    process.exit(0);
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
