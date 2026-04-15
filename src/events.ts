@@ -310,6 +310,56 @@ export interface BrowserVisualChangedEvent extends NanoClawEvent {
   };
 }
 
+// --- Item lifecycle events ---
+
+export interface ItemClassifiedEvent extends NanoClawEvent {
+  type: 'item.classified';
+  source: 'classification';
+  payload: {
+    itemId: string;
+    decision: 'push' | 'digest' | 'resolved';
+    source: string;
+    reason: Record<string, unknown>;
+  };
+}
+
+export interface ItemPushedEvent extends NanoClawEvent {
+  type: 'item.pushed';
+  source: 'push-manager';
+  payload: {
+    itemId: string;
+    telegramMessageId: number;
+  };
+}
+
+export interface ItemResolvedEvent extends NanoClawEvent {
+  type: 'item.resolved';
+  source: 'resolution-detector';
+  payload: {
+    itemId: string;
+    method: string;
+  };
+}
+
+export interface ItemStaleEvent extends NanoClawEvent {
+  type: 'item.stale';
+  source: 'digest-engine';
+  payload: {
+    itemId: string;
+    digestCycles: number;
+  };
+}
+
+export interface DigestSentEvent extends NanoClawEvent {
+  type: 'digest.sent';
+  source: 'digest-engine';
+  payload: {
+    groupName: string;
+    itemCount: number;
+    digestType: 'smart' | 'morning' | 'ondemand';
+  };
+}
+
 // --- Learn events ---
 
 export interface LearnRuleCreatedEvent extends NanoClawEvent {
@@ -422,6 +472,11 @@ export interface EventMap {
   'learn.procedure_executed': LearnProcedureExecutedEvent;
   'learn.procedure_promoted': LearnProcedurePromotedEvent;
   'learn.feedback_received': LearnFeedbackReceivedEvent;
+  'item.classified': ItemClassifiedEvent;
+  'item.pushed': ItemPushedEvent;
+  'item.resolved': ItemResolvedEvent;
+  'item.stale': ItemStaleEvent;
+  'digest.sent': DigestSentEvent;
 }
 
 export type EventType = keyof EventMap;
