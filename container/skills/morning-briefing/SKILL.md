@@ -1,3 +1,7 @@
+<!-- DEPRECATED: Morning dashboard is migrating to orchestrator's digest-engine.ts (TENSION-2).
+     This container skill continues running during the transition period.
+     When fully migrated, this skill will be removed. -->
+
 # Morning Briefing
 
 Generate a comprehensive morning briefing and send to the user via send_message.
