@@ -67,6 +67,23 @@ const TOOL_CLASS_MAP: Record<string, ActionClass> = {
   resume_task: 'services.write',
   create_calendar_event: 'services.write',
   delete_calendar_event: 'services.transact',
+  // Browser domain — reads (session-level trust)
+  browser_navigate: 'info.read',
+  browser_snapshot: 'info.read',
+  browser_take_screenshot: 'info.read',
+  browser_tab_list: 'info.read',
+  browser_tab_new: 'info.read',
+  browser_tab_select: 'info.read',
+  browser_pdf_save: 'info.read',
+  browser_extract: 'info.read',
+  browser_observe: 'info.read',
+  // Browser domain — writes (per-action trust)
+  browser_click: 'services.write',
+  browser_type: 'services.write',
+  browser_select_option: 'services.write',
+  browser_file_upload: 'services.write',
+  browser_press_key: 'services.write',
+  browser_act: 'services.write',
 };
 
 /** Parse an ActionClass string into domain and operation. */

@@ -175,3 +175,37 @@ describe('recordTrustDecision', () => {
     expect(afterDenial.confidence).toBeLessThan(beforeDenial.confidence);
   });
 });
+
+describe('browser tool classification', () => {
+  it('classifies browser_navigate as info.read', () => {
+    expect(classifyTool('browser_navigate')).toBe('info.read');
+  });
+
+  it('classifies browser_snapshot as info.read', () => {
+    expect(classifyTool('browser_snapshot')).toBe('info.read');
+  });
+
+  it('classifies browser_click as services.write', () => {
+    expect(classifyTool('browser_click')).toBe('services.write');
+  });
+
+  it('classifies browser_type as services.write', () => {
+    expect(classifyTool('browser_type')).toBe('services.write');
+  });
+
+  it('classifies browser_act as services.write', () => {
+    expect(classifyTool('browser_act')).toBe('services.write');
+  });
+
+  it('classifies browser_extract as info.read', () => {
+    expect(classifyTool('browser_extract')).toBe('info.read');
+  });
+
+  it('classifies browser_observe as info.read', () => {
+    expect(classifyTool('browser_observe')).toBe('info.read');
+  });
+
+  it('classifies browser_file_upload as services.write', () => {
+    expect(classifyTool('browser_file_upload')).toBe('services.write');
+  });
+});
