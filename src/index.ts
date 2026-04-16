@@ -1498,7 +1498,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
-    enqueueEmailTrigger: (chatJid, prompt, onResult) => {
+    enqueueEmailTrigger: (chatJid, prompt, onResult, triggerEmails) => {
       const taskId = `email-trigger-${Date.now()}`;
       queue.enqueueTask(chatJid, taskId, async () => {
         const group = registeredGroups[chatJid];
@@ -1599,7 +1599,7 @@ async function main(): Promise<void> {
                 progressHandle = null;
               }
               const clean = formatOutbound(output.result);
-              if (clean) await onResult(clean);
+              if (clean) await onResult(clean, triggerEmails ?? []);
               scheduleClose();
             }
           },

@@ -41,7 +41,21 @@ export interface IpcDeps {
   enqueueEmailTrigger: (
     chatJid: string,
     prompt: string,
-    onResult: (text: string) => Promise<void>,
+    onResult: (
+      text: string,
+      emails: Array<{
+        thread_id: string;
+        account: string;
+        subject: string;
+        sender: string;
+      }>,
+    ) => Promise<void>,
+    emails: Array<{
+      thread_id: string;
+      account: string;
+      subject: string;
+      sender: string;
+    }>,
   ) => void;
   // Browser automation
   stagehandBridge?: StagehandBridge;
@@ -620,11 +634,28 @@ export async function processTaskIpc(
         break;
       }
 
+      // Build structured email list for passing to the onResult callback
+      // so downstream handlers can attach archive/action buttons per email.
+      const triggerEmails = (data.emails ?? []).map(
+        (e: { thread_id?: string; account?: string; subject?: string; sender?: string }) => ({
+          thread_id: e.thread_id ?? '',
+          account: e.account ?? '',
+          subject: e.subject ?? '',
+          sender: e.sender ?? '',
+        }),
+      );
+
       // Enqueue agent task — the agent processes emails in a container
       // and sends clean proposals back to the same channel it runs on
-      deps.enqueueEmailTrigger(agentJid, prompt, async (text: string) => {
-        await deps.sendMessage(agentJid, text);
-      });
+      deps.enqueueEmailTrigger(
+        agentJid,
+        prompt,
+        async (text: string, emails) => {
+          void emails; // available for archive-button attachment in later tasks
+          await deps.sendMessage(agentJid, text);
+        },
+        triggerEmails,
+      );
 
       logger.info(
         { emailCount, sourceGroup, agentJid },
