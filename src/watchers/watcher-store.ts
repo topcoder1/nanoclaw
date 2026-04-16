@@ -148,19 +148,34 @@ export function listAllEnabledWatchers(): StoredWatcher[] {
 
 /**
  * Update the last observed value and check timestamp.
+ * Logs a warning if the watcher ID does not exist.
  */
 export function updateWatcherValue(id: string, value: string): void {
   const db = getDb();
   const now = Date.now();
-  db.prepare(
-    'UPDATE browser_watchers SET last_value = ?, checked_at = ? WHERE id = ?',
-  ).run(value, now, id);
+  const result = db
+    .prepare(
+      'UPDATE browser_watchers SET last_value = ?, checked_at = ? WHERE id = ?',
+    )
+    .run(value, now, id);
+  if (result.changes === 0) {
+    logger.warn({ id }, 'updateWatcherValue: no watcher found');
+  }
 }
 
 /**
  * Soft-delete a watcher by setting enabled = 0.
+ * Returns true if a watcher was disabled, false if ID not found.
  */
-export function removeWatcher(id: string): void {
+export function removeWatcher(id: string): boolean {
   const db = getDb();
-  db.prepare('UPDATE browser_watchers SET enabled = 0 WHERE id = ?').run(id);
+  const result = db
+    .prepare('UPDATE browser_watchers SET enabled = 0 WHERE id = ?')
+    .run(id);
+  if (result.changes > 0) {
+    logger.info({ id }, 'Browser watcher disabled');
+    return true;
+  }
+  logger.warn({ id }, 'removeWatcher: no watcher found');
+  return false;
 }
