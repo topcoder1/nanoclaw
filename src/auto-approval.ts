@@ -16,8 +16,12 @@ export class AutoApprovalTimer {
   }
 
   start(taskId: string, durationMs: number): void {
-    // Cancel existing timer for this task if any
-    this.cancel(taskId);
+    // Cancel existing timer for this task if any — but don't emit cancelled for replacement
+    const existing = this.timers.get(taskId);
+    if (existing) {
+      clearTimeout(existing.handle);
+      this.timers.delete(taskId);
+    }
 
     const expiresAt = Date.now() + durationMs;
     const handle = setTimeout(() => {
