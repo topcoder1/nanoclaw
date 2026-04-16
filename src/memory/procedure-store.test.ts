@@ -181,4 +181,46 @@ describe('Procedure Store', () => {
       expect(findProcedure('deploy to production')).toBeNull();
     });
   });
+
+  describe('auto-execute promotion', () => {
+    it('promotes to auto_execute after 5 consecutive successes', () => {
+      saveProcedure(makeProcedure({ success_count: 4, failure_count: 0 }));
+      updateProcedureStats('test_procedure', true);
+      const found = findProcedure('test this thing');
+      expect(found!.auto_execute).toBe(true);
+      expect(found!.success_count).toBe(5);
+    });
+
+    it('does not promote if any failures exist', () => {
+      saveProcedure(makeProcedure({ success_count: 4, failure_count: 1 }));
+      updateProcedureStats('test_procedure', true);
+      const found = findProcedure('test this thing');
+      expect(found!.auto_execute).toBe(false);
+    });
+  });
+
+  describe('procedure deprecation', () => {
+    it('deprecates after 3 consecutive failures with no successes', () => {
+      saveProcedure(makeProcedure({ success_count: 0, failure_count: 2 }));
+      updateProcedureStats('test_procedure', false);
+      const found = findProcedure('test this thing');
+      expect(found).toBeNull();
+    });
+
+    it('deprecates when failure rate exceeds 50% with 5+ runs', () => {
+      saveProcedure(makeProcedure({ success_count: 2, failure_count: 2 }));
+      updateProcedureStats('test_procedure', false);
+      // failure_count = 3, total = 5, rate = 60% > 50%
+      const found = findProcedure('test this thing');
+      expect(found).toBeNull();
+    });
+
+    it('does not deprecate if under 5 total runs', () => {
+      saveProcedure(makeProcedure({ success_count: 1, failure_count: 1 }));
+      updateProcedureStats('test_procedure', false);
+      // failure_count = 2, total = 3 (< 5), rate = 66% but under threshold
+      const found = findProcedure('test this thing');
+      expect(found).not.toBeNull();
+    });
+  });
 });

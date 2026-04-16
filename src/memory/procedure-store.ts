@@ -146,6 +146,9 @@ export function listProcedures(groupId?: string): Procedure[] {
 
 /**
  * Update procedure stats after execution.
+ * - Promotes to auto_execute after 5 consecutive successes with zero failures.
+ * - Deprecates (renames to .deprecated.json) after 3 consecutive failures with
+ *   no successes, or when failure rate exceeds 50% with 5+ total runs.
  */
 export function updateProcedureStats(
   name: string,
@@ -155,7 +158,6 @@ export function updateProcedureStats(
   const filePath = procedurePath(name, groupId);
 
   if (!fs.existsSync(filePath)) {
-    // Try global if group-specific not found
     if (groupId) {
       return updateProcedureStats(name, success);
     }
@@ -170,6 +172,24 @@ export function updateProcedureStats(
       data.failure_count = (data.failure_count || 0) + 1;
     }
     data.updated_at = new Date().toISOString();
+
+    // Auto-promote: 5+ successes with zero failures
+    if (data.success_count >= 5 && data.failure_count === 0) {
+      data.auto_execute = true;
+    }
+
+    const total = data.success_count + data.failure_count;
+    const shouldDeprecate =
+      (data.failure_count >= 3 && data.success_count === 0) ||
+      (total >= 5 && data.failure_count / total > 0.5);
+
+    if (shouldDeprecate) {
+      const deprecatedPath = filePath.replace(/\.json$/, '.deprecated.json');
+      fs.renameSync(filePath, deprecatedPath);
+      logger.info({ name, groupId, filePath: deprecatedPath }, 'Procedure deprecated');
+      return true;
+    }
+
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
     return true;
   } catch (err) {
@@ -199,7 +219,7 @@ function listProceduresFromDir(dir: string): Procedure[] {
   const procedures: Procedure[] = [];
 
   try {
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.deprecated.json'));
     for (const file of files) {
       try {
         const data = JSON.parse(
