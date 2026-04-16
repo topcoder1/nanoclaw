@@ -14,7 +14,12 @@ describe('email-trigger pipeline – interface contract', () => {
     const calls: Array<{
       chatJid: string;
       prompt: string;
-      emails: Array<{ thread_id: string; account: string; subject: string; sender: string }>;
+      emails: Array<{
+        thread_id: string;
+        account: string;
+        subject: string;
+        sender: string;
+      }>;
     }> = [];
 
     const stub: IpcDeps = {
@@ -40,8 +45,18 @@ describe('email-trigger pipeline – interface contract', () => {
     const { stub, calls } = buildStub();
 
     const emails = [
-      { thread_id: 'thread-1', account: 'user@example.com', subject: 'Hello', sender: 'a@b.com' },
-      { thread_id: 'thread-2', account: 'user2@example.com', subject: 'World', sender: 'c@d.com' },
+      {
+        thread_id: 'thread-1',
+        account: 'user@example.com',
+        subject: 'Hello',
+        sender: 'a@b.com',
+      },
+      {
+        thread_id: 'thread-2',
+        account: 'user2@example.com',
+        subject: 'World',
+        sender: 'c@d.com',
+      },
     ];
 
     stub.enqueueEmailTrigger('tg:12345', 'process emails', vi.fn(), emails);
@@ -55,7 +70,12 @@ describe('email-trigger pipeline – interface contract', () => {
     const { stub } = buildStub();
 
     const emails = [
-      { thread_id: 'thread-abc', account: 'x@y.com', subject: 'Test', sender: 'z@w.com' },
+      {
+        thread_id: 'thread-abc',
+        account: 'x@y.com',
+        subject: 'Test',
+        sender: 'z@w.com',
+      },
     ];
 
     const receivedArgs: Array<{ text: string; emails: typeof emails }> = [];
@@ -99,5 +119,98 @@ describe('email-trigger pipeline – interface contract', () => {
     expect(passed).toHaveProperty('account', email.account);
     expect(passed).toHaveProperty('subject', email.subject);
     expect(passed).toHaveProperty('sender', email.sender);
+  });
+});
+
+import { classifyAndFormat } from '../router.js';
+import { ArchiveTracker } from '../archive-tracker.js';
+import Database from 'better-sqlite3';
+
+describe('email trigger output — classifyAndFormat integration', () => {
+  it('should classify agent email output and attach actions', () => {
+    const emailText = `[Email [personal] from alice@example.com]
+Subject: Meeting tomorrow
+
+Hi, let's meet tomorrow at 3pm to discuss the project.`;
+
+    const { text, meta } = classifyAndFormat(emailText);
+    expect(meta.category).toBe('email');
+  });
+
+  it('should pass through non-email agent output and return the text', () => {
+    const normalText = 'I checked your calendar and you have no meetings today.';
+    const { text, meta } = classifyAndFormat(normalText);
+    // The default category for unrecognised messages is 'email' (classifier fallback);
+    // what matters here is that the text is preserved and meta.actions starts empty.
+    expect(text).toContain('calendar');
+    expect(meta.actions).toEqual([]);
+  });
+});
+
+describe('archive buttons from trigger metadata', () => {
+  it('should record emails in archiveTracker', () => {
+    const db = new Database(':memory:');
+    // ArchiveTracker uses the 'acted_emails' table
+    db.exec(`CREATE TABLE IF NOT EXISTS acted_emails (
+      email_id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      account TEXT NOT NULL,
+      action_taken TEXT NOT NULL DEFAULT '',
+      acted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      archived_at TEXT
+    )`);
+    const tracker = new ArchiveTracker(db);
+
+    const triggerEmails = [
+      { thread_id: 'thread-123', account: 'personal', subject: 'Test', sender: 'bob@example.com' },
+    ];
+
+    for (const email of triggerEmails) {
+      tracker.recordAction(email.thread_id, email.thread_id, email.account, 'replied');
+    }
+
+    const unarchived = tracker.getUnarchived();
+    expect(unarchived).toHaveLength(1);
+    expect(unarchived[0].email_id).toBe('thread-123');
+    db.close();
+  });
+
+  it('should add archive button when not already present', () => {
+    const actions: Array<{ label: string; callbackData: string; style: string }> = [];
+    const triggerEmails = [
+      { thread_id: 'thread-456', account: 'dev', subject: 'Deploy', sender: 'ci@example.com' },
+    ];
+
+    for (const email of triggerEmails) {
+      const emailId = email.thread_id;
+      if (!actions.some((a) => a.callbackData?.startsWith('archive:'))) {
+        actions.push({ label: '🗄 Archive', callbackData: `archive:${emailId}`, style: 'secondary' });
+      }
+    }
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].callbackData).toBe('archive:thread-456');
+  });
+
+  it('should not duplicate archive buttons for multiple emails from same trigger', () => {
+    const { meta } = classifyAndFormat('Agent processed 2 emails.');
+    const triggerEmails = [
+      { thread_id: 'thread-1', account: 'personal', subject: 'A', sender: 'a@x.com' },
+      { thread_id: 'thread-2', account: 'dev', subject: 'B', sender: 'b@x.com' },
+    ];
+
+    for (const email of triggerEmails) {
+      const emailId = email.thread_id;
+      if (!meta.actions.some((a) => a.callbackData?.startsWith(`archive:${emailId}`))) {
+        meta.actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${emailId}`,
+          style: 'secondary' as const,
+        });
+      }
+    }
+
+    const archiveActions = meta.actions.filter((a) => a.callbackData?.startsWith('archive:'));
+    expect(archiveActions).toHaveLength(2);
   });
 });

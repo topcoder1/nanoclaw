@@ -1599,7 +1599,45 @@ async function main(): Promise<void> {
                 progressHandle = null;
               }
               const clean = formatOutbound(output.result);
-              if (clean) await onResult(clean, triggerEmails ?? []);
+              if (clean) {
+                const { text: formatted, meta } = classifyAndFormat(clean);
+
+                // Force-attach archive buttons from trigger metadata
+                // (classifier may not detect email category since agent formats freely)
+                for (const email of triggerEmails ?? []) {
+                  const emailId = email.thread_id;
+                  archiveTracker.recordAction(
+                    emailId,
+                    email.thread_id,
+                    email.account,
+                    'replied',
+                  );
+
+                  if (!meta.actions.some((a) => a.callbackData?.startsWith('archive:'))) {
+                    meta.actions.push({
+                      label: '🗄 Archive',
+                      callbackData: `archive:${emailId}`,
+                      style: 'secondary' as const,
+                    });
+                  }
+                }
+
+                // Send with buttons if the channel supports them
+                const outChannel = findChannel(channels, chatJid);
+                if (
+                  outChannel &&
+                  meta.actions.length > 0 &&
+                  'sendMessageWithActions' in outChannel
+                ) {
+                  await (outChannel as any).sendMessageWithActions(
+                    chatJid,
+                    formatted,
+                    meta.actions,
+                  );
+                } else {
+                  await onResult(formatted, triggerEmails ?? []);
+                }
+              }
               scheduleClose();
             }
           },
