@@ -537,6 +537,67 @@ export class TelegramChannel implements Channel {
       },
     };
   }
+  /**
+   * Replace the inline keyboard on an existing message.
+   * Used for two-step confirm flow and post-action button replacement.
+   */
+  async editMessageButtons(
+    jid: string,
+    messageId: number,
+    actions: Action[],
+  ): Promise<void> {
+    if (!this.bot) return;
+    const chatId = jid.replace(/^tg:/, '');
+    const keyboard = {
+      inline_keyboard: [
+        actions.map((a) => ({
+          text: a.label,
+          ...(a.webAppUrl
+            ? { web_app: { url: a.webAppUrl } }
+            : { callback_data: a.callbackData }),
+        })),
+      ],
+    };
+    try {
+      await this.bot.api.editMessageReplyMarkup(chatId, messageId, {
+        reply_markup: keyboard,
+      });
+    } catch (err) {
+      logger.debug({ jid, messageId, err }, 'Failed to edit message buttons');
+    }
+  }
+
+  /**
+   * Edit an existing message's text and optionally its buttons.
+   * Used for post-action state transitions (e.g., "✓ Archived").
+   */
+  async editMessageTextAndButtons(
+    jid: string,
+    messageId: number,
+    text: string,
+    actions?: Action[],
+  ): Promise<void> {
+    if (!this.bot) return;
+    const chatId = jid.replace(/^tg:/, '');
+    const opts: Record<string, unknown> = { parse_mode: 'HTML' };
+    if (actions) {
+      opts.reply_markup = {
+        inline_keyboard: [
+          actions.map((a) => ({
+            text: a.label,
+            ...(a.webAppUrl
+              ? { web_app: { url: a.webAppUrl } }
+              : { callback_data: a.callbackData }),
+          })),
+        ],
+      };
+    }
+    try {
+      await this.bot.api.editMessageText(chatId, messageId, text, opts);
+    } catch (err) {
+      logger.debug({ jid, messageId, err }, 'Failed to edit message text and buttons');
+    }
+  }
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
