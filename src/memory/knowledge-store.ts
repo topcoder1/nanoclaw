@@ -256,7 +256,8 @@ export async function queryFactsSemantic(
       filter: opts?.domain ? { must: [{ key: 'domain', match: { value: opts.domain } }] } : undefined,
     });
 
-    return results.map((r, i) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return results.map((r: any, i: number) => ({
       rowid: i,
       text: (r.payload as Record<string, string>).text,
       domain: (r.payload as Record<string, string>).domain,

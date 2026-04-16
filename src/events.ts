@@ -172,6 +172,14 @@ export interface TrustGraduatedEvent extends NanoClawEvent {
   };
 }
 
+export interface TrustUnknownToolEvent extends NanoClawEvent {
+  type: 'trust.unknown_tool';
+  source: 'trust-engine';
+  payload: {
+    toolName: string;
+  };
+}
+
 // --- Verification events ---
 
 export interface VerifyCheckEvent extends NanoClawEvent {
@@ -503,6 +511,7 @@ export interface EventMap {
   'trust.approved': TrustApprovedEvent;
   'trust.denied': TrustDeniedEvent;
   'trust.graduated': TrustGraduatedEvent;
+  'trust.unknown_tool': TrustUnknownToolEvent;
   'verify.check': VerifyCheckEvent;
   'verify.passed': VerifyPassedEvent;
   'verify.failed': VerifyFailedEvent;

@@ -57,5 +57,5 @@ export function getCalibrationStats(): CalibrationStats {
 
   logger.debug({ stats: buckets }, 'Confidence calibration stats computed');
 
-  return buckets as CalibrationStats;
+  return buckets as unknown as CalibrationStats;
 }

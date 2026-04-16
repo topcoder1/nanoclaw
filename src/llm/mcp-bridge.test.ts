@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 
+// Mock container-only dependencies that aren't installed on the host
+vi.mock('@ai-sdk/mcp', () => ({
+  createMCPClient: vi.fn(),
+}));
+vi.mock('@ai-sdk/mcp/stdio', () => ({
+  Experimental_StdioMCPTransport: vi.fn(),
+}));
+
 describe('MCP bridge config builder', () => {
   afterEach(() => {
     vi.restoreAllMocks();
