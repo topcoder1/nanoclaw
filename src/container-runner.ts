@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_API_KEY,
   ONECLI_URL,
   SUPERPILOT_API_URL,
   SUPERPILOT_MCP_URL,
@@ -35,7 +36,7 @@ import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 // Track which gmail account directories we've already logged the
 // "skipping mount, no credentials.json" warning for, so the operator
@@ -105,7 +106,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
+    // (store, group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -126,16 +127,14 @@ function buildVolumeMounts(
       });
     }
 
-    // Store directory (messages.db) — writable so agents can mark items
-    // as processed, log approvals, and update contact activity.
+    // Main gets writable access to the store (SQLite DB) so it can
+    // query and write to the database directly.
     const storeDir = path.join(projectRoot, 'store');
-    if (fs.existsSync(storeDir)) {
-      mounts.push({
-        hostPath: storeDir,
-        containerPath: '/workspace/project/store',
-        readonly: false,
-      });
-    }
+    mounts.push({
+      hostPath: storeDir,
+      containerPath: '/workspace/project/store',
+      readonly: false,
+    });
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -143,6 +142,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Global memory directory — writable for main so it can update shared context
+    const globalDir = path.join(GROUPS_DIR, 'global');
+    if (fs.existsSync(globalDir)) {
+      mounts.push({
+        hostPath: globalDir,
+        containerPath: '/workspace/global',
+        readonly: false,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({

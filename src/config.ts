@@ -9,6 +9,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
+  'ONECLI_API_KEY',
   'TZ',
   'EMAIL_INTELLIGENCE_ENABLED',
   'SUPERPILOT_API_URL',
@@ -57,6 +58,8 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 ); // 10MB default
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
+export const ONECLI_API_KEY =
+  process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 export const SUPERPILOT_MCP_URL =
   process.env.SUPERPILOT_MCP_URL || 'http://host.docker.internal:8100';
 export const SUPERPILOT_API_URL =

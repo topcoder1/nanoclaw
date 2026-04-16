@@ -100,6 +100,7 @@ import {
 } from './gmail-token-refresh.js';
 import { runDailyDigest } from './daily-digest.js';
 import { startEventRouter } from './event-router.js';
+import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
 import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
@@ -1601,6 +1602,7 @@ async function main(): Promise<void> {
         );
     },
   });
+  startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
