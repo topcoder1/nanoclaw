@@ -163,6 +163,8 @@ import { formatBatch } from './message-formatter.js';
 import { startMiniAppServer } from './mini-app/server.js';
 import { GmailOpsRouter } from './gmail-ops.js';
 import type { GmailOpsProvider } from './gmail-ops.js';
+import { UxConfig } from './ux-config.js';
+import { parseCommand, handleConfigCommand, handleSmokeTest } from './chat-commands.js';
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
@@ -1219,9 +1221,51 @@ async function main(): Promise<void> {
         return;
       }
 
+      // Chat commands: config, smoketest (main group only)
+      const group = registeredGroups[chatJid];
+      if (group?.isMain) {
+        const cmd = parseCommand(trimmed);
+        if (cmd) {
+          (async () => {
+            try {
+              let reply: string;
+              if (cmd.type === 'config') {
+                reply = handleConfigCommand(cmd, uxConfig);
+              } else {
+                const enrichAccts = channels
+                  .filter((c) => c.name.startsWith('gmail-'))
+                  .map((c) => c.name.replace(/^gmail-/, ''));
+                reply = await handleSmokeTest({
+                  classifyAndFormat,
+                  gmailOpsRouter: {
+                    listRecentDrafts: (account) =>
+                      gmailOpsRouter.listRecentDrafts(account),
+                    accounts: enrichAccts,
+                  },
+                  archiveTracker: {
+                    getUnarchived: () => archiveTracker.getUnarchived(),
+                  },
+                  draftWatcherRunning: draftWatcher !== undefined,
+                  uxConfig: {
+                    list: () => uxConfig.list(),
+                  },
+                  miniAppPort: Number(process.env.MINI_APP_PORT) || 3847,
+                });
+              }
+              const ch = findChannel(channels, chatJid);
+              if (ch) {
+                await ch.sendMessage(chatJid, reply);
+              }
+            } catch (err) {
+              logger.error({ err }, 'Chat command failed');
+            }
+          })().catch((err) => logger.error({ err }, 'Chat command error'));
+          return;
+        }
+      }
+
       // "Archive all" command — batch-archive acted emails
       if (trimmed.toLowerCase() === 'archive all') {
-        const group = registeredGroups[chatJid];
         if (group?.isMain) {
           (async () => {
             const unarchived = archiveTracker.getUnarchived();
@@ -1320,6 +1364,8 @@ async function main(): Promise<void> {
   // --- Agentic UX initialization ---
 
   const archiveTracker = new ArchiveTracker(getDb());
+  const uxConfig = new UxConfig(getDb());
+  uxConfig.seedDefaults();
   const autoApproval = new AutoApprovalTimer(eventBus);
 
   // --- Draft enrichment watcher ---
@@ -1340,11 +1386,11 @@ async function main(): Promise<void> {
       updateDraft: (account, draftId, newBody) =>
         gmailOpsRouter.updateDraft(account, draftId, newBody),
       evaluateEnrichment: async (draft) => {
-        if (draft.body.length > 200) return null;
+        if (draft.body.length > uxConfig.getNumber('enrichment.maxBodyLength')) return null;
         const ageMs = Date.now() - new Date(draft.createdAt).getTime();
-        if (ageMs > 30 * 60 * 1000) return null;
+        if (ageMs > uxConfig.getNumber('enrichment.maxAgeMinutes') * 60 * 1000) return null;
 
-        const ENRICHMENT_TIMEOUT_MS = 60_000;
+        const ENRICHMENT_TIMEOUT_MS = uxConfig.getNumber('enrichment.timeoutMs');
         const telegramJid = Object.keys(registeredGroups).find((jid) =>
           jid.startsWith('tg:'),
         );
@@ -1378,21 +1424,13 @@ async function main(): Promise<void> {
                   return;
                 }
 
-                const enrichPrompt = `## Draft Enrichment Task
-
-You are improving an auto-generated email draft reply.
-
-Subject: ${draft.subject}
-Current draft body:
----
-${draft.body}
----
-
-Instructions:
-- Improve the draft with better tone, completeness, and context
-- Keep the same intent and meaning
-- Return ONLY the improved body text, nothing else
-- If the draft is already adequate, return exactly: NO_CHANGE`;
+                const promptTemplate = uxConfig.get('enrichment.prompt');
+                const enrichPrompt = `## Draft Enrichment Task\n\n${promptTemplate
+                  .replace(/\{subject\}/g, draft.subject)
+                  .replace(/\{threadId\}/g, draft.threadId)
+                  .replace(/\{body\}/g, draft.body)
+                  .replace(/\{account\}/g, draft.account ?? '')
+                  .replace(/\{draftId\}/g, draft.draftId)}`;
 
                 let enrichedBody: string | null = null;
                 await runAgent(
