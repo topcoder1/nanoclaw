@@ -18,8 +18,11 @@ import {
   storeCalendarEvents,
   getUpcomingEvents,
   getEventsInRange,
+  pollCalendar,
+  cleanupOldEvents,
   type CalendarEvent,
 } from '../calendar-poller.js';
+import { eventBus } from '../event-bus.js';
 
 beforeEach(() => _initTestDatabase());
 afterEach(() => _closeDatabase());
@@ -230,5 +233,103 @@ describe('getEventsInRange', () => {
 
     const results = getEventsInRange(1800000000000, 1800003600000);
     expect(results).toEqual([]);
+  });
+});
+
+describe('pollCalendar', () => {
+  it('stores events from a successful fetch and emits calendar.synced', async () => {
+    const mockEvents = [
+      {
+        id: 'evt-poll-1',
+        title: 'Standup',
+        start: '2026-04-16T09:00:00Z',
+        end: '2026-04-16T09:30:00Z',
+        attendees: [{ email: 'alice@test.com' }],
+        location: 'Zoom',
+        source_account: 'work@test.com',
+      },
+    ];
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ events: mockEvents }),
+    }) as any;
+
+    await pollCalendar();
+
+    expect(vi.mocked(eventBus.emit)).toHaveBeenCalledWith(
+      'calendar.synced',
+      expect.objectContaining({
+        type: 'calendar.synced',
+        payload: expect.objectContaining({ eventsFound: 1 }),
+      }),
+    );
+
+    // Verify event was stored
+    const stored = getUpcomingEvents(0, Date.now() + 999999999999);
+    expect(stored.some((e) => e.id === 'evt-poll-1')).toBe(true);
+  });
+
+  it('handles non-OK response gracefully without throwing', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as any;
+
+    await expect(pollCalendar()).resolves.toBeUndefined();
+  });
+
+  it('handles response with summary field instead of title', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        events: [
+          {
+            id: 'evt-summary',
+            summary: 'Weekly Sync',
+            start: { dateTime: '2026-04-16T10:00:00-07:00' },
+            end: { dateTime: '2026-04-16T10:30:00-07:00' },
+            attendees: ['bob@test.com'],
+          },
+        ],
+      }),
+    }) as any;
+
+    await pollCalendar();
+
+    const stored = getUpcomingEvents(0, Date.now() + 999999999999);
+    const evt = stored.find((e) => e.id === 'evt-summary');
+    expect(evt).toBeDefined();
+    expect(evt!.title).toBe('Weekly Sync');
+  });
+});
+
+describe('cleanupOldEvents', () => {
+  it('removes events older than the cutoff', () => {
+    const oldEvent: CalendarEvent = {
+      id: 'old-evt',
+      title: 'Old Meeting',
+      start_time: 1000,
+      end_time: 2000,
+      attendees: [],
+      location: null,
+      source_account: null,
+    };
+    const recentEvent: CalendarEvent = {
+      id: 'recent-evt',
+      title: 'Recent Meeting',
+      start_time: Date.now() - 1000,
+      end_time: Date.now() + 3600000,
+      attendees: [],
+      location: null,
+      source_account: null,
+    };
+
+    storeCalendarEvents([oldEvent, recentEvent]);
+    cleanupOldEvents(86400000); // 1 day
+
+    const remaining = getUpcomingEvents(0, Date.now() + 999999999999);
+    expect(remaining.some((e) => e.id === 'old-evt')).toBe(false);
+    expect(remaining.some((e) => e.id === 'recent-evt')).toBe(true);
   });
 });
