@@ -115,6 +115,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
 import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
+import { captureTaskOutcome } from './knowledge-ingestion.js';
 import { resolveModel, getEscalationModel } from './llm/provider.js';
 import { scoreComplexity } from './llm/escalation.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -759,6 +760,13 @@ async function runAgent(
         ? realCostUsd
         : (durationMs / 10_000) * 0.01,
     });
+
+    captureTaskOutcome({
+      groupId: group.folder,
+      prompt: prompt.slice(0, 250),
+      status: 'success',
+      durationMs,
+    }).catch(() => {});
 
     // Parse agent lesson for learning system
     if (output.result) {
