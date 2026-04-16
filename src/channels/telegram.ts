@@ -595,7 +595,10 @@ export class TelegramChannel implements Channel {
     try {
       await this.bot.api.editMessageText(chatId, messageId, text, opts);
     } catch (err) {
-      logger.debug({ jid, messageId, err }, 'Failed to edit message text and buttons');
+      logger.debug(
+        { jid, messageId, err },
+        'Failed to edit message text and buttons',
+      );
     }
   }
 }

@@ -19,7 +19,10 @@ function normalizeDigestTitle(title: string): string {
   return title.replace(/^(re|fwd|fw):\s*/gi, '').trim();
 }
 
-export function generateMorningDashboard(groupName: string, archiveTracker?: ArchiveTracker): string {
+export function generateMorningDashboard(
+  groupName: string,
+  archiveTracker?: ArchiveTracker,
+): string {
   const now = Date.now();
   const dateStr =
     formatLocalTime(new Date(now).toISOString(), TIMEZONE).split(',')[0] ||

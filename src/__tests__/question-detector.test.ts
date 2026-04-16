@@ -4,7 +4,7 @@ import { detectQuestion } from '../question-detector.js';
 describe('detectQuestion', () => {
   it('detects yes/no question with "Want me to"', () => {
     const result = detectQuestion(
-      'Want me to reply yes to Florian\'s exception?',
+      "Want me to reply yes to Florian's exception?",
     );
     expect(result).not.toBeNull();
     expect(result!.type).toBe('yes-no');
@@ -21,9 +21,7 @@ describe('detectQuestion', () => {
   });
 
   it('detects financial confirmation with "expected"', () => {
-    const result = detectQuestion(
-      'Total: $54,900.00. Were both expected?',
-    );
+    const result = detectQuestion('Total: $54,900.00. Were both expected?');
     expect(result).not.toBeNull();
     expect(result!.type).toBe('financial-confirm');
     expect(result!.actions[0].label).toBe('Yes, all expected');
@@ -31,9 +29,7 @@ describe('detectQuestion', () => {
   });
 
   it('detects financial confirmation with "All expected"', () => {
-    const result = detectQuestion(
-      'Total new: $59,558.45 in. All expected?',
-    );
+    const result = detectQuestion('Total new: $59,558.45 in. All expected?');
     expect(result).not.toBeNull();
     expect(result!.type).toBe('financial-confirm');
   });

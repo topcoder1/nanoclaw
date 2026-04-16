@@ -80,11 +80,7 @@ const RULES: ClassificationRule[] = [
   },
   // Email — draft enrichment, SuperPilot
   {
-    patterns: [
-      /enriched.*draft/i,
-      /SuperPilot.*draft/i,
-      /draft.*enriched/i,
-    ],
+    patterns: [/enriched.*draft/i, /SuperPilot.*draft/i, /draft.*enriched/i],
     category: 'email',
     urgency: 'attention',
     batchable: false,

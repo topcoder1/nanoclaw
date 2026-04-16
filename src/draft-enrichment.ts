@@ -1,6 +1,9 @@
 import type { EventBus } from './event-bus.js';
 import type Database from 'better-sqlite3';
-import type { EmailDraftCreatedEvent, EmailDraftEnrichedEvent } from './events.js';
+import type {
+  EmailDraftCreatedEvent,
+  EmailDraftEnrichedEvent,
+} from './events.js';
 import { logger } from './logger.js';
 
 export interface DraftEnrichmentOpts {
@@ -11,7 +14,11 @@ export interface DraftEnrichmentOpts {
   /** Callback to evaluate if a draft needs enrichment. Returns enriched body or null. */
   evaluateEnrichment: (draft: DraftInfo) => Promise<string | null>;
   /** Callback to update the draft via Gmail API */
-  updateDraft: (account: string, draftId: string, newBody: string) => Promise<void>;
+  updateDraft: (
+    account: string,
+    draftId: string,
+    newBody: string,
+  ) => Promise<void>;
   /** Callback to list recent drafts from Gmail API */
   listRecentDrafts: (account: string) => Promise<DraftInfo[]>;
 }
@@ -40,7 +47,10 @@ export class DraftEnrichmentWatcher {
 
   start(): void {
     if (this.intervalId) return;
-    logger.info({ accounts: this.opts.accounts }, 'Draft enrichment watcher started');
+    logger.info(
+      { accounts: this.opts.accounts },
+      'Draft enrichment watcher started',
+    );
 
     // Run immediately, then on interval
     this.poll().catch((err) => logger.error({ err }, 'Draft poll error'));
@@ -83,12 +93,20 @@ export class DraftEnrichmentWatcher {
           if (!enrichedBody) continue;
 
           // Store original for revert
-          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          const expiresAt = new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ).toISOString();
           this.db
             .prepare(
               `INSERT OR REPLACE INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
             )
-            .run(draft.draftId, account, draft.body, new Date().toISOString(), expiresAt);
+            .run(
+              draft.draftId,
+              account,
+              draft.body,
+              new Date().toISOString(),
+              expiresAt,
+            );
 
           // Update the draft
           await this.opts.updateDraft(account, draft.draftId, enrichedBody);
@@ -104,7 +122,10 @@ export class DraftEnrichmentWatcher {
             },
           } as EmailDraftEnrichedEvent);
 
-          logger.info({ draftId: draft.draftId, account, subject: draft.subject }, 'Draft enriched');
+          logger.info(
+            { draftId: draft.draftId, account, subject: draft.subject },
+            'Draft enriched',
+          );
         }
       } catch (err) {
         logger.error({ err, account }, 'Failed to poll drafts for account');
@@ -121,7 +142,9 @@ export class DraftEnrichmentWatcher {
     if (!row) return false;
 
     await this.opts.updateDraft(row.account, draftId, row.original_body);
-    this.db.prepare('DELETE FROM draft_originals WHERE draft_id = ?').run(draftId);
+    this.db
+      .prepare('DELETE FROM draft_originals WHERE draft_id = ?')
+      .run(draftId);
     logger.info({ draftId }, 'Draft reverted to original');
     return true;
   }

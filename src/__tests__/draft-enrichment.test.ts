@@ -81,7 +81,9 @@ describe('DraftEnrichmentWatcher', () => {
     watcher = new DraftEnrichmentWatcher(bus, db, {
       accounts: ['dev'],
       listRecentDrafts: vi.fn().mockResolvedValue([mockDraft]),
-      evaluateEnrichment: vi.fn().mockResolvedValue('Enriched body with context'),
+      evaluateEnrichment: vi
+        .fn()
+        .mockResolvedValue('Enriched body with context'),
       updateDraft,
     });
 
@@ -89,10 +91,16 @@ describe('DraftEnrichmentWatcher', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     // Draft was updated
-    expect(updateDraft).toHaveBeenCalledWith('dev', 'd1', 'Enriched body with context');
+    expect(updateDraft).toHaveBeenCalledWith(
+      'dev',
+      'd1',
+      'Enriched body with context',
+    );
 
     // Original stored in DB
-    const original = db.prepare('SELECT * FROM draft_originals WHERE draft_id = ?').get('d1') as Record<string, string>;
+    const original = db
+      .prepare('SELECT * FROM draft_originals WHERE draft_id = ?')
+      .get('d1') as Record<string, string>;
     expect(original.original_body).toBe('Original body');
 
     // Event emitted
@@ -143,14 +151,22 @@ describe('DraftEnrichmentWatcher', () => {
     // Manually insert an original
     db.prepare(
       'INSERT INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('d1', 'personal', 'Original body', new Date().toISOString(), new Date(Date.now() + 86400000).toISOString());
+    ).run(
+      'd1',
+      'personal',
+      'Original body',
+      new Date().toISOString(),
+      new Date(Date.now() + 86400000).toISOString(),
+    );
 
     const reverted = await watcher.revert('d1');
     expect(reverted).toBe(true);
     expect(updateDraft).toHaveBeenCalledWith('personal', 'd1', 'Original body');
 
     // Original should be deleted after revert
-    const row = db.prepare('SELECT * FROM draft_originals WHERE draft_id = ?').get('d1');
+    const row = db
+      .prepare('SELECT * FROM draft_originals WHERE draft_id = ?')
+      .get('d1');
     expect(row).toBeUndefined();
   });
 

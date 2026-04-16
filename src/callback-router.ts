@@ -23,7 +23,10 @@ export function handleCallback(
   const action = parts[0];
   const entityId = parts[1] || '';
 
-  logger.debug({ action, entityId, chatJid: query.chatJid }, 'Callback query received');
+  logger.debug(
+    { action, entityId, chatJid: query.chatJid },
+    'Callback query received',
+  );
 
   switch (action) {
     case 'archive':

@@ -47,9 +47,21 @@ export function detectQuestion(text: string): DetectedQuestion | null {
       type: 'financial-confirm',
       questionId: qid,
       actions: [
-        { label: 'Yes, all expected', callbackData: `answer:${qid}:yes`, style: 'primary' },
-        { label: 'Not all — review', callbackData: `answer:${qid}:review`, style: 'destructive-safe' },
-        { label: 'Details ↗', callbackData: `answer:${qid}:details`, style: 'secondary' },
+        {
+          label: 'Yes, all expected',
+          callbackData: `answer:${qid}:yes`,
+          style: 'primary',
+        },
+        {
+          label: 'Not all — review',
+          callbackData: `answer:${qid}:review`,
+          style: 'destructive-safe',
+        },
+        {
+          label: 'Details ↗',
+          callbackData: `answer:${qid}:details`,
+          style: 'secondary',
+        },
       ],
     };
   }
@@ -62,8 +74,16 @@ export function detectQuestion(text: string): DetectedQuestion | null {
       questionId: qid,
       actions: [
         { label: 'Yes', callbackData: `answer:${qid}:yes`, style: 'primary' },
-        { label: 'No', callbackData: `answer:${qid}:no`, style: 'destructive-safe' },
-        { label: 'Let me think...', callbackData: `answer:${qid}:defer`, style: 'secondary' },
+        {
+          label: 'No',
+          callbackData: `answer:${qid}:no`,
+          style: 'destructive-safe',
+        },
+        {
+          label: 'Let me think...',
+          callbackData: `answer:${qid}:defer`,
+          style: 'secondary',
+        },
       ],
     };
   }

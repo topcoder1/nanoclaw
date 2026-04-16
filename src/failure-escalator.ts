@@ -20,9 +20,21 @@ export class FailureEscalator {
         ].join('\n');
 
         const actions: Action[] = [
-          { label: 'Retry', callbackData: `retry:${e.payload.taskId}`, style: 'primary' },
-          { label: 'View Details ↗', callbackData: `details:${e.payload.taskId}`, style: 'secondary' },
-          { label: 'Dismiss', callbackData: `dismiss:${e.payload.taskId}`, style: 'secondary' },
+          {
+            label: 'Retry',
+            callbackData: `retry:${e.payload.taskId}`,
+            style: 'primary',
+          },
+          {
+            label: 'View Details ↗',
+            callbackData: `details:${e.payload.taskId}`,
+            style: 'secondary',
+          },
+          {
+            label: 'Dismiss',
+            callbackData: `dismiss:${e.payload.taskId}`,
+            style: 'secondary',
+          },
         ];
 
         opts.onEscalate(text, actions);

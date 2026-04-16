@@ -11,7 +11,9 @@ describe('MessageBatcher', () => {
     batcher = new MessageBatcher({
       maxItems: 5,
       maxWaitMs: 10_000,
-      onFlush: (items) => { flushed.push([...items]); },
+      onFlush: (items) => {
+        flushed.push([...items]);
+      },
     });
   });
 

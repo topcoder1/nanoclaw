@@ -65,7 +65,11 @@ describe('formatWithMeta', () => {
   });
 
   it('formats batch of auto-handled items', () => {
-    const items = ['Newsletter A dismissed', 'Receipt B processed', 'Promo C ignored'];
+    const items = [
+      'Newsletter A dismissed',
+      'Receipt B processed',
+      'Promo C ignored',
+    ];
     const result = formatWithMeta(items.join('\n'), {
       category: 'auto-handled',
       urgency: 'info',

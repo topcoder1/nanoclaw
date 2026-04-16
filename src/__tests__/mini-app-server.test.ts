@@ -14,7 +14,11 @@ describe('Mini App templates', () => {
         { label: 'Request delisting', status: 'pending', output: null },
       ],
       logs: [
-        { time: '12:03:41', level: 'success', text: 'Spamhaus lookup complete' },
+        {
+          time: '12:03:41',
+          level: 'success',
+          text: 'Spamhaus lookup complete',
+        },
         { time: '12:03:42', level: 'info', text: 'Starting port scan' },
       ],
       startedAt: new Date().toISOString(),

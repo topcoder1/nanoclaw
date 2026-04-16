@@ -1,6 +1,6 @@
 export interface MessageBatcherOpts {
-  maxItems: number;       // Flush after this many items (default: 5)
-  maxWaitMs: number;      // Flush after this many ms since first buffered item (default: 10000)
+  maxItems: number; // Flush after this many items (default: 5)
+  maxWaitMs: number; // Flush after this many ms since first buffered item (default: 10000)
   onFlush: (items: string[]) => void;
 }
 
