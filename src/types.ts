@@ -93,7 +93,12 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
-export type ActionStyle = 'primary' | 'destructive-safe' | 'plan-execution' | 'secondary' | 'timed-auto';
+export type ActionStyle =
+  | 'primary'
+  | 'destructive-safe'
+  | 'plan-execution'
+  | 'secondary'
+  | 'timed-auto';
 
 export interface Action {
   label: string;
@@ -193,7 +198,11 @@ export type MessageCategory =
   | 'account'
   | 'auto-handled';
 
-export type MessageUrgency = 'info' | 'attention' | 'action-required' | 'urgent';
+export type MessageUrgency =
+  | 'info'
+  | 'attention'
+  | 'action-required'
+  | 'urgent';
 
 export interface MessageMeta {
   category: MessageCategory;
