@@ -114,7 +114,9 @@ export async function handleCallback(
               {
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
-                webAppUrl: MINI_APP_URL ? `${MINI_APP_URL}/email/${entityId}?account=${account}` : undefined,
+                webAppUrl: MINI_APP_URL
+                  ? `${MINI_APP_URL}/email/${entityId}?account=${account}`
+                  : undefined,
                 style: 'secondary',
               },
               {
@@ -145,7 +147,9 @@ export async function handleCallback(
               {
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
-                webAppUrl: MINI_APP_URL ? `${MINI_APP_URL}/email/${entityId}` : undefined,
+                webAppUrl: MINI_APP_URL
+                  ? `${MINI_APP_URL}/email/${entityId}`
+                  : undefined,
                 style: 'secondary',
               },
               {
