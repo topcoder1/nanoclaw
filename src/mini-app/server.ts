@@ -1,16 +1,24 @@
 import express from 'express';
 import type Database from 'better-sqlite3';
 import { renderTaskDetail } from './templates/task-detail.js';
+import { renderEmailFull } from './templates/email-full.js';
+import { renderDraftDiff } from './templates/draft-diff.js';
+import { getCachedEmailBody, cacheEmailBody } from '../email-preview.js';
+import type { GmailOps } from '../gmail-ops.js';
+import type { DraftEnrichmentWatcher } from '../draft-enrichment.js';
 import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
 
 export interface MiniAppServerOpts {
   port: number;
   db: Database.Database;
+  gmailOps?: GmailOps;
+  draftWatcher?: DraftEnrichmentWatcher;
 }
 
 export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   const app = express();
+  app.use(express.json());
 
   app.get('/task/:taskId', (req, res) => {
     const { taskId } = req.params;
@@ -88,6 +96,76 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     }
 
     res.json(row);
+  });
+
+  // --- Email full view ---
+  app.get('/email/:emailId', async (req, res) => {
+    const { emailId } = req.params;
+    const account = (req.query.account as string) || '';
+
+    let body = getCachedEmailBody(emailId);
+    if (!body && opts.gmailOps && account) {
+      try {
+        body = await opts.gmailOps.getMessageBody(account, emailId);
+        if (body) cacheEmailBody(emailId, body);
+      } catch (err) {
+        logger.warn({ emailId, err }, 'Failed to fetch email body for Mini App');
+      }
+    }
+
+    const html = renderEmailFull({
+      emailId,
+      subject: `Email ${emailId}`,
+      from: '',
+      to: '',
+      date: '',
+      body: body || 'Email body could not be loaded.',
+      attachments: [],
+    });
+    res.type('html').send(html);
+  });
+
+  // --- Draft diff view ---
+  app.get('/draft-diff/:draftId', (req, res) => {
+    const { draftId } = req.params;
+    const row = opts.db
+      .prepare('SELECT * FROM draft_originals WHERE draft_id = ?')
+      .get(draftId) as
+      | { account: string; original_body: string; enriched_at: string }
+      | undefined;
+
+    if (!row) {
+      res.status(404).send('Draft not found');
+      return;
+    }
+
+    const html = renderDraftDiff({
+      draftId,
+      account: row.account,
+      originalBody: row.original_body,
+      enrichedBody: null,
+      enrichedAt: row.enriched_at,
+    });
+    res.type('html').send(html);
+  });
+
+  // --- Draft revert API ---
+  app.post('/api/draft/:draftId/revert', async (req, res) => {
+    const { draftId } = req.params;
+    if (!opts.draftWatcher) {
+      res.status(503).json({ success: false, error: 'Draft watcher not configured' });
+      return;
+    }
+    try {
+      const success = await opts.draftWatcher.revert(draftId);
+      res.json({ success });
+    } catch (err) {
+      logger.error({ draftId, err }, 'Draft revert failed');
+      res.status(500).json({
+        success: false,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
   });
 
   return app;
