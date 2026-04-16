@@ -313,6 +313,43 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_browser_watchers_group ON browser_watchers(group_id, enabled);
   `);
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS task_detail_state (
+      task_id TEXT PRIMARY KEY,
+      group_jid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      title TEXT NOT NULL,
+      steps_json TEXT NOT NULL DEFAULT '[]',
+      log_json TEXT NOT NULL DEFAULT '[]',
+      findings_json TEXT NOT NULL DEFAULT '[]',
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS acted_emails (
+      email_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      account TEXT NOT NULL,
+      action_taken TEXT NOT NULL,
+      acted_at TEXT NOT NULL,
+      archived_at TEXT,
+      PRIMARY KEY (email_id, action_taken)
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS draft_originals (
+      draft_id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      original_body TEXT NOT NULL,
+      enriched_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
