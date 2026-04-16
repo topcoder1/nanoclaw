@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../config.js', () => ({
-  BROWSER_CDP_URL: 'ws://test-sidecar:9222',
+  BROWSER_CDP_URL: 'http://test-sidecar:9222',
 }));
 
 vi.mock('../logger.js', () => ({
@@ -23,7 +23,7 @@ const mockBrowser = {
 
 vi.mock('playwright-core', () => ({
   chromium: {
-    connect: vi.fn(() => Promise.resolve(mockBrowser)),
+    connectOverCDP: vi.fn(() => Promise.resolve(mockBrowser)),
   },
 }));
 
@@ -41,7 +41,7 @@ describe('PlaywrightClient', () => {
     it('connects to the sidecar CDP endpoint', async () => {
       await client.connect();
       const { chromium } = await import('playwright-core');
-      expect(chromium.connect).toHaveBeenCalledWith('ws://test-sidecar:9222');
+      expect(chromium.connectOverCDP).toHaveBeenCalledWith('http://test-sidecar:9222');
       expect(client.isConnected()).toBe(true);
     });
 
@@ -49,7 +49,7 @@ describe('PlaywrightClient', () => {
       await client.connect();
       await client.connect();
       const { chromium } = await import('playwright-core');
-      expect(chromium.connect).toHaveBeenCalledTimes(1);
+      expect(chromium.connectOverCDP).toHaveBeenCalledTimes(1);
     });
   });
 

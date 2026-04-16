@@ -15,7 +15,7 @@ export class PlaywrightClient {
   async connect(): Promise<void> {
     if (this.browser?.isConnected()) return;
 
-    this.browser = await chromium.connect(this.cdpUrl);
+    this.browser = await chromium.connectOverCDP(this.cdpUrl);
     logger.info({ cdpUrl: this.cdpUrl }, 'Connected to browser sidecar');
 
     this.disconnectHandler = () => {

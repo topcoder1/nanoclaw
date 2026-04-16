@@ -553,7 +553,9 @@ async function buildContainerArgs(
   // Trust gateway — containers call this before executing write/transact ops
   args.push('-e', `TRUST_GATEWAY_URL=${TRUST_GATEWAY_URL}`);
   // Browser sidecar — CDP endpoint for browser automation
-  args.push('-e', `BROWSER_CDP_URL=${BROWSER_CDP_URL}`);
+  // Containers on the Docker network connect via the service name, not localhost
+  const containerCdpUrl = BROWSER_CDP_URL.replace('localhost', 'host.docker.internal');
+  args.push('-e', `BROWSER_CDP_URL=${containerCdpUrl}`);
   // readEnvFile() is needed because .env values are NOT loaded into process.env.
   const containerEnv = readEnvFile([
     'DISCORD_BOT_TOKEN',

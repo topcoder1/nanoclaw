@@ -30,7 +30,7 @@ vi.mock('./config.js', () => ({
   QDRANT_URL: '',
   TRUST_GATEWAY_PORT: 10255,
   TRUST_GATEWAY_URL: 'http://host.docker.internal:10255',
-  BROWSER_CDP_URL: 'ws://localhost:9223',
+  BROWSER_CDP_URL: 'http://localhost:9223',
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_TIMEOUT: 1800000,
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,

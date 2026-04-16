@@ -8,7 +8,7 @@ vi.mock('../config.js', () => ({
   BROWSER_MAX_PAGES: 2,
   BROWSER_IDLE_TIMEOUT_MS: 600_000,
   BROWSER_ACQUIRE_TIMEOUT_MS: 30_000,
-  BROWSER_CDP_URL: 'ws://test:9222',
+  BROWSER_CDP_URL: 'http://test:9222',
   BROWSER_PROFILE_DIR: 'browser',
 }));
 

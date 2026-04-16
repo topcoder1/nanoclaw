@@ -174,7 +174,7 @@ export const QDRANT_URL = process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
 
 // Browser sidecar settings
 export const BROWSER_CDP_URL =
-  process.env.BROWSER_CDP_URL || 'ws://localhost:9223';
+  process.env.BROWSER_CDP_URL || 'http://localhost:9223';
 export const BROWSER_MAX_CONTEXTS = Math.max(
   1,
   parseInt(process.env.BROWSER_MAX_CONTEXTS || '5', 10) || 5,

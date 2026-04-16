@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../config.js', () => ({
-  BROWSER_CDP_URL: 'ws://test:9222',
+  BROWSER_CDP_URL: 'http://test:9222',
   BROWSER_MAX_CONTEXTS: 3,
   BROWSER_MAX_PAGES: 2,
   BROWSER_IDLE_TIMEOUT_MS: 600_000,
