@@ -73,8 +73,9 @@ export class WhatsAppChannel implements Channel {
   >();
   /** Bot's LID user ID (e.g. "80355281346633") for normalizing group mentions. */
   private botLidUser?: string;
-  /** Resolve the initial connect() once the first successful open happens. */
+  /** Resolve/reject the initial connect() once the first successful open happens (or auth fails). */
   private pendingFirstOpen?: () => void;
+  private pendingFirstReject?: (err: Error) => void;
 
   private opts: WhatsAppChannelOpts;
 
@@ -85,6 +86,7 @@ export class WhatsAppChannel implements Channel {
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.pendingFirstOpen = resolve;
+      this.pendingFirstReject = reject;
       this.connectInternal().catch(reject);
     });
   }
@@ -151,8 +153,13 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        // Don't kill the process — let other channels (Telegram) keep running
         this.connected = false;
+        this.sock?.end(undefined);
+        if (this.pendingFirstReject) {
+          this.pendingFirstReject(new Error(msg));
+          this.pendingFirstReject = undefined;
+          this.pendingFirstOpen = undefined;
+        }
         return;
       }
 
@@ -182,8 +189,15 @@ export class WhatsAppChannel implements Channel {
             }, 5000);
           });
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+          logger.error('WhatsApp logged out. Run /setup to re-authenticate.');
+          this.sock?.end(undefined);
+          if (this.pendingFirstReject) {
+            this.pendingFirstReject(
+              new Error('WhatsApp auth expired — logged out'),
+            );
+            this.pendingFirstReject = undefined;
+            this.pendingFirstOpen = undefined;
+          }
         }
       } else if (connection === 'open') {
         this.connected = true;
