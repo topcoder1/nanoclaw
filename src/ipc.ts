@@ -22,6 +22,7 @@ import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
 import { saveProcedure } from './memory/procedure-store.js';
 import type { Procedure } from './memory/procedure-store.js';
+import { addWatcher } from './watchers/watcher-store.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -186,6 +187,50 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
+}
+
+export interface WatchPageIpcResult {
+  success: boolean;
+  watcherId?: string;
+  error?: string;
+}
+
+export function handleWatchPageIpc(
+  taskData: Record<string, unknown>,
+  groupName: string,
+): WatchPageIpcResult {
+  const url = taskData.url as string | undefined;
+  const selector = taskData.selector as string | undefined;
+  const label = (taskData.label as string) || 'Unnamed watcher';
+  const intervalMs = (taskData.intervalMs as number) || 300000; // 5 min default
+
+  if (!url) {
+    return { success: false, error: 'watch_page: url is required' };
+  }
+  if (!selector) {
+    return { success: false, error: 'watch_page: selector is required' };
+  }
+
+  try {
+    const watcher = addWatcher({
+      url,
+      selector,
+      groupId: groupName,
+      intervalMs,
+      label,
+    });
+
+    logger.info(
+      { watcherId: watcher.id, url, groupId: groupName },
+      'watch_page IPC: watcher created',
+    );
+
+    return { success: true, watcherId: watcher.id };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, 'watch_page IPC: failed to create watcher');
+    return { success: false, error: msg };
+  }
 }
 
 export async function processTaskIpc(
@@ -898,6 +943,16 @@ export async function processTaskIpc(
           `Memory recall for "${query}":\n${formatted}\n`,
           'utf-8',
         );
+      }
+      break;
+    }
+
+    case 'watch_page': {
+      const result = handleWatchPageIpc(data as Record<string, unknown>, sourceGroup);
+      if (result.success) {
+        logger.info({ watcherId: result.watcherId }, 'watch_page IPC processed');
+      } else {
+        logger.warn({ error: result.error }, 'watch_page IPC failed');
       }
       break;
     }
