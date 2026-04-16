@@ -73,8 +73,9 @@ export class WhatsAppChannel implements Channel {
   >();
   /** Bot's LID user ID (e.g. "80355281346633") for normalizing group mentions. */
   private botLidUser?: string;
-  /** Resolve the initial connect() once the first successful open happens. */
+  /** Resolve/reject the initial connect() on first open or auth failure. */
   private pendingFirstOpen?: () => void;
+  private pendingFirstOpenReject?: (err: Error) => void;
 
   private opts: WhatsAppChannelOpts;
 
@@ -85,6 +86,7 @@ export class WhatsAppChannel implements Channel {
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.pendingFirstOpen = resolve;
+      this.pendingFirstOpenReject = reject;
       this.connectInternal().catch(reject);
     });
   }
@@ -151,8 +153,13 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        // Don't kill the process — let other channels (Telegram) keep running
+        // Don't kill the process — reject connect() so main() continues with other channels
         this.connected = false;
+        if (this.pendingFirstOpenReject) {
+          this.pendingFirstOpenReject(new Error('WhatsApp authentication required'));
+          this.pendingFirstOpenReject = undefined;
+          this.pendingFirstOpen = undefined;
+        }
         return;
       }
 

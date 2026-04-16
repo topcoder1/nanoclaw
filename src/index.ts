@@ -146,10 +146,7 @@ import {
 } from './tracked-items.js';
 import { recordBehavior } from './classification-adjustments.js';
 import { PushBuffer } from './push-buffer.js';
-import {
-  getPushActions,
-  PushRateLimiter,
-} from './push-manager.js';
+import { getPushActions, PushRateLimiter } from './push-manager.js';
 import { classify } from './classification.js';
 /* eslint-enable @typescript-eslint/no-unused-vars */
 import { StatusBarManager } from './status-bar.js';
@@ -1339,8 +1336,15 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.warn(
+        { channel: channelName, err: String(err) },
+        'Channel failed to connect — skipping',
+      );
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');
