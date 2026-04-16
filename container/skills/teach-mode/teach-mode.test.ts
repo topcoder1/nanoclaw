@@ -192,6 +192,9 @@ describe('buildProcedure', () => {
     expect(proc.steps).toHaveLength(5);
     expect(proc.steps[0].action).toBe('navigate');
     expect(proc.steps[4].action).toBe('wait');
+    // details field must be populated for correct step rendering in executeProcedure
+    expect(proc.steps[0].details).toBe('Go to a.com');
+    expect(proc.steps[1].details).toBe('Click Login');
   });
 
   it('handles empty steps array', () => {
@@ -352,6 +355,8 @@ describe('end-to-end teach flow', () => {
       'https://alto.com/pharmacy',
     );
     expect(content.procedure.steps[5].target).toBe('Lisinopril');
+    // details must be present so executeProcedure renders the description, not just the action name
+    expect(content.procedure.steps[0].details).toBe('Go to https://alto.com/pharmacy');
   });
 
   it('mixed valid and invalid narrations only captures valid steps', () => {

@@ -53,7 +53,10 @@ export function buildProcedure(
   return {
     name: name.replace(/\s+/g, '_').toLowerCase(),
     trigger: `user asks to ${name}`,
-    steps,
+    steps: steps.map((s) => ({
+      ...s,
+      details: s.description || `${s.action} ${s.target}`,
+    })),
     learnedFrom: `${new Date().toISOString()} teach mode in ${groupId}`,
     acquisition: 'teach',
   };

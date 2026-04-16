@@ -76,6 +76,73 @@ describe('formatProcedureOffer', () => {
   });
 });
 
+describe('executeProcedure', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('renders step details (not bare action names) in the prompt', async () => {
+    const { executeProcedure } = await import('./procedure-matcher.js');
+    const proc = {
+      name: 'reorder-alto-refill',
+      trigger: 'reorder alto refill',
+      description: 'Reorder Alto pharmacy refill',
+      steps: [
+        { action: 'navigate', details: 'Go to https://alto.com/pharmacy' },
+        { action: 'click', details: 'Click on Sign In' },
+        { action: 'find', details: 'Find Lisinopril' },
+      ],
+      success_count: 2,
+      failure_count: 0,
+      auto_execute: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      groupId: 'g1',
+    };
+    const capturedPrompts: string[] = [];
+    const runAgent = vi.fn(async (prompt: string) => {
+      capturedPrompts.push(prompt);
+      return 'success' as const;
+    });
+
+    await executeProcedure(proc, 'g1', runAgent);
+
+    expect(capturedPrompts[0]).toContain('Go to https://alto.com/pharmacy');
+    expect(capturedPrompts[0]).toContain('Click on Sign In');
+    expect(capturedPrompts[0]).toContain('Find Lisinopril');
+    // Must NOT contain bare action names as standalone steps
+    expect(capturedPrompts[0]).not.toMatch(/^\d+\. navigate$/m);
+    expect(capturedPrompts[0]).not.toMatch(/^\d+\. click$/m);
+  });
+
+  it('falls back to action name when details is absent', async () => {
+    const { executeProcedure } = await import('./procedure-matcher.js');
+    const proc = {
+      name: 'legacy-proc',
+      trigger: 'do legacy thing',
+      description: 'Legacy procedure without details',
+      steps: [
+        { action: 'navigate' },
+        { action: 'click' },
+      ],
+      success_count: 0,
+      failure_count: 0,
+      auto_execute: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      groupId: 'g1',
+    };
+    const capturedPrompts: string[] = [];
+    const runAgent = vi.fn(async (prompt: string) => {
+      capturedPrompts.push(prompt);
+      return 'success' as const;
+    });
+
+    await executeProcedure(proc, 'g1', runAgent);
+
+    expect(capturedPrompts[0]).toMatch(/1\. navigate/);
+    expect(capturedPrompts[0]).toMatch(/2\. click/);
+  });
+});
+
 describe('promoteProcedure', () => {
   beforeEach(() => vi.clearAllMocks());
 
