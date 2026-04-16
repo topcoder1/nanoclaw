@@ -6,6 +6,7 @@ import {
   storeFact,
   queryFacts,
   queryFactsSemantic,
+  ensureQdrantCollection,
   deleteFact,
   getAllFacts,
 } from './knowledge-store.js';
@@ -124,6 +125,16 @@ describe('Knowledge Store', () => {
     const results = queryFacts('Python', { domain: 'tech' });
     expect(results).toHaveLength(1);
     expect(results[0].domain).toBe('tech');
+  });
+});
+
+describe('ensureQdrantCollection', () => {
+  it('is a callable function', () => {
+    expect(typeof ensureQdrantCollection).toBe('function');
+  });
+
+  it('succeeds silently when QDRANT_URL is not set', async () => {
+    await expect(ensureQdrantCollection()).resolves.toBeUndefined();
   });
 });
 

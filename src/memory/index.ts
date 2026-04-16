@@ -11,7 +11,10 @@
 export {
   initKnowledgeStore,
   storeFact,
+  storeFactWithVector,
   queryFacts,
+  queryFactsSemantic,
+  ensureQdrantCollection,
   deleteFact,
   getAllFacts,
 } from './knowledge-store.js';

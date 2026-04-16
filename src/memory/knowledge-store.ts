@@ -210,6 +210,27 @@ function getQdrant(): QdrantClient | null {
   return qdrantClient;
 }
 
+/**
+ * Ensure the Qdrant collection exists with correct vector config.
+ * No-op if QDRANT_URL is not set. Safe to call multiple times.
+ */
+export async function ensureQdrantCollection(): Promise<void> {
+  const client = getQdrant();
+  if (!client) return;
+
+  try {
+    const exists = await client.collectionExists(COLLECTION_NAME);
+    if (exists.exists) return;
+
+    await client.createCollection(COLLECTION_NAME, {
+      vectors: { size: 1536, distance: 'Cosine' },
+    });
+    logger.info({ collection: COLLECTION_NAME }, 'Qdrant collection created');
+  } catch (err) {
+    logger.warn({ err }, 'Qdrant collection init failed (non-fatal)');
+  }
+}
+
 export async function storeFactWithVector(input: StoreFactInput): Promise<void> {
   storeFact(input);
 
