@@ -48,6 +48,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private callbackHandler: ((query: CallbackQuery) => void) | null = null;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -336,6 +337,31 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeMedia(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeMedia(ctx, '[Contact]'));
 
+    // Register callback query handler using a deferred pattern:
+    // The handler may be set before or after connect(). We register a
+    // single listener here that delegates to this.callbackHandler,
+    // which can be swapped later via onCallbackQuery().
+    this.bot.on('callback_query:data', async (ctx) => {
+      if (!this.callbackHandler) return;
+      const chatJid = `tg:${ctx.callbackQuery.message?.chat.id}`;
+      const messageId = ctx.callbackQuery.message?.message_id ?? 0;
+      const data = ctx.callbackQuery.data;
+      const senderName =
+        ctx.callbackQuery.from.first_name ||
+        ctx.callbackQuery.from.username ||
+        ctx.callbackQuery.from.id.toString();
+
+      this.callbackHandler({
+        id: ctx.callbackQuery.id,
+        chatJid,
+        messageId,
+        data,
+        senderName,
+      });
+
+      await ctx.answerCallbackQuery();
+    });
+
     // Handle errors gracefully
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
@@ -449,30 +475,9 @@ export class TelegramChannel implements Channel {
   }
 
   onCallbackQuery(handler: (query: CallbackQuery) => void): void {
-    if (!this.bot) {
-      logger.warn('Cannot register callback query handler — bot not connected');
-      return;
-    }
-
-    this.bot.on('callback_query:data', async (ctx) => {
-      const chatJid = `tg:${ctx.callbackQuery.message?.chat.id}`;
-      const messageId = ctx.callbackQuery.message?.message_id ?? 0;
-      const data = ctx.callbackQuery.data;
-      const senderName =
-        ctx.callbackQuery.from.first_name ||
-        ctx.callbackQuery.from.username ||
-        ctx.callbackQuery.from.id.toString();
-
-      handler({
-        id: ctx.callbackQuery.id,
-        chatJid,
-        messageId,
-        data,
-        senderName,
-      });
-
-      await ctx.answerCallbackQuery();
-    });
+    // Store the handler — the deferred listener in connect() delegates to it.
+    // Safe to call before or after connect().
+    this.callbackHandler = handler;
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
