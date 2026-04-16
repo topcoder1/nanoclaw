@@ -98,6 +98,8 @@ import { runHealthCheck } from './watchers/sidecar-health.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
+import { startWatcherPoller, stopWatcherPoller } from './watchers/watcher-poller.js';
+import { createExtractFn } from './watchers/extract-text.js';
 import {
   correlateByAttendee,
   correlateBySubject,
@@ -1134,6 +1136,7 @@ async function main(): Promise<void> {
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
     stopCalendarPoller();
+    stopWatcherPoller();
     if (proactiveSuggestionTimer) {
       clearInterval(proactiveSuggestionTimer);
       proactiveSuggestionTimer = null;
@@ -1486,6 +1489,47 @@ async function main(): Promise<void> {
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
   startCalendarPoller();
+
+  // Browser watcher polling
+  if (browserSessionManager) {
+    const watcherExtract = createExtractFn(browserSessionManager, '__watchers__');
+    startWatcherPoller(watcherExtract);
+  }
+
+  // Notify user when a browser watcher detects a change
+  eventBus.on('watcher.changed', (event) => {
+    const payload = event.payload as {
+      watcherId: string;
+      url: string;
+      selector: string;
+      previousValue: string | null;
+      newValue: string | null;
+      groupId: string;
+    };
+
+    const groupJid = Object.keys(registeredGroups).find(
+      (jid) => registeredGroups[jid].folder === payload.groupId,
+    );
+    if (!groupJid) {
+      logger.warn({ payload }, 'watcher.changed: no group found for groupId');
+      return;
+    }
+
+    const channel = findChannel(channels, groupJid);
+    if (!channel) {
+      logger.warn({ groupJid }, 'watcher.changed: no channel for JID');
+      return;
+    }
+
+    const msg =
+      `🔔 **Watcher update** (${payload.watcherId})\n` +
+      `URL: ${payload.url}\n` +
+      `Changed: ${payload.previousValue ?? '(first check)'} → ${payload.newValue}`;
+
+    channel.sendMessage(groupJid, msg).catch((err: unknown) => {
+      logger.error({ err, groupJid }, 'watcher.changed: failed to send notification');
+    });
+  });
 
   // Event router: processes events against per-group rules
   startEventRouter({
