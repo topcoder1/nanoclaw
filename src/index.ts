@@ -102,7 +102,8 @@ import { startWebhookServer } from './watchers/webhook-server.js';
 import { getMeetingBriefings } from './watchers/meeting-briefing.js';
 import { runHealthCheck } from './watchers/sidecar-health.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
-import { startEmailSSE } from './email-sse.js';
+import { startEmailSSE, setEmailTriggerDebouncer, getEmailTriggerDebouncer, writeIpcTrigger } from './email-sse.js';
+import { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
 import {
   startWatcherPoller,
@@ -164,7 +165,11 @@ import { startMiniAppServer } from './mini-app/server.js';
 import { GmailOpsRouter } from './gmail-ops.js';
 import type { GmailOpsProvider } from './gmail-ops.js';
 import { UxConfig } from './ux-config.js';
-import { parseCommand, handleConfigCommand, handleSmokeTest } from './chat-commands.js';
+import {
+  parseCommand,
+  handleConfigCommand,
+  handleSmokeTest,
+} from './chat-commands.js';
 import type {
   MessageInboundEvent,
   MessageOutboundEvent,
@@ -1250,6 +1255,7 @@ async function main(): Promise<void> {
                     list: () => uxConfig.list(),
                   },
                   miniAppPort: Number(process.env.MINI_APP_PORT) || 3847,
+                  triggerDebouncer: getEmailTriggerDebouncer(),
                 });
               }
               const ch = findChannel(channels, chatJid);
@@ -1386,11 +1392,15 @@ async function main(): Promise<void> {
       updateDraft: (account, draftId, newBody) =>
         gmailOpsRouter.updateDraft(account, draftId, newBody),
       evaluateEnrichment: async (draft) => {
-        if (draft.body.length > uxConfig.getNumber('enrichment.maxBodyLength')) return null;
+        if (draft.body.length > uxConfig.getNumber('enrichment.maxBodyLength'))
+          return null;
         const ageMs = Date.now() - new Date(draft.createdAt).getTime();
-        if (ageMs > uxConfig.getNumber('enrichment.maxAgeMinutes') * 60 * 1000) return null;
+        if (ageMs > uxConfig.getNumber('enrichment.maxAgeMinutes') * 60 * 1000)
+          return null;
 
-        const ENRICHMENT_TIMEOUT_MS = uxConfig.getNumber('enrichment.timeoutMs');
+        const ENRICHMENT_TIMEOUT_MS = uxConfig.getNumber(
+          'enrichment.timeoutMs',
+        );
         const telegramJid = Object.keys(registeredGroups).find((jid) =>
           jid.startsWith('tg:'),
         );
@@ -1850,6 +1860,15 @@ async function main(): Promise<void> {
     }, 30_000);
   }
 
+  // Initialize email trigger debouncer — buffers rapid-fire SSE triggers
+  // into a single merged IPC file to prevent duplicate agent runs
+  const triggerDebouncer = new EmailTriggerDebouncer({
+    debounceMs: uxConfig.getNumber('trigger.debounceMs'),
+    maxHoldMs: uxConfig.getNumber('trigger.maxHoldMs'),
+    onFlush: (emails, label) => writeIpcTrigger(emails, label),
+  });
+  setEmailTriggerDebouncer(triggerDebouncer);
+
   // Real-time email notifications via SSE (poll is fallback)
   startEmailSSE();
   startCalendarPoller();
@@ -2066,7 +2085,17 @@ async function main(): Promise<void> {
         if (notifyJid) {
           const channel = findChannel(channels, notifyJid);
           if (channel) {
+            const currentDebouncer = getEmailTriggerDebouncer();
             for (const item of pushItems) {
+              // Suppress push if email is in debounce buffer —
+              // agent will handle it when the buffer flushes
+              if (currentDebouncer?.has(item.threadId)) {
+                logger.debug(
+                  { threadId: item.threadId, itemId: item.itemId },
+                  'Push suppressed — email in debounce buffer',
+                );
+                continue;
+              }
               const message = formatPushMessage({
                 source: 'gmail',
                 title: item.subject,
