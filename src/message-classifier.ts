@@ -1,6 +1,6 @@
 import type { MessageMeta, MessageCategory, MessageUrgency } from './types.js';
 
-interface ClassificationRule {
+export interface ClassificationRule {
   patterns: RegExp[];
   category: MessageCategory;
   urgency: MessageUrgency;
@@ -87,8 +87,12 @@ const RULES: ClassificationRule[] = [
   },
 ];
 
-export function classifyMessage(text: string): MessageMeta {
-  for (const rule of RULES) {
+export function classifyMessage(
+  text: string,
+  dynamicRules?: ClassificationRule[],
+): MessageMeta {
+  const rules = dynamicRules ?? RULES;
+  for (const rule of rules) {
     if (rule.patterns.some((p) => p.test(text))) {
       return {
         category: rule.category,

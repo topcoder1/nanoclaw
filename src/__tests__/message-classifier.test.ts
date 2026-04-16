@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { classifyMessage } from '../message-classifier.js';
+import type { ClassificationRule } from '../message-classifier.js';
 
 describe('classifyMessage', () => {
   it('classifies Chase wire notification as financial + action-required', () => {
@@ -70,5 +71,42 @@ describe('classifyMessage', () => {
     expect(meta.category).toBe('email');
     expect(meta.urgency).toBe('info');
     expect(meta.batchable).toBe(false);
+  });
+});
+
+describe('classifyMessage with dynamic rules', () => {
+  it('should use provided rules instead of defaults', () => {
+    const customRules: ClassificationRule[] = [
+      {
+        patterns: [/test pattern/i],
+        category: 'security' as const,
+        urgency: 'urgent' as const,
+        batchable: false,
+      },
+    ];
+
+    const result = classifyMessage('this has test pattern in it', customRules);
+    expect(result.category).toBe('security');
+    expect(result.urgency).toBe('urgent');
+  });
+
+  it('should fall back to email/info for unmatched dynamic rules', () => {
+    const customRules: ClassificationRule[] = [
+      {
+        patterns: [/specific_match/i],
+        category: 'financial' as const,
+        urgency: 'action-required' as const,
+        batchable: false,
+      },
+    ];
+
+    const result = classifyMessage('no match here', customRules);
+    expect(result.category).toBe('email');
+    expect(result.urgency).toBe('info');
+  });
+
+  it('should still work without dynamic rules (backward compat)', () => {
+    const result = classifyMessage('incoming wire transfer');
+    expect(result.category).toBe('financial');
   });
 });
