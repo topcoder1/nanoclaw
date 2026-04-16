@@ -10,8 +10,18 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((p: string) => {
-      if (typeof p === 'string' && p.includes('gmail-mcp') && p.endsWith('credentials.json')) return true;
-      if (typeof p === 'string' && p.includes('gmail-mcp') && p.endsWith('gcp-oauth.keys.json')) return true;
+      if (
+        typeof p === 'string' &&
+        p.includes('gmail-mcp') &&
+        p.endsWith('credentials.json')
+      )
+        return true;
+      if (
+        typeof p === 'string' &&
+        p.includes('gmail-mcp') &&
+        p.endsWith('gcp-oauth.keys.json')
+      )
+        return true;
       return actual.existsSync(p);
     }),
     readFileSync: vi.fn((p: string, enc?: string) => {
@@ -40,7 +50,10 @@ vi.mock('fs', async () => {
   };
 });
 
-import { fetchCalendarEvents, type CalendarAccountConfig } from './calendar-fetcher.js';
+import {
+  fetchCalendarEvents,
+  type CalendarAccountConfig,
+} from './calendar-fetcher.js';
 
 describe('fetchCalendarEvents', () => {
   it('returns empty array when no accounts provided', async () => {

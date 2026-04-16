@@ -8,10 +8,7 @@
 import { logger } from '../logger.js';
 
 import { evaluateWatcher, type WatcherResult } from './browser-watcher.js';
-import {
-  listAllEnabledWatchers,
-  updateWatcherValue,
-} from './watcher-store.js';
+import { listAllEnabledWatchers, updateWatcherValue } from './watcher-store.js';
 
 type ExtractFn = (url: string, selector: string) => Promise<string>;
 
@@ -30,7 +27,10 @@ export async function pollAllWatchers(
 
   for (const watcher of watchers) {
     // Skip if the interval has not elapsed since last check
-    if (watcher.checkedAt !== null && now - watcher.checkedAt < watcher.intervalMs) {
+    if (
+      watcher.checkedAt !== null &&
+      now - watcher.checkedAt < watcher.intervalMs
+    ) {
       continue;
     }
 

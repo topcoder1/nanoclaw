@@ -98,7 +98,10 @@ import { runHealthCheck } from './watchers/sidecar-health.js';
 import { startDealWatchLoop } from './deal-watch-loop.js';
 import { startEmailSSE } from './email-sse.js';
 import { startCalendarPoller, stopCalendarPoller } from './calendar-poller.js';
-import { startWatcherPoller, stopWatcherPoller } from './watchers/watcher-poller.js';
+import {
+  startWatcherPoller,
+  stopWatcherPoller,
+} from './watchers/watcher-poller.js';
 import { createExtractFn } from './watchers/extract-text.js';
 import {
   correlateByAttendee,
@@ -1492,7 +1495,10 @@ async function main(): Promise<void> {
 
   // Browser watcher polling
   if (browserSessionManager) {
-    const watcherExtract = createExtractFn(browserSessionManager, '__watchers__');
+    const watcherExtract = createExtractFn(
+      browserSessionManager,
+      '__watchers__',
+    );
     startWatcherPoller(watcherExtract);
   }
 
@@ -1527,7 +1533,10 @@ async function main(): Promise<void> {
       `Changed: ${payload.previousValue ?? '(first check)'} → ${payload.newValue}`;
 
     channel.sendMessage(groupJid, msg).catch((err: unknown) => {
-      logger.error({ err, groupJid }, 'watcher.changed: failed to send notification');
+      logger.error(
+        { err, groupJid },
+        'watcher.changed: failed to send notification',
+      );
     });
   });
 

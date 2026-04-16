@@ -100,16 +100,28 @@ function buildCalendarClient(
       try {
         const updated = { ...creds, ...tokens };
         if (tokens.expiry_date) updated.expiry_date = tokens.expiry_date;
-        fs.writeFileSync(account.credentialsPath, JSON.stringify(updated, null, 2));
-        logger.debug({ account: account.label }, 'Calendar OAuth tokens refreshed and saved');
+        fs.writeFileSync(
+          account.credentialsPath,
+          JSON.stringify(updated, null, 2),
+        );
+        logger.debug(
+          { account: account.label },
+          'Calendar OAuth tokens refreshed and saved',
+        );
       } catch (err) {
-        logger.warn({ err, account: account.label }, 'Failed to save refreshed calendar tokens');
+        logger.warn(
+          { err, account: account.label },
+          'Failed to save refreshed calendar tokens',
+        );
       }
     });
 
     return google.calendar({ version: 'v3', auth: oauth2 });
   } catch (err) {
-    logger.warn({ err, account: account.label }, 'Failed to build calendar client');
+    logger.warn(
+      { err, account: account.label },
+      'Failed to build calendar client',
+    );
     return null;
   }
 }

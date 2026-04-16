@@ -119,7 +119,8 @@ describe('pollAllWatchers', () => {
       intervalMs: 60_000,
     });
 
-    const extract = vi.fn()
+    const extract = vi
+      .fn()
       .mockRejectedValueOnce(new Error('network timeout'))
       .mockResolvedValueOnce('$42.00');
 

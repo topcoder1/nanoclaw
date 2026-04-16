@@ -948,9 +948,15 @@ export async function processTaskIpc(
     }
 
     case 'watch_page': {
-      const result = handleWatchPageIpc(data as Record<string, unknown>, sourceGroup);
+      const result = handleWatchPageIpc(
+        data as Record<string, unknown>,
+        sourceGroup,
+      );
       if (result.success) {
-        logger.info({ watcherId: result.watcherId }, 'watch_page IPC processed');
+        logger.info(
+          { watcherId: result.watcherId },
+          'watch_page IPC processed',
+        );
       } else {
         logger.warn({ error: result.error }, 'watch_page IPC failed');
       }

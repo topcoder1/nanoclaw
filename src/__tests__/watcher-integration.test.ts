@@ -104,7 +104,9 @@ describe('Browser Watcher Integration', () => {
       label: 'Product price',
     });
 
-    const extract = vi.fn().mockRejectedValue(new Error('DNS resolution failed'));
+    const extract = vi
+      .fn()
+      .mockRejectedValue(new Error('DNS resolution failed'));
     const results = await pollAllWatchers(extract);
 
     expect(results).toHaveLength(1);

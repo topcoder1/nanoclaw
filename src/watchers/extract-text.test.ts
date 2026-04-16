@@ -38,7 +38,9 @@ describe('createExtractFn', () => {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
     });
-    expect(page.textContent).toHaveBeenCalledWith('.price', { timeout: 10_000 });
+    expect(page.textContent).toHaveBeenCalledWith('.price', {
+      timeout: 10_000,
+    });
     expect(page.close).toHaveBeenCalled();
     expect(result).toBe('$42.00');
   });
@@ -58,7 +60,9 @@ describe('createExtractFn', () => {
 
     const extract = createExtractFn(sessionManager as any, 'group-1');
 
-    await expect(extract('https://example.com', '.bad')).rejects.toThrow('element not found');
+    await expect(extract('https://example.com', '.bad')).rejects.toThrow(
+      'element not found',
+    );
     expect(page.close).toHaveBeenCalled();
   });
 });
