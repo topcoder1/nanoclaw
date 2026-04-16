@@ -41,7 +41,9 @@ describe('PlaywrightClient', () => {
     it('connects to the sidecar CDP endpoint', async () => {
       await client.connect();
       const { chromium } = await import('playwright-core');
-      expect(chromium.connectOverCDP).toHaveBeenCalledWith('http://test-sidecar:9222');
+      expect(chromium.connectOverCDP).toHaveBeenCalledWith(
+        'http://test-sidecar:9222',
+      );
       expect(client.isConnected()).toBe(true);
     });
 
