@@ -1233,11 +1233,17 @@ async function main(): Promise<void> {
             let archived = 0;
             for (const email of unarchived) {
               try {
-                await gmailOpsRouter.archiveThread(email.account, email.thread_id);
+                await gmailOpsRouter.archiveThread(
+                  email.account,
+                  email.thread_id,
+                );
                 archiveTracker.markArchived(email.email_id, email.action_taken);
                 archived++;
               } catch (err) {
-                logger.error({ err, emailId: email.email_id }, 'Failed to archive email');
+                logger.error(
+                  { err, emailId: email.email_id },
+                  'Failed to archive email',
+                );
               }
             }
             await ch?.sendMessage(

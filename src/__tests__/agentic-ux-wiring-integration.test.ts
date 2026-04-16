@@ -64,7 +64,10 @@ describe('Agentic UX wiring integration', () => {
     );
 
     // 5. Verify Gmail API was called and DB updated
-    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith('personal', 'thread1');
+    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
+      'personal',
+      'thread1',
+    );
     expect(tracker.getUnarchived()).toHaveLength(0);
   });
 
@@ -99,7 +102,9 @@ describe('Agentic UX wiring integration', () => {
       archiveThread: vi.fn(),
       listRecentDrafts: vi.fn(),
       updateDraft: vi.fn(),
-      getMessageBody: vi.fn().mockResolvedValue('This is the full email body text'),
+      getMessageBody: vi
+        .fn()
+        .mockResolvedValue('This is the full email body text'),
     };
     const mockChannel = {
       editMessageTextAndButtons: vi.fn().mockResolvedValue(undefined),
@@ -115,7 +120,11 @@ describe('Agentic UX wiring integration', () => {
         senderName: 'User',
       },
       {
-        archiveTracker: { getUnarchived: vi.fn().mockReturnValue([]), markArchived: vi.fn(), recordAction: vi.fn() } as any,
+        archiveTracker: {
+          getUnarchived: vi.fn().mockReturnValue([]),
+          markArchived: vi.fn(),
+          recordAction: vi.fn(),
+        } as any,
         autoApproval: { cancel: vi.fn() } as any,
         statusBar: { removePendingItem: vi.fn() } as any,
         gmailOps: mockGmailOps,
@@ -123,7 +132,10 @@ describe('Agentic UX wiring integration', () => {
       },
     );
 
-    expect(mockGmailOps.getMessageBody).toHaveBeenCalledWith('personal', 'emailXYZ');
+    expect(mockGmailOps.getMessageBody).toHaveBeenCalledWith(
+      'personal',
+      'emailXYZ',
+    );
     expect(mockChannel.editMessageTextAndButtons).toHaveBeenCalled();
   });
 });

@@ -26,7 +26,9 @@ describe('GmailChannel Gmail Ops methods', () => {
                     { name: 'From', value: 'me@example.com' },
                   ],
                   mimeType: 'text/plain',
-                  body: { data: Buffer.from('Draft body text').toString('base64') },
+                  body: {
+                    data: Buffer.from('Draft body text').toString('base64'),
+                  },
                 },
               },
             },
@@ -38,7 +40,9 @@ describe('GmailChannel Gmail Ops methods', () => {
             data: {
               payload: {
                 mimeType: 'text/plain',
-                body: { data: Buffer.from('Full message body').toString('base64') },
+                body: {
+                  data: Buffer.from('Full message body').toString('base64'),
+                },
               },
             },
           }),
@@ -51,7 +55,11 @@ describe('GmailChannel Gmail Ops methods', () => {
   it('archiveThread calls threads.modify with removeLabelIds INBOX', async () => {
     const { GmailChannel } = await import('../channels/gmail.js');
     const channel = new GmailChannel(
-      { onMessage: vi.fn(), onChatMetadata: vi.fn(), registeredGroups: () => ({}) },
+      {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      },
       'personal',
     );
     const mockGmail = makeMockGmail();
@@ -68,7 +76,11 @@ describe('GmailChannel Gmail Ops methods', () => {
   it('listRecentDrafts returns DraftInfo array', async () => {
     const { GmailChannel } = await import('../channels/gmail.js');
     const channel = new GmailChannel(
-      { onMessage: vi.fn(), onChatMetadata: vi.fn(), registeredGroups: () => ({}) },
+      {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      },
       'dev',
     );
     const mockGmail = makeMockGmail();
@@ -89,7 +101,11 @@ describe('GmailChannel Gmail Ops methods', () => {
   it('getMessageBody returns extracted text body', async () => {
     const { GmailChannel } = await import('../channels/gmail.js');
     const channel = new GmailChannel(
-      { onMessage: vi.fn(), onChatMetadata: vi.fn(), registeredGroups: () => ({}) },
+      {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      },
       'personal',
     );
     const mockGmail = makeMockGmail();
@@ -107,7 +123,11 @@ describe('GmailChannel Gmail Ops methods', () => {
   it('updateDraft calls drafts.update with re-encoded body', async () => {
     const { GmailChannel } = await import('../channels/gmail.js');
     const channel = new GmailChannel(
-      { onMessage: vi.fn(), onChatMetadata: vi.fn(), registeredGroups: () => ({}) },
+      {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+        registeredGroups: () => ({}),
+      },
       'personal',
     );
     const mockGmail = makeMockGmail();

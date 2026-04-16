@@ -358,7 +358,9 @@ export class GmailChannel implements Channel {
     logger.info({ threadId, account: this.accountAlias }, 'Thread archived');
   }
 
-  async listRecentDrafts(): Promise<import('../draft-enrichment.js').DraftInfo[]> {
+  async listRecentDrafts(): Promise<
+    import('../draft-enrichment.js').DraftInfo[]
+  > {
     if (!this.gmail) throw new Error('Gmail not connected');
     const res = await this.gmail.users.drafts.list({
       userId: 'me',
@@ -379,7 +381,8 @@ export class GmailChannel implements Channel {
 
         const headers = msg.payload?.headers || [];
         const getHeader = (name: string) =>
-          headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+          headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+            ?.value || '';
 
         drafts.push({
           draftId: stub.id,
@@ -387,7 +390,9 @@ export class GmailChannel implements Channel {
           account: this.accountAlias,
           subject: getHeader('Subject'),
           body: this.extractTextBody(msg.payload),
-          createdAt: new Date(parseInt(msg.internalDate || '0', 10)).toISOString(),
+          createdAt: new Date(
+            parseInt(msg.internalDate || '0', 10),
+          ).toISOString(),
         });
       } catch (err) {
         logger.warn({ draftId: stub.id, err }, 'Failed to fetch draft details');
@@ -406,13 +411,16 @@ export class GmailChannel implements Channel {
     const msg = existing.data.message;
     const headers = msg?.payload?.headers || [];
     const getHeader = (name: string) =>
-      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value || '';
 
     const rawMessage = [
       `To: ${getHeader('To')}`,
       `From: ${getHeader('From')}`,
       `Subject: ${getHeader('Subject')}`,
-      getHeader('In-Reply-To') ? `In-Reply-To: ${getHeader('In-Reply-To')}` : '',
+      getHeader('In-Reply-To')
+        ? `In-Reply-To: ${getHeader('In-Reply-To')}`
+        : '',
       getHeader('References') ? `References: ${getHeader('References')}` : '',
       'Content-Type: text/plain; charset=utf-8',
       '',
@@ -434,7 +442,10 @@ export class GmailChannel implements Channel {
         message: { raw: encoded, threadId: msg?.threadId || undefined },
       },
     });
-    logger.info({ draftId, account: this.accountAlias }, 'Draft updated with enriched body');
+    logger.info(
+      { draftId, account: this.accountAlias },
+      'Draft updated with enriched body',
+    );
   }
 
   async getMessageBody(messageId: string): Promise<string | null> {
@@ -453,9 +464,7 @@ export class GmailChannel implements Channel {
     }
   }
 
-  extractTextBody(
-    payload: gmail_v1.Schema$MessagePart | undefined,
-  ): string {
+  extractTextBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
     if (!payload) return '';
 
     // Direct text/plain body

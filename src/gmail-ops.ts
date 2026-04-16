@@ -23,7 +23,8 @@ export class GmailOpsRouter implements GmailOps {
 
   private getChannel(account: string): GmailOpsProvider {
     const ch = this.channels.get(account);
-    if (!ch) throw new Error(`No Gmail channel registered for account: ${account}`);
+    if (!ch)
+      throw new Error(`No Gmail channel registered for account: ${account}`);
     return ch;
   }
 
@@ -35,11 +36,18 @@ export class GmailOpsRouter implements GmailOps {
     return this.getChannel(account).listRecentDrafts();
   }
 
-  async updateDraft(account: string, draftId: string, newBody: string): Promise<void> {
+  async updateDraft(
+    account: string,
+    draftId: string,
+    newBody: string,
+  ): Promise<void> {
     return this.getChannel(account).updateDraft(draftId, newBody);
   }
 
-  async getMessageBody(account: string, messageId: string): Promise<string | null> {
+  async getMessageBody(
+    account: string,
+    messageId: string,
+  ): Promise<string | null> {
     return this.getChannel(account).getMessageBody(messageId);
   }
 }

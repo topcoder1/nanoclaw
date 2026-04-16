@@ -64,8 +64,14 @@ describe('handleCallback', () => {
   it('confirm_archive calls gmailOps.archiveThread and marks archived', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('confirm_archive:email1'), deps);
-    expect(deps.gmailOps!.archiveThread).toHaveBeenCalledWith('personal', 'thread1');
-    expect(deps.archiveTracker.markArchived).toHaveBeenCalledWith('email1', 'replied');
+    expect(deps.gmailOps!.archiveThread).toHaveBeenCalledWith(
+      'personal',
+      'thread1',
+    );
+    expect(deps.archiveTracker.markArchived).toHaveBeenCalledWith(
+      'email1',
+      'replied',
+    );
   });
 
   it('cancel_archive reverts buttons (no archive call)', async () => {
@@ -77,7 +83,10 @@ describe('handleCallback', () => {
   it('expand fetches body and edits message with preview', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('expand:msg1:personal'), deps);
-    expect(deps.gmailOps!.getMessageBody).toHaveBeenCalledWith('personal', 'msg1');
+    expect(deps.gmailOps!.getMessageBody).toHaveBeenCalledWith(
+      'personal',
+      'msg1',
+    );
     const channel = (deps.findChannel as any).mock.results[0]?.value;
     expect(channel.editMessageTextAndButtons).toHaveBeenCalled();
   });
@@ -104,7 +113,11 @@ describe('handleCallback', () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('keep:draft1'), deps);
     const channel = (deps.findChannel as any).mock.results[0]?.value;
-    expect(channel.editMessageButtons).toHaveBeenCalledWith('telegram:123', 100, []);
+    expect(channel.editMessageButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      [],
+    );
   });
 
   it('stop cancels auto-approval', async () => {

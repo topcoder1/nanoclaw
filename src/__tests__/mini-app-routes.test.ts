@@ -43,7 +43,10 @@ describe('Mini App extended routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('html');
     expect(res.text).toContain('Full email body for test');
-    expect(mockGmailOps.getMessageBody).toHaveBeenCalledWith('personal', 'msg123');
+    expect(mockGmailOps.getMessageBody).toHaveBeenCalledWith(
+      'personal',
+      'msg123',
+    );
   });
 
   it('GET /draft-diff/:draftId shows diff view', async () => {
@@ -51,7 +54,13 @@ describe('Mini App extended routes', () => {
     db.prepare(
       `INSERT INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at)
        VALUES (?, ?, ?, ?, ?)`,
-    ).run('d1', 'personal', 'Original draft text', new Date().toISOString(), new Date(Date.now() + 86400000).toISOString());
+    ).run(
+      'd1',
+      'personal',
+      'Original draft text',
+      new Date().toISOString(),
+      new Date(Date.now() + 86400000).toISOString(),
+    );
 
     const res = await request(app).get('/draft-diff/d1');
     expect(res.status).toBe(200);

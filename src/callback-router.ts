@@ -105,9 +105,22 @@ export async function handleCallback(
             query.messageId,
             preview,
             [
-              { label: '📧 Collapse', callbackData: `collapse:${entityId}`, style: 'secondary' },
-              { label: '🌐 Full Email', callbackData: `noop:${entityId}`, webAppUrl: `/email/${entityId}?account=${account}`, style: 'secondary' },
-              { label: '🗄 Archive', callbackData: `archive:${entityId}`, style: 'secondary' },
+              {
+                label: '📧 Collapse',
+                callbackData: `collapse:${entityId}`,
+                style: 'secondary',
+              },
+              {
+                label: '🌐 Full Email',
+                callbackData: `noop:${entityId}`,
+                webAppUrl: `/email/${entityId}?account=${account}`,
+                style: 'secondary',
+              },
+              {
+                label: '🗄 Archive',
+                callbackData: `archive:${entityId}`,
+                style: 'secondary',
+              },
             ],
           );
         }
@@ -123,9 +136,22 @@ export async function handleCallback(
             query.messageId,
             summary,
             [
-              { label: '📧 Expand', callbackData: `expand:${entityId}`, style: 'secondary' },
-              { label: '🌐 Full Email', callbackData: `noop:${entityId}`, webAppUrl: `/email/${entityId}`, style: 'secondary' },
-              { label: '🗄 Archive', callbackData: `archive:${entityId}`, style: 'secondary' },
+              {
+                label: '📧 Expand',
+                callbackData: `expand:${entityId}`,
+                style: 'secondary',
+              },
+              {
+                label: '🌐 Full Email',
+                callbackData: `noop:${entityId}`,
+                webAppUrl: `/email/${entityId}`,
+                style: 'secondary',
+              },
+              {
+                label: '🗄 Archive',
+                callbackData: `archive:${entityId}`,
+                style: 'secondary',
+              },
             ],
           );
         }
@@ -139,7 +165,9 @@ export async function handleCallback(
             await channel.editMessageTextAndButtons(
               query.chatJid,
               query.messageId,
-              reverted ? '↩ Reverted to original' : '⚠️ Could not revert — original not found',
+              reverted
+                ? '↩ Reverted to original'
+                : '⚠️ Could not revert — original not found',
               [],
             );
           }
@@ -179,12 +207,14 @@ export async function handleCallback(
   } catch (err) {
     logger.error({ err, action, entityId }, 'Callback handler failed');
     if (channel?.editMessageTextAndButtons) {
-      await channel.editMessageTextAndButtons(
-        query.chatJid,
-        query.messageId,
-        `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        [],
-      ).catch(() => {});
+      await channel
+        .editMessageTextAndButtons(
+          query.chatJid,
+          query.messageId,
+          `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          [],
+        )
+        .catch(() => {});
     }
   }
 }
