@@ -297,6 +297,20 @@ function createSchema(database: Database.Database): void {
       last_delegated_at INTEGER,
       PRIMARY KEY (group_name, action_class)
     );
+
+    CREATE TABLE IF NOT EXISTS browser_watchers (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      selector TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      interval_ms INTEGER NOT NULL DEFAULT 60000,
+      label TEXT NOT NULL DEFAULT '',
+      last_value TEXT,
+      checked_at INTEGER,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_watchers_group ON browser_watchers(group_id, enabled);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
