@@ -146,6 +146,9 @@ export async function runVercelQuery(
       input.groupFolder,
     );
 
+    // Build tools object for Vercel AI SDK v6. The SDK reads `inputSchema`
+    // (not `parameters`) and uses `asSchema()` which auto-detects zod v4
+    // schemas via the `_zod` property and calls `z.toJSONSchema()` internally.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tools: Record<string, any> = {};
     for (const [name, def] of Object.entries(ipcTools)) {
