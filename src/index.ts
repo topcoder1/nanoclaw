@@ -82,7 +82,7 @@ import {
   handlePotentialApprovalReply,
 } from './trust-approval-handler.js';
 import { parseTrustCommand, executeTrustCommand } from './trust-commands.js';
-import { initKnowledgeStore } from './memory/knowledge-store.js';
+import { initKnowledgeStore, ensureQdrantCollection } from './memory/knowledge-store.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1056,6 +1056,10 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   initKnowledgeStore();
+  // Initialize Qdrant collection if configured (non-blocking, non-fatal)
+  ensureQdrantCollection().catch((err) =>
+    logger.warn({ err }, 'Qdrant collection init failed'),
+  );
   initOutcomeStore();
   logger.info('Database initialized');
   loadState();
@@ -1395,7 +1399,10 @@ async function main(): Promise<void> {
         try {
           ensureBrowserSidecar();
         } catch (err) {
-          logger.error({ err: String(err) }, 'Failed to restart browser sidecar');
+          logger.error(
+            { err: String(err) },
+            'Failed to restart browser sidecar',
+          );
         }
       }).catch((err) => {
         logger.warn({ err: String(err) }, 'Sidecar health check failed');
