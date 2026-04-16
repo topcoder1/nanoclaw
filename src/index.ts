@@ -1353,9 +1353,8 @@ async function main(): Promise<void> {
           return null;
         }
 
-        const { parseEnrichmentResponse } = await import(
-          './draft-enrichment.js'
-        );
+        const { parseEnrichmentResponse } =
+          await import('./draft-enrichment.js');
 
         return new Promise<string | null>((resolve) => {
           const timer = setTimeout(() => {

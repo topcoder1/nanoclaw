@@ -637,7 +637,12 @@ export async function processTaskIpc(
       // Build structured email list for passing to the onResult callback
       // so downstream handlers can attach archive/action buttons per email.
       const triggerEmails = (data.emails ?? []).map(
-        (e: { thread_id?: string; account?: string; subject?: string; sender?: string }) => ({
+        (e: {
+          thread_id?: string;
+          account?: string;
+          subject?: string;
+          sender?: string;
+        }) => ({
           thread_id: e.thread_id ?? '',
           account: e.account ?? '',
           subject: e.subject ?? '',

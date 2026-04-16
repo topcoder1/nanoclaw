@@ -9,7 +9,8 @@ describe('parseEnrichmentResponse', () => {
   });
 
   it('should return enriched body from agent response', () => {
-    const body = 'Thank you for your email. I would be happy to discuss further.';
+    const body =
+      'Thank you for your email. I would be happy to discuss further.';
     expect(parseEnrichmentResponse(body)).toBe(body);
   });
 
@@ -113,9 +114,14 @@ function buildEvaluator(opts: EvaluatorOpts) {
     return new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), timeoutMs);
       const taskId = `draft-enrich-${draft.draftId}-${Date.now()}`;
-      enqueueTask(groupJid, taskId, async () => {
-        clearTimeout(timer);
-      }, 'proactive');
+      enqueueTask(
+        groupJid,
+        taskId,
+        async () => {
+          clearTimeout(timer);
+        },
+        'proactive',
+      );
     });
   };
 }
