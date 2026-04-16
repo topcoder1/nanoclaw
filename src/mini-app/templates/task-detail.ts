@@ -67,7 +67,7 @@ export function renderTaskDetail(data: TaskDetailData): string {
     .btn { background: #21262d; color: #c9d1d9; padding: 8px 16px; border-radius: 6px; border: none; font-size: 13px; cursor: pointer; }
   </style>
 </head>
-<body>
+<body data-updated-at="${escapeHtml(data.startedAt)}">
   <div class="header">
     <div class="status">${data.status.toUpperCase()}</div>
     <div class="title">${escapeHtml(data.title)}</div>
@@ -78,6 +78,37 @@ export function renderTaskDetail(data: TaskDetailData): string {
     <button class="btn">Pause</button>
     <button class="btn" style="color:#f85149;">Abort</button>
   </div>
+  <script>
+    const taskId = '${escapeHtml(data.taskId)}';
+    const evtSource = new EventSource('/api/task/' + taskId + '/stream');
+
+    evtSource.onmessage = function(event) {
+      const state = JSON.parse(event.data);
+      // Update status
+      const statusEl = document.querySelector('.status');
+      if (statusEl) statusEl.textContent = state.status.toUpperCase();
+
+      // Reload page on significant changes (simple approach)
+      // A production version would do granular DOM updates
+      if (state.updated_at !== document.body.dataset.updatedAt) {
+        document.body.dataset.updatedAt = state.updated_at;
+        location.reload();
+      }
+    };
+
+    evtSource.addEventListener('complete', function() {
+      evtSource.close();
+      const statusEl = document.querySelector('.status');
+      if (statusEl) {
+        statusEl.textContent = 'COMPLETE';
+        statusEl.style.color = '#3fb950';
+      }
+    });
+
+    evtSource.onerror = function() {
+      evtSource.close();
+    };
+  </script>
 </body>
 </html>`;
 }

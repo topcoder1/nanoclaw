@@ -35,6 +35,47 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     res.type('html').send(html);
   });
 
+  // SSE endpoint for live task updates
+  app.get('/api/task/:taskId/stream', (req, res) => {
+    const { taskId } = req.params;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    // Send current state immediately
+    const row = opts.db
+      .prepare('SELECT * FROM task_detail_state WHERE task_id = ?')
+      .get(taskId);
+    if (row) {
+      res.write(`data: ${JSON.stringify(row)}\n\n`);
+    }
+
+    // Poll for changes every 2 seconds
+    const intervalId = setInterval(() => {
+      const current = opts.db
+        .prepare('SELECT * FROM task_detail_state WHERE task_id = ?')
+        .get(taskId) as Record<string, string> | undefined;
+      if (current) {
+        res.write(`data: ${JSON.stringify(current)}\n\n`);
+        // Stop polling if task is complete
+        if (current.status === 'complete') {
+          res.write('event: complete\ndata: {}\n\n');
+          clearInterval(intervalId);
+          res.end();
+        }
+      }
+    }, 2000);
+
+    // Clean up on client disconnect
+    req.on('close', () => {
+      clearInterval(intervalId);
+    });
+  });
+
   app.get('/api/task/:taskId/state', (req, res) => {
     const { taskId } = req.params;
     const row = opts.db
