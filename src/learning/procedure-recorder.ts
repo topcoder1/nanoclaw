@@ -23,6 +23,7 @@ function traceKey(groupId: string, taskId: string): string {
 }
 
 const MAX_TRACE_AGE_MS = 60 * 60 * 1000; // 1 hour
+const MAX_TRACE_BUFFER_SIZE = 100;
 
 export function startTrace(groupId: string, taskId: string): void {
   traceBuffer.set(traceKey(groupId, taskId), []);
@@ -32,12 +33,35 @@ export function startTrace(groupId: string, taskId: string): void {
 export function pruneOrphanedTraces(): number {
   const cutoff = Date.now() - MAX_TRACE_AGE_MS;
   let pruned = 0;
+
   for (const [key, actions] of traceBuffer.entries()) {
-    if (actions.length === 0 || actions[0].timestamp < cutoff) {
+    if (actions.length === 0) {
+      traceBuffer.delete(key);
+      pruned++;
+      continue;
+    }
+    // Check the LAST action timestamp, not the first
+    const lastTimestamp = actions[actions.length - 1].timestamp;
+    if (lastTimestamp < cutoff) {
       traceBuffer.delete(key);
       pruned++;
     }
   }
+
+  // Enforce buffer size cap — evict oldest traces first
+  if (traceBuffer.size > MAX_TRACE_BUFFER_SIZE) {
+    const entries = [...traceBuffer.entries()].sort((a, b) => {
+      const aTime = a[1].length > 0 ? a[1][a[1].length - 1].timestamp : 0;
+      const bTime = b[1].length > 0 ? b[1][b[1].length - 1].timestamp : 0;
+      return aTime - bTime;
+    });
+    const excess = traceBuffer.size - MAX_TRACE_BUFFER_SIZE;
+    for (let i = 0; i < excess; i++) {
+      traceBuffer.delete(entries[i][0]);
+      pruned++;
+    }
+  }
+
   return pruned;
 }
 

@@ -12,7 +12,55 @@ vi.mock('../memory/procedure-store.js', () => ({
   findProcedure: (...args: unknown[]) => mockFindProcedure(...args),
 }));
 
-import { startTrace, addTrace, finalizeTrace } from './procedure-recorder.js';
+import { startTrace, addTrace, finalizeTrace, pruneOrphanedTraces } from './procedure-recorder.js';
+
+describe('pruneOrphanedTraces', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('prunes traces older than MAX_TRACE_AGE_MS based on last action', () => {
+    startTrace('g1', 'old-task');
+    addTrace('g1', 'old-task', {
+      type: 'navigate',
+      timestamp: Date.now() - 2 * 60 * 60 * 1000,
+      inputSummary: 'old',
+      result: 'success',
+    });
+    const pruned = pruneOrphanedTraces();
+    expect(pruned).toBe(1);
+  });
+
+  it('does not prune traces with recent actions', () => {
+    startTrace('g1', 'recent-task');
+    addTrace('g1', 'recent-task', {
+      type: 'navigate',
+      timestamp: Date.now() - 2 * 60 * 60 * 1000,
+      inputSummary: 'first',
+      result: 'success',
+    });
+    addTrace('g1', 'recent-task', {
+      type: 'click',
+      timestamp: Date.now(),
+      inputSummary: 'second',
+      result: 'success',
+    });
+    const pruned = pruneOrphanedTraces();
+    expect(pruned).toBe(0);
+  });
+
+  it('prunes empty trace buffers', () => {
+    startTrace('g1', 'empty-task');
+    const pruned = pruneOrphanedTraces();
+    expect(pruned).toBe(1);
+  });
+
+  it('caps trace buffer at MAX_BUFFER_SIZE', () => {
+    for (let i = 0; i < 150; i++) {
+      startTrace('g1', `task-${i}`);
+    }
+    const pruned = pruneOrphanedTraces();
+    expect(pruned).toBeGreaterThanOrEqual(50);
+  });
+});
 
 describe('startTrace', () => {
   beforeEach(() => vi.clearAllMocks());
