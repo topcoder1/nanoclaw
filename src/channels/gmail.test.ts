@@ -98,7 +98,9 @@ describe('GmailChannel.getDraftReplyContext', () => {
           threadId: 'thread-abc',
           payload: {
             mimeType: 'text/plain',
-            body: { data: Buffer.from('Agent draft body here').toString('base64url') },
+            body: {
+              data: Buffer.from('Agent draft body here').toString('base64url'),
+            },
             headers: [],
           },
         },

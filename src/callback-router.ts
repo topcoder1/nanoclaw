@@ -271,7 +271,10 @@ export async function handleCallback(
         // Retry a failed draft send. entityId = draftId. Account is resolved
         // from draft_originals (stored when the draft was enriched).
         if (!deps.db || !deps.gmailOps) {
-          logger.warn({ draftId: entityId }, 'retry_send: db or gmailOps missing');
+          logger.warn(
+            { draftId: entityId },
+            'retry_send: db or gmailOps missing',
+          );
           break;
         }
         const row = deps.db

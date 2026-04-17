@@ -35,7 +35,10 @@ describe('waitForSidecarReady', () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ Browser: 'Chromium/1' }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ Browser: 'Chromium/1' }),
+      });
     const ok = await waitForSidecarReady('http://localhost:9222', {
       fetchImpl: fetchMock as unknown as typeof fetch,
       timeoutMs: 5000,

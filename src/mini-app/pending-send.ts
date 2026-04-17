@@ -26,10 +26,7 @@ export class PendingSendRegistry {
       // Remove from pending BEFORE firing so cancel() post-fire returns false.
       this.pending.delete(draftId);
       onFire(draftId, account).catch((err) => {
-        logger.error(
-          { draftId, account, err },
-          'Pending send onFire rejected',
-        );
+        logger.error({ draftId, account, err }, 'Pending send onFire rejected');
       });
     }, delayMs);
 

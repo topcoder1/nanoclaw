@@ -18,7 +18,13 @@ vi.mock('@ai-sdk/anthropic', () => ({
 }));
 
 import { generateText, embed } from 'ai';
-import { resolveUtilityModel, classify, generateShort, embedText, isEmbeddingAvailable } from './utility.js';
+import {
+  resolveUtilityModel,
+  classify,
+  generateShort,
+  embedText,
+  isEmbeddingAvailable,
+} from './utility.js';
 
 describe('resolveUtilityModel', () => {
   beforeEach(() => vi.clearAllMocks());

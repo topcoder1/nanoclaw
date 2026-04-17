@@ -378,10 +378,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     const { draftId } = req.params;
     const cancelled = registry.cancel(draftId);
     if (cancelled) {
-      logger.info(
-        { draftId, component: 'mini-app' },
-        'Draft send cancelled',
-      );
+      logger.info({ draftId, component: 'mini-app' }, 'Draft send cancelled');
     }
     res.json({ ok: true, cancelled });
   });
@@ -389,9 +386,10 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   return app;
 }
 
-export function startMiniAppServer(
-  opts: MiniAppServerOpts,
-): { server: ReturnType<express.Application['listen']>; registry: PendingSendRegistry } {
+export function startMiniAppServer(opts: MiniAppServerOpts): {
+  server: ReturnType<express.Application['listen']>;
+  registry: PendingSendRegistry;
+} {
   const registry = new PendingSendRegistry();
   const app = createMiniAppServer({ ...opts, pendingSendRegistry: registry });
   const server = app.listen(opts.port, () => {
