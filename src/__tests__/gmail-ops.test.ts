@@ -52,4 +52,49 @@ describe('GmailOpsRouter', () => {
     await router.updateDraft('attaxion', 'draft789', 'new body');
     expect(channel.updateDraft).toHaveBeenCalledWith('draft789', 'new body');
   });
+
+  it('resolves full email address to alias via reverse map', async () => {
+    const router = new GmailOpsRouter();
+    const channel = makeMockChannel('personal');
+    (channel as any).emailAddress = 'topcoder1@gmail.com';
+    router.register('personal', channel as any);
+    await router.archiveThread('topcoder1@gmail.com', 'thread123');
+    expect(channel.archiveThread).toHaveBeenCalledWith('thread123');
+  });
+
+  it('prefers alias over email when both could match', async () => {
+    const router = new GmailOpsRouter();
+    const ch1 = makeMockChannel('personal');
+    (ch1 as any).emailAddress = 'topcoder1@gmail.com';
+    const ch2 = makeMockChannel('dev');
+    (ch2 as any).emailAddress = 'dev@whoisxmlapi.com';
+    router.register('personal', ch1 as any);
+    router.register('dev', ch2 as any);
+    await router.archiveThread('personal', 'thread123');
+    expect(ch1.archiveThread).toHaveBeenCalledWith('thread123');
+  });
+
+  it('still throws for completely unknown account', async () => {
+    const router = new GmailOpsRouter();
+    const channel = makeMockChannel('personal');
+    (channel as any).emailAddress = 'topcoder1@gmail.com';
+    router.register('personal', channel as any);
+    await expect(
+      router.archiveThread('nobody@example.com', 'thread1'),
+    ).rejects.toThrow('No Gmail channel registered for account: nobody@example.com');
+  });
+
+  it('handles channel without emailAddress gracefully', async () => {
+    const router = new GmailOpsRouter();
+    const channel = makeMockChannel('personal');
+    // No emailAddress property
+    router.register('personal', channel as any);
+    // Direct alias still works
+    await router.archiveThread('personal', 'thread123');
+    expect(channel.archiveThread).toHaveBeenCalledWith('thread123');
+    // But email lookup fails
+    await expect(
+      router.archiveThread('topcoder1@gmail.com', 'thread1'),
+    ).rejects.toThrow();
+  });
 });
