@@ -21,7 +21,9 @@ describe('remember tool', () => {
       body: 'Never auto-archive emails.',
       scopes: ['personal'],
     });
-    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    const files = fs
+      .readdirSync(candidateDir())
+      .filter((f) => f.endsWith('.md'));
     expect(files).toHaveLength(1);
     const raw = fs.readFileSync(path.join(candidateDir(), files[0]), 'utf8');
     expect(raw).toContain('confidence: 1');

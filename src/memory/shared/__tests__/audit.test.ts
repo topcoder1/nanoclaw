@@ -14,8 +14,18 @@ describe('audit log', () => {
   });
 
   it('appends entries and reads them back in order', () => {
-    logAudit({ action: 'create', slug: 'feedback_a', source: 'main', reason: 'x' });
-    logAudit({ action: 'merge', slug: 'feedback_a', source: 'tg', reason: 'reinforced' });
+    logAudit({
+      action: 'create',
+      slug: 'feedback_a',
+      source: 'main',
+      reason: 'x',
+    });
+    logAudit({
+      action: 'merge',
+      slug: 'feedback_a',
+      source: 'tg',
+      reason: 'reinforced',
+    });
     const lines = readAudit();
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatchObject({ action: 'create', slug: 'feedback_a' });

@@ -254,7 +254,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const failedDir = path.join(rememberDir, '.failed');
               fs.mkdirSync(failedDir, { recursive: true });
               fs.renameSync(filePath, path.join(failedDir, file));
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }
         }
       }

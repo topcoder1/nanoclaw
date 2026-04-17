@@ -141,10 +141,13 @@ describe('extractor', () => {
         groupName: 'whatsapp_main',
         userMessage:
           'A substantial message that easily clears the trivial-turn skip threshold.',
-        agentReply: 'A substantial reply that also clears the threshold easily here.',
+        agentReply:
+          'A substantial reply that also clears the threshold easily here.',
       });
       expect(mock).not.toHaveBeenCalled();
-      expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
+      expect(
+        fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+      ).toHaveLength(0);
     } finally {
       delete process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS;
     }
@@ -161,7 +164,8 @@ describe('extractor', () => {
         groupName: 'telegram_main',
         userMessage:
           'A substantial message that easily clears the trivial-turn skip threshold.',
-        agentReply: 'A substantial reply that also clears the threshold easily here.',
+        agentReply:
+          'A substantial reply that also clears the threshold easily here.',
       });
       const { generateText: g } = await import('ai');
       expect(g).toHaveBeenCalled();

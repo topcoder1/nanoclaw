@@ -17,9 +17,13 @@ export interface RememberInput {
   scopes?: string[];
 }
 
-export async function rememberTool(input: RememberInput): Promise<{ slug: string }> {
+export async function rememberTool(
+  input: RememberInput,
+): Promise<{ slug: string }> {
   if (!VALID_TYPES.includes(input.type)) {
-    throw new Error(`Invalid type: ${input.type}. Must be one of ${VALID_TYPES.join(', ')}`);
+    throw new Error(
+      `Invalid type: ${input.type}. Must be one of ${VALID_TYPES.join(', ')}`,
+    );
   }
   if (!input.name?.trim() || !input.body?.trim()) {
     throw new Error('name and body are required');
@@ -51,9 +55,11 @@ export async function rememberTool(input: RememberInput): Promise<{ slug: string
 }
 
 function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact'
+  );
 }

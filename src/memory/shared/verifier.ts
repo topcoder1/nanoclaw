@@ -192,7 +192,10 @@ Reject if: transient state (current task progress), agent confusion, hallucinati
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/```\s*$/, ''),
     ) as Verdict & { verdict: 'pass' | 'fail' };
-    return { pass: String(parsed.verdict).toLowerCase() === 'pass', reason: parsed.reason };
+    return {
+      pass: String(parsed.verdict).toLowerCase() === 'pass',
+      reason: parsed.reason,
+    };
   } catch {
     return { pass: false, reason: 'unparseable verifier output' };
   }

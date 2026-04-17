@@ -47,7 +47,12 @@ export async function extractCandidates(input: ExtractInput): Promise<void> {
   if (process.env.NANOCLAW_MEMORY_EXTRACT === '0') return;
   const allowlist = (process.env.NANOCLAW_MEMORY_EXTRACT_GROUPS ?? '').trim();
   if (allowlist) {
-    const allowed = new Set(allowlist.split(',').map((s) => s.trim()).filter(Boolean));
+    const allowed = new Set(
+      allowlist
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
     if (!allowed.has(input.groupName)) return;
   }
   if (isTrivialTurn(input.userMessage, input.agentReply)) return;

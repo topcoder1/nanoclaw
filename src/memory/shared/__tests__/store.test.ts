@@ -101,11 +101,11 @@ describe('shared memory store', () => {
   });
 
   it('skips corrupt fact files without crashing listFacts', () => {
-    const bogusPath = path.join(
-      process.env.NANOCLAW_MEMORY_DIR!,
-      'bogus.md',
+    const bogusPath = path.join(process.env.NANOCLAW_MEMORY_DIR!, 'bogus.md');
+    fs.writeFileSync(
+      bogusPath,
+      '---\nthis is: not: valid: yaml: {[\n---\n\nbody',
     );
-    fs.writeFileSync(bogusPath, '---\nthis is: not: valid: yaml: {[\n---\n\nbody');
     // Should not throw; readFact returns null; listFacts excludes it.
     expect(() => listFacts()).not.toThrow();
     expect(listFacts()).toEqual([]);

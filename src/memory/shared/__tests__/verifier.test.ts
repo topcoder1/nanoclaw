@@ -66,8 +66,9 @@ describe('verifier sweep', () => {
     await runVerifierSweep();
 
     expect(fs.existsSync(factPath('feedback_prefers_terse'))).toBe(true);
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 
   it('merges into existing fact, incrementing count and source', async () => {
@@ -138,9 +139,11 @@ describe('verifier sweep', () => {
 
     await runVerifierSweep();
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
-    expect(fs.readdirSync(rejectedDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(1);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
+    expect(
+      fs.readdirSync(rejectedDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(1);
   });
 });
