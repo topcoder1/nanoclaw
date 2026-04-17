@@ -254,6 +254,7 @@ export interface EmailReceivedEvent extends NanoClawEvent {
       account: string;
       subject: string;
       sender: string;
+      snippet?: string;
     }>;
     connection: string;
   };

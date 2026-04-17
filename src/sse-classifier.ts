@@ -16,6 +16,7 @@ export interface SSEEmail {
   account: string;
   subject?: string;
   sender?: string;
+  snippet?: string;
   superpilot_label?: string;
 }
 
@@ -113,7 +114,7 @@ export function classifyFromSSE(
       // belt-and-suspenders guard so triage failures never crash the classifier.
       void triageEmail({
         trackedItemId: itemId,
-        emailBody: email.subject || '',
+        emailBody: email.snippet || email.subject || '',
         sender,
         subject,
         superpilotLabel: email.superpilot_label ?? null,

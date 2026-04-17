@@ -212,6 +212,7 @@ export function writeIpcTrigger(
     account: string;
     subject?: string;
     sender?: string;
+    snippet?: string;
   }>,
   label: string,
 ): void {
@@ -225,6 +226,7 @@ export function writeIpcTrigger(
       account: e.account || 'unknown',
       subject: e.subject || '',
       sender: e.sender || '',
+      snippet: e.snippet || '',
     })),
     triggered_at: new Date().toISOString(),
     source: 'sse',
@@ -284,11 +286,13 @@ function handleTriagedEmails(data: string, label: string): void {
             account: string;
             subject?: string;
             sender?: string;
+            snippet?: string;
           }) => ({
             thread_id: e.thread_id,
             account: e.account || 'unknown',
             subject: e.subject || '',
             sender: e.sender || '',
+            snippet: e.snippet || '',
           }),
         ),
         label,
@@ -310,11 +314,13 @@ function handleTriagedEmails(data: string, label: string): void {
             account: string;
             subject?: string;
             sender?: string;
+            snippet?: string;
           }) => ({
             thread_id: e.thread_id,
             account: e.account || 'unknown',
             subject: e.subject || '',
             sender: e.sender || '',
+            snippet: e.snippet || '',
           }),
         ),
         connection: label,

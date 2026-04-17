@@ -346,11 +346,13 @@ If a user asks you about an email (e.g. "review Ryan's email", "what did Mike sa
 When triggered with new emails (prompt starts with `## Email Intelligence Trigger`):
 1. Check if each email is already in processed_items (avoid double-processing)
 2. Skip any thread whose thread_id starts with `test-approval-` (these are test fixtures from the dev harness, not real emails — NEVER reply, archive, or classify them; just mark processed and move on)
-3. Use superpilot MCP to get full thread context
+3. Read the `Preview:` line that accompanies each email in the trigger prompt — that is the first ~400 chars of the body, fetched alongside the classification. Use it as your primary context source. Only call `superpilot` MCP `get_thread_summary` when the Preview is missing or clearly insufficient for the decision.
 4. Classify each email into action tier (AUTO / PROPOSE / ESCALATE)
 5. Execute actions per autonomy rules below
 6. Mark each email as processed
 7. Report results via send_message — **pass `email_id` (thread_id) and `email_account` whenever the message is about a single specific email** so the user gets Expand / Full Email / Archive buttons. For batch summaries spanning multiple emails, omit these fields and describe the batch in prose.
+
+**Silent-drop rule for autonomous triggers.** The user did not ask for anything here — the trigger is automatic. If fetching a thread fails transiently (e.g., `not found`, `not yet indexed`, `thread not in account`), do NOT send a user-facing message. Just mark the email as processed with status `fetch_failed_transient` and move on. Rule 7 in the Evidence discipline section below (tool-failure reporting) applies to USER-REQUESTED work (briefings, thread summaries, "check my inbox"), NOT to autonomous triggers. A failed autonomous fetch is noise, not news; log it, skip it, don't surface it. Only escalate to the user if the same thread fails fetch three or more times across triggers — that indicates a persistent problem worth knowing about.
 
 ### Evidence discipline (anti-hallucination)
 

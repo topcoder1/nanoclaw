@@ -299,6 +299,7 @@ export async function processTaskIpc(
       account: string;
       subject: string;
       sender: string;
+      snippet?: string;
     }>;
     // For toggle_verbose
     enabled?: boolean;
@@ -632,11 +633,14 @@ export async function processTaskIpc(
         .map((e) => {
           const from = e.sender || 'unknown sender';
           const subj = e.subject || '(no subject)';
-          return `- [${e.account}] From: ${from}, Subject: ${subj} (thread: ${e.thread_id})`;
+          const preview = e.snippet
+            ? `\n  Preview: ${e.snippet.replace(/\s+/g, ' ').slice(0, 400)}`
+            : '';
+          return `- [${e.account}] From: ${from}, Subject: ${subj} (thread: ${e.thread_id})${preview}`;
         })
         .join('\n');
 
-      const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nFollow the Email Intelligence instructions in your CLAUDE.md. For each email:\n1. Check if already processed (search processed_items)\n2. Use superpilot MCP to get full context\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed\n\nWhen you send a message about a specific email via \`send_message\`, include \`email_id\` (thread_id from above) and \`email_account\` so the user gets Expand / Full Email / Archive buttons. For batch summaries that span multiple emails, omit these fields.`;
+      const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nEach email above includes a Preview of the first ~400 chars of the body. Use the Preview as your primary context — only call \`superpilot\` MCP \`get_thread_summary\` if the Preview is empty or insufficient for a decision. If the preview is missing AND fetch fails transiently (not found, not yet indexed), mark the email processed with status \`fetch_failed_transient\` and MOVE ON SILENTLY — do NOT send a user-facing message about the failure.\n\nFor each email:\n1. Check if already processed (search processed_items)\n2. Use the Preview (or fetch via superpilot MCP if Preview is empty/short)\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed\n\nWhen you send a message about a specific email via \`send_message\`, include \`email_id\` (thread_id from above) and \`email_account\` so the user gets Expand / Full Email / Archive buttons. For batch summaries that span multiple emails, omit these fields.`;
 
       // Run the agent on the Telegram JID (primary notification channel)
       // so that user replies on Telegram go to the same container session.
