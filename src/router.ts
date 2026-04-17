@@ -3,6 +3,7 @@ import { formatLocalTime } from './timezone.js';
 import { classifyMessage } from './message-classifier.js';
 import { formatWithMeta } from './message-formatter.js';
 import { detectQuestion } from './question-detector.js';
+import { detectActions } from './action-detector.js';
 import { truncatePreview } from './email-preview.js';
 import { MINI_APP_URL } from './config.js';
 
@@ -139,12 +140,19 @@ export function classifyAndFormat(rawText: string): ClassifiedMessage {
 
   const meta = classifyMessage(text);
 
-  // Detect questions and attach buttons
-  const question = detectQuestion(text);
-  if (question) {
-    meta.questionType = question.type;
-    meta.questionId = question.questionId;
-    meta.actions = [...meta.actions, ...question.actions];
+  // Detect actionable items (forward, RSVP, open URL) — takes priority over generic questions
+  const detectedActions = detectActions(text, meta);
+  if (detectedActions.length > 0) {
+    const actionButtons = detectedActions.flatMap((a) => a.actions);
+    meta.actions = [...meta.actions, ...actionButtons];
+  } else {
+    // Fall back to generic question detection only if no specific actions found
+    const question = detectQuestion(text);
+    if (question) {
+      meta.questionType = question.type;
+      meta.questionId = question.questionId;
+      meta.actions = [...meta.actions, ...question.actions];
+    }
   }
 
   let displayText = text;
