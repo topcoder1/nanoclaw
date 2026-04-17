@@ -260,7 +260,7 @@ export async function storeFactWithVector(
       ],
     });
   } catch (err) {
-    logger.warn({ err }, 'Qdrant store failed, FTS5 fallback retained');
+    logger.debug({ err }, 'Qdrant store failed, FTS5 fallback retained');
   }
 }
 
@@ -305,7 +305,7 @@ export async function queryFactsSemantic(
       created_at: (r.payload as Record<string, string>).created_at,
     }));
   } catch (err) {
-    logger.warn({ err }, 'Qdrant query failed, falling back to FTS5');
+    logger.debug({ err }, 'Qdrant query failed, falling back to FTS5');
     return queryFacts(query, opts);
   }
 }
