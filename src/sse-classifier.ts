@@ -80,6 +80,12 @@ export function classifyFromSSE(
       telegram_message_id: null,
       classification_reason: result.reason,
       metadata: { account: email.account, sender },
+      confidence: null,
+      model_tier: null,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
     });
 
     if (result.decision === 'digest') {
