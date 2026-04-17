@@ -6,7 +6,7 @@
 
 **Architecture:** Extend existing infrastructure rather than replace it. Reuses `src/email-sse.ts` (SSE consumer), `src/tracked-items.ts` (state machine + SQLite), `src/callback-router.ts` (Telegram button routing), `src/classification-adjustments.ts` + `src/sender-allowlist.ts` (learning), `src/digest-engine.ts` (archive digest posting), `src/llm/` (provider resolution), `src/memory/knowledge-store.ts` (Weaviate). New modules live under `src/triage/`.
 
-**Tech Stack:** TypeScript, Node.js, better-sqlite3, Vitest, Anthropic SDK (`@anthropic-ai/sdk`) with prompt caching, MLflow (via existing `mcp__mlflow-mcp__*`).
+**Tech Stack:** TypeScript, Node.js, better-sqlite3, Vitest. **LLM calls use the Vercel AI SDK** (`ai` + `@ai-sdk/anthropic`) — the pattern already used in `src/llm/utility.ts`. Prompt caching on Anthropic is exposed via `providerOptions.anthropic.cacheControl` on message parts (verify shape against installed `@ai-sdk/anthropic` version, currently `^3.0.69`). MLflow is not wired at runtime in v1 — JSONL traces under `.omc/logs/triage/` are sufficient.
 
 **Reference spec:** [2026-04-16-email-triage-pipeline-design.md](../specs/2026-04-16-email-triage-pipeline-design.md)
 
@@ -19,10 +19,10 @@
 Run: `npm test`
 Expected: All pass. If any are broken before this plan starts, open a separate bug fix — do not proceed until main is green.
 
-- [ ] **Step 0.2: Verify Anthropic SDK is already a dependency**
+- [ ] **Step 0.2: Verify Vercel AI SDK deps are present**
 
-Run: `grep '"@anthropic-ai/sdk"' package.json`
-Expected: Present. If missing: `npm install @anthropic-ai/sdk` then commit.
+Run: `grep -E '"ai"|"@ai-sdk/anthropic"' package.json`
+Expected: both present. The codebase uses the Vercel AI SDK (see `src/llm/utility.ts` for the canonical pattern). Do NOT install `@anthropic-ai/sdk`; use `@ai-sdk/anthropic` + `generateText`/`generateObject` from `ai`.
 
 - [ ] **Step 0.3: Confirm SuperPilot SSE is flowing**
 
@@ -1055,20 +1055,25 @@ git commit -m "feat(triage): add cacheable layered prompt builder"
 - Create: `src/triage/classifier.ts`
 - Test: `src/__tests__/triage-classifier.test.ts`
 
-This is the heart of v1. Calls Anthropic with `cache_control`, parses JSON, validates, retries once on malformed, escalates to next tier on still-invalid or when `confidence ∈ (escalateLow, escalateHigh)`.
+This is the heart of v1. Uses **Vercel AI SDK** (`generateText` from `ai` + `createAnthropic` from `@ai-sdk/anthropic`) — matching the pattern in `src/llm/utility.ts`. Parses JSON, validates, retries once on malformed, escalates to next tier on still-invalid or when `confidence ∈ (escalateLow, escalateHigh)`.
+
+**Anthropic prompt caching via Vercel AI SDK:** Pass `providerOptions.anthropic.cacheControl = { type: 'ephemeral' }` on system/message parts. The Vercel SDK forwards this to the Anthropic API as `cache_control`. Verify exact shape against installed `@ai-sdk/anthropic` version (currently `^3.0.69`) — consult `node_modules/@ai-sdk/anthropic/README.md` or the package's types if uncertain. If the installed version expects a different shape for per-part cache control, adapt the call-site; the rest of the classifier logic is SDK-agnostic.
+
+**What to mock in tests:** mock `generateText` from `ai` (not the Anthropic SDK). Test doubles return `{ text, usage: { inputTokens, outputTokens, cachedInputTokens } }` — the Vercel SDK's shape.
 
 - [ ] **Step 7.1: Write failing tests**
 
 Create `src/__tests__/triage-classifier.test.ts`:
 
 ```typescript
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockCreate = vi.fn();
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = { create: mockCreate };
-  },
+const mockGenerateText = vi.fn();
+vi.mock('ai', () => ({
+  generateText: mockGenerateText,
+}));
+vi.mock('@ai-sdk/anthropic', () => ({
+  createAnthropic: () => (modelId: string) => ({ modelId }),
 }));
 vi.mock('../triage/examples.js', () => ({
   getRecentExamples: vi.fn(() => []),
@@ -1085,19 +1090,23 @@ vi.mock('../logger.js', () => ({
 
 import { classifyWithLlm } from '../triage/classifier.js';
 
-function fakeAnthropicResponse(json: object) {
+function fakeResponse(json: object, cached = 80) {
   return {
-    content: [{ type: 'text', text: JSON.stringify(json) }],
-    usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80 },
+    text: JSON.stringify(json),
+    usage: {
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedInputTokens: cached,
+    },
   };
 }
 
 describe('classifyWithLlm', () => {
-  beforeEach(() => mockCreate.mockReset());
+  beforeEach(() => mockGenerateText.mockReset());
 
   it('returns decision on first try at tier1 when valid + high confidence', async () => {
-    mockCreate.mockResolvedValueOnce(
-      fakeAnthropicResponse({
+    mockGenerateText.mockResolvedValueOnce(
+      fakeResponse({
         queue: 'attention',
         confidence: 0.9,
         reasons: ['direct ask', 'VIP sender'],
@@ -1119,13 +1128,13 @@ describe('classifyWithLlm', () => {
 
     expect(out.decision.queue).toBe('attention');
     expect(out.tier).toBe(1);
-    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
   });
 
   it('escalates to tier2 when tier1 confidence is in the gap band', async () => {
-    mockCreate
+    mockGenerateText
       .mockResolvedValueOnce(
-        fakeAnthropicResponse({
+        fakeResponse({
           queue: 'archive_candidate',
           confidence: 0.5,
           reasons: ['mixed', 'unclear'],
@@ -1136,7 +1145,7 @@ describe('classifyWithLlm', () => {
         }),
       )
       .mockResolvedValueOnce(
-        fakeAnthropicResponse({
+        fakeResponse({
           queue: 'archive_candidate',
           confidence: 0.9,
           reasons: ['clearer on re-read', 'bulk footer'],
@@ -1160,17 +1169,17 @@ describe('classifyWithLlm', () => {
   });
 
   it('retries once on malformed JSON, then escalates if still malformed', async () => {
-    mockCreate
+    mockGenerateText
       .mockResolvedValueOnce({
-        content: [{ type: 'text', text: 'not-json {' }],
-        usage: { input_tokens: 10, output_tokens: 5 },
+        text: 'not-json {',
+        usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 0 },
       })
       .mockResolvedValueOnce({
-        content: [{ type: 'text', text: 'still bad' }],
-        usage: { input_tokens: 10, output_tokens: 5 },
+        text: 'still bad',
+        usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 0 },
       })
       .mockResolvedValueOnce(
-        fakeAnthropicResponse({
+        fakeResponse({
           queue: 'ignore',
           confidence: 0.8,
           reasons: ['empty', 'no content'],
@@ -1190,7 +1199,7 @@ describe('classifyWithLlm', () => {
     });
     expect(out.tier).toBe(2);
     expect(out.decision.queue).toBe('ignore');
-    expect(mockCreate).toHaveBeenCalledTimes(3);
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
   });
 });
 ```
@@ -1203,7 +1212,8 @@ Expected: FAIL.
 - [ ] **Step 7.3: Implement `src/triage/classifier.ts`**
 
 ```typescript
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { logger } from '../logger.js';
 import { buildPrompt, type BuildPromptInput } from './prompt-builder.js';
 import { TRIAGE_DEFAULTS } from './config.js';
@@ -1223,15 +1233,23 @@ export interface ClassifierResult {
   };
 }
 
-let clientSingleton: Anthropic | null = null;
-function client(): Anthropic {
-  if (!clientSingleton) clientSingleton = new Anthropic();
-  return clientSingleton;
+// Resolve Anthropic model by tier. Lazy + memoized.
+const anthropic = createAnthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+});
+
+function modelForTier(tier: 1 | 2 | 3) {
+  const modelId =
+    tier === 1
+      ? TRIAGE_DEFAULTS.models.tier1
+      : tier === 2
+        ? TRIAGE_DEFAULTS.models.tier2
+        : TRIAGE_DEFAULTS.models.tier3;
+  return anthropic(modelId);
 }
 
 function extractJson(text: string): unknown | null {
   const trimmed = text.trim();
-  // Accept raw JSON or fenced ```json blocks
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed);
   const candidate = fenced ? fenced[1].trim() : trimmed;
   try {
@@ -1246,39 +1264,47 @@ async function callTier(
   input: BuildPromptInput,
   stricterInstruction?: string,
 ): Promise<{ raw: string; usage: ClassifierResult['usage'] }> {
-  const model =
-    tier === 1
-      ? TRIAGE_DEFAULTS.models.tier1
-      : tier === 2
-        ? TRIAGE_DEFAULTS.models.tier2
-        : TRIAGE_DEFAULTS.models.tier3;
-
   const built = buildPrompt(input);
   const userContent = stricterInstruction
     ? `${stricterInstruction}\n\n${built.userMessage}`
     : built.userMessage;
 
-  const resp = await client().messages.create({
-    model,
-    max_tokens: 1024,
-    system: built.systemBlocks,
+  // Build messages with per-part cacheControl on the stable system blocks.
+  // Each cache breakpoint adds a cache-control marker; the Vercel SDK forwards
+  // these to Anthropic via providerOptions on each content part.
+  //
+  // Note: some versions of @ai-sdk/anthropic expose this as
+  //   providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } }
+  // on each content-part object in messages[].content. If your installed
+  // version differs, adapt here — the rest of this module is unchanged.
+  //
+  // For v1, concatenate built.systemBlocks into the `system` string and pass
+  // cacheControl once on the full system. This gives good-enough caching on
+  // the stable prefix without per-block breakpoints. If cache hit rate is
+  // low in shadow mode, revisit this and split into message parts.
+
+  const resp = await generateText({
+    model: modelForTier(tier),
+    system: built.system,
     messages: [{ role: 'user', content: userContent }],
+    maxOutputTokens: 1024,
+    providerOptions: {
+      anthropic: {
+        cacheControl: { type: 'ephemeral' },
+      },
+    },
   });
 
-  const textBlock = resp.content.find((b: { type: string }) => b.type === 'text') as
-    | { type: 'text'; text: string }
-    | undefined;
-  const raw = textBlock?.text ?? '';
+  const raw = resp.text ?? '';
 
+  // Vercel AI SDK v3 usage shape: { inputTokens, outputTokens, cachedInputTokens }
+  // Some versions use `totalTokens` + provider-specific breakdowns; handle both.
   const usage = {
-    inputTokens: resp.usage?.input_tokens ?? 0,
-    outputTokens: resp.usage?.output_tokens ?? 0,
+    inputTokens: resp.usage?.inputTokens ?? 0,
+    outputTokens: resp.usage?.outputTokens ?? 0,
     cacheReadTokens:
-      (resp.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ??
-      0,
-    cacheCreationTokens:
-      (resp.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ??
-      0,
+      (resp.usage as { cachedInputTokens?: number })?.cachedInputTokens ?? 0,
+    cacheCreationTokens: 0,   // not exposed uniformly; leave at 0
   };
 
   return { raw, usage };
@@ -3338,6 +3364,8 @@ git commit -m "feat(triage): nightly agreement-rate check with calibration alert
 - Test: (none — it's a one-off script; dry-run flag is sufficient validation)
 
 Uses Anthropic Batch API on the last 5,000 archived emails + 500 inbox emails (read from SuperPilot via existing client or Gmail MCPs) to seed `triage_skip_list`, `triage_examples`. Safe to re-run; idempotent.
+
+**SDK note:** The Vercel AI SDK does NOT expose Anthropic's Batch API. This script is a one-off bootstrap, not part of the runtime pipeline, so it may either (a) install `@anthropic-ai/sdk` specifically for this script (`npm install --save-dev @anthropic-ai/sdk`) and use `client.messages.batches.create(...)`, or (b) call the batch endpoint directly via `fetch` with `x-api-key` and `anthropic-beta: message-batches-2024-09-24` headers. Option (a) is simpler; the runtime classifier (Task 7) remains on Vercel AI SDK.
 
 - [ ] **Step 20.1: Read how superpilot exposes historical emails**
 
