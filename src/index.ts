@@ -139,6 +139,7 @@ import { scoreComplexity } from './llm/escalation.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { runAttentionReminderSweep } from './triage/reminder.js';
+import { runNightlyAgreementCheck } from './triage/agreement.js';
 import { TRIAGE_DEFAULTS } from './triage/config.js';
 import { eventBus } from './event-bus.js';
 import { shouldFireDigest, generateSmartDigest } from './digest-engine.js';
@@ -1972,6 +1973,18 @@ async function main(): Promise<void> {
       });
     },
     60 * 60 * 1000,
+  );
+
+  // Triage nightly agreement-rate calibration check: runs every 24h.
+  // Posts a calibration alert to attention when 7d agreement drops below floor.
+  setInterval(
+    () => {
+      if (!TRIAGE_DEFAULTS.enabled) return;
+      void runNightlyAgreementCheck({ agreementFloor: 0.8 }).catch((err) => {
+        logger.warn({ err: String(err) }, 'nightly agreement check failed');
+      });
+    },
+    24 * 60 * 60 * 1000,
   );
 
   // Initialize email trigger debouncer — buffers rapid-fire SSE triggers
