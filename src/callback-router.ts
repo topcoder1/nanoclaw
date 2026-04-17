@@ -28,6 +28,12 @@ import {
   cacheEmailMeta,
 } from './email-preview.js';
 import { logger } from './logger.js';
+import {
+  handleArchive as handleTriageArchive,
+  handleDismiss as handleTriageDismiss,
+  handleSnooze as handleTriageSnooze,
+  handleOverride as handleTriageOverride,
+} from './triage/queue-actions.js';
 
 export interface CallbackRouterDeps {
   archiveTracker: ArchiveTracker;
@@ -496,6 +502,57 @@ export async function handleCallback(
           }
         } else {
           logger.warn('RSVP requested but no calendarOps available');
+        }
+        break;
+      }
+
+      case 'triage': {
+        // Triage v1 queue-button callbacks.
+        // Formats:
+        //   triage:archive:<itemId>
+        //   triage:dismiss:<itemId>
+        //   triage:snooze:1h:<itemId>
+        //   triage:snooze:tomorrow:<itemId>
+        //   triage:override:attention:<itemId>
+        //   triage:override:archive:<itemId>
+        // After initial split: action='triage', entityId=<sub>, extra, extra2.
+        const sub = entityId;
+        if (sub === 'archive') {
+          handleTriageArchive(extra);
+        } else if (sub === 'dismiss') {
+          handleTriageDismiss(extra);
+        } else if (sub === 'snooze') {
+          const duration = extra;
+          const itemId = extra2;
+          if (duration === '1h' || duration === 'tomorrow') {
+            handleTriageSnooze(itemId, duration);
+          } else {
+            logger.warn(
+              { duration, data: query.data },
+              'Unknown triage snooze duration',
+            );
+          }
+        } else if (sub === 'override') {
+          const target = extra;
+          const itemId = extra2;
+          if (target === 'attention') {
+            handleTriageOverride(itemId, 'attention');
+          } else if (target === 'archive') {
+            handleTriageOverride(itemId, 'archive_candidate');
+          } else {
+            logger.warn(
+              { target, data: query.data },
+              'Unknown triage override target',
+            );
+          }
+        } else {
+          logger.warn(
+            { sub, data: query.data },
+            'Unknown triage sub-action',
+          );
+        }
+        if (channel?.editMessageButtons) {
+          await channel.editMessageButtons(query.chatJid, query.messageId, []);
         }
         break;
       }
