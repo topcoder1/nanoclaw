@@ -17,6 +17,7 @@ export interface CallbackRouterDeps {
   autoApproval: AutoApprovalTimer;
   statusBar: StatusBarManager;
   gmailOps?: GmailOps;
+  calendarOps?: { rsvp(account: string, eventId: string, response: string): Promise<void> };
   draftWatcher?: DraftEnrichmentWatcher;
   findChannel: (jid: string) => (Channel & Record<string, any>) | undefined;
 }
@@ -33,6 +34,7 @@ export async function handleCallback(
   const action = parts[0];
   const entityId = parts[1] || '';
   const extra = parts[2] || '';
+  const extra2 = parts[3] || '';
 
   logger.debug(
     { action, entityId, extra, chatJid: query.chatJid },
@@ -249,6 +251,134 @@ export async function handleCallback(
       case 'dismiss':
         deps.statusBar.removePendingItem(entityId);
         break;
+
+      case 'forward': {
+        // entityId = threadId, extra = recipient, extra2 = account
+        if (channel?.editMessageButtons) {
+          await channel.editMessageButtons(query.chatJid, query.messageId, [
+            {
+              label: `✅ Confirm Forward to ${extra.length > 20 ? extra.slice(0, 17) + '...' : extra}`,
+              callbackData: `confirm_forward:${entityId}:${extra}:${extra2}`,
+              style: 'primary',
+            },
+            {
+              label: '❌ Cancel',
+              callbackData: `cancel_forward:${entityId}:${extra}:${extra2}`,
+              style: 'secondary',
+            },
+          ]);
+        }
+        break;
+      }
+
+      case 'confirm_forward': {
+        // entityId = threadId, extra = recipient, extra2 = account
+        if (deps.gmailOps && 'forwardThread' in deps.gmailOps) {
+          await (deps.gmailOps as any).forwardThread(
+            extra2 || 'personal',
+            entityId,
+            extra,
+          );
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              `✅ Forwarded to ${extra}`,
+              [],
+            );
+          }
+        }
+        break;
+      }
+
+      case 'cancel_forward': {
+        if (channel?.editMessageButtons) {
+          await channel.editMessageButtons(query.chatJid, query.messageId, [
+            {
+              label: `📨 Forward to ${extra.length > 20 ? extra.slice(0, 17) + '...' : extra}`,
+              callbackData: `forward:${entityId}:${extra}:${extra2}`,
+              style: 'primary',
+            },
+          ]);
+        }
+        break;
+      }
+
+      case 'open_url': {
+        if (channel?.editMessageButtons) {
+          await channel.editMessageButtons(query.chatJid, query.messageId, [
+            {
+              label: '✅ Confirm Open',
+              callbackData: `confirm_open_url:${entityId}`,
+              style: 'primary',
+            },
+            {
+              label: '❌ Cancel',
+              callbackData: `cancel_open_url:${entityId}`,
+              style: 'secondary',
+            },
+          ]);
+        }
+        break;
+      }
+
+      case 'confirm_open_url': {
+        if (channel?.editMessageTextAndButtons) {
+          await channel.editMessageTextAndButtons(
+            query.chatJid,
+            query.messageId,
+            '✅ Opening link via browser...',
+            [],
+          );
+        }
+        logger.info({ actionId: entityId }, 'Open URL confirmed — delegating to browser sidecar');
+        break;
+      }
+
+      case 'cancel_open_url': {
+        if (channel?.editMessageButtons) {
+          await channel.editMessageButtons(query.chatJid, query.messageId, [
+            {
+              label: '🔗 Open Link',
+              callbackData: `open_url:${entityId}`,
+              style: 'primary',
+            },
+          ]);
+        }
+        break;
+      }
+
+      case 'rsvp': {
+        // entityId = eventId or actionId, extra = 'accepted' | 'declined'
+        const response = extra as 'accepted' | 'declined';
+        if (deps.calendarOps) {
+          try {
+            await deps.calendarOps.rsvp('personal', entityId, response);
+            const label = response === 'accepted' ? "✅ RSVP'd — attending" : '❌ Declined';
+            if (channel?.editMessageTextAndButtons) {
+              await channel.editMessageTextAndButtons(
+                query.chatJid,
+                query.messageId,
+                label,
+                [],
+              );
+            }
+          } catch (err) {
+            logger.warn({ err: String(err), entityId, response }, 'RSVP failed');
+            if (channel?.editMessageTextAndButtons) {
+              await channel.editMessageTextAndButtons(
+                query.chatJid,
+                query.messageId,
+                `⚠️ RSVP failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                [],
+              );
+            }
+          }
+        } else {
+          logger.warn('RSVP requested but no calendarOps available');
+        }
+        break;
+      }
 
       default:
         logger.warn({ action, data: query.data }, 'Unknown callback action');

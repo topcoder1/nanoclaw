@@ -173,4 +173,108 @@ describe('handleCallback', () => {
       'replied',
     );
   });
+
+  it('forward shows confirmation buttons', async () => {
+    const deps = makeDeps();
+    await handleCallback(
+      makeQuery('forward:thread1:alice@example.com:personal'),
+      deps,
+    );
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.arrayContaining([
+        expect.objectContaining({
+          callbackData: 'confirm_forward:thread1:alice@example.com:personal',
+        }),
+        expect.objectContaining({ callbackData: expect.stringContaining('cancel_forward') }),
+      ]),
+    );
+  });
+
+  it('confirm_forward calls gmailOps.forwardThread', async () => {
+    const deps = makeDeps();
+    (deps.gmailOps as any).forwardThread = vi.fn().mockResolvedValue(undefined);
+    await handleCallback(
+      makeQuery('confirm_forward:thread1:alice@example.com:personal'),
+      deps,
+    );
+    expect((deps.gmailOps as any).forwardThread).toHaveBeenCalledWith(
+      'personal',
+      'thread1',
+      'alice@example.com',
+    );
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining('Forwarded'),
+      [],
+    );
+  });
+
+  it('cancel_forward restores forward button', async () => {
+    const deps = makeDeps();
+    await handleCallback(
+      makeQuery('cancel_forward:thread1:alice@example.com:personal'),
+      deps,
+    );
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.arrayContaining([
+        expect.objectContaining({
+          callbackData: 'forward:thread1:alice@example.com:personal',
+        }),
+      ]),
+    );
+  });
+
+  it('open_url shows confirmation with URL', async () => {
+    const deps = makeDeps();
+    await handleCallback(makeQuery('open_url:act_123'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.arrayContaining([
+        expect.objectContaining({
+          callbackData: 'confirm_open_url:act_123',
+        }),
+        expect.objectContaining({
+          callbackData: 'cancel_open_url:act_123',
+        }),
+      ]),
+    );
+  });
+
+  it('rsvp:accepted calls calendarOps.rsvp', async () => {
+    const deps = makeDeps();
+    (deps as any).calendarOps = {
+      rsvp: vi.fn().mockResolvedValue(undefined),
+    };
+    await handleCallback(makeQuery('rsvp:evt1:accepted'), deps);
+    expect((deps as any).calendarOps.rsvp).toHaveBeenCalledWith(
+      expect.any(String),
+      'evt1',
+      'accepted',
+    );
+  });
+
+  it('rsvp:declined shows declined message', async () => {
+    const deps = makeDeps();
+    (deps as any).calendarOps = {
+      rsvp: vi.fn().mockResolvedValue(undefined),
+    };
+    await handleCallback(makeQuery('rsvp:evt1:declined'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining('Declined'),
+      [],
+    );
+  });
 });
