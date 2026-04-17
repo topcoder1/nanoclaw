@@ -655,7 +655,11 @@ async function callBotApi<T>(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const json = (await resp.json()) as { ok: boolean; result?: T; description?: string };
+  const json = (await resp.json()) as {
+    ok: boolean;
+    result?: T;
+    description?: string;
+  };
   if (!resp.ok || !json.ok) {
     throw new Error(
       `Telegram ${method} failed: ${resp.status} ${json.description || ''}`,

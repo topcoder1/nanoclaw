@@ -62,9 +62,9 @@ describe('appendExtractedFacts', () => {
       sender: 's@x.com',
       facts: [],
     });
-    expect(
-      fs.existsSync(path.join(root, 'email-intel', 'knowledge.md')),
-    ).toBe(false);
+    expect(fs.existsSync(path.join(root, 'email-intel', 'knowledge.md'))).toBe(
+      false,
+    );
     expect(mockStoreFactWithVector).not.toHaveBeenCalled();
   });
 
@@ -83,8 +83,8 @@ describe('appendExtractedFacts', () => {
       }),
     ).resolves.toBeUndefined();
     // markdown still written
-    expect(
-      fs.existsSync(path.join(root, 'email-intel', 'knowledge.md')),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(root, 'email-intel', 'knowledge.md'))).toBe(
+      true,
+    );
   });
 });

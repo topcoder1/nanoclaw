@@ -4,7 +4,7 @@ import { getDb } from '../db.js';
 import { shouldSkip } from './prefilter.js';
 import { classifyWithLlm } from './classifier.js';
 import { emitTrace } from './traces.js';
-import { enforceCostCap } from './cost-cap.js';
+import { reserveAndEnforceCostCap, estimateCostUsd } from './cost-cap.js';
 import { TRIAGE_DEFAULTS } from './config.js';
 import type { TriageDecision } from './schema.js';
 
@@ -46,8 +46,20 @@ export async function triageEmail(
     return { outcome: 'skipped', reason: pre.reason };
   }
 
+  // Reserve a pessimistic cost upfront (assume worst case: escalation through
+  // all three tiers). This prevents a burst of concurrent fire-and-forget
+  // classifier calls from collectively blowing the cap before any of them
+  // have written a trace line.
+  const pessimisticEstimate =
+    estimateCostUsd(1, 12_000, 500, 10_000) +
+    estimateCostUsd(2, 12_000, 500, 10_000) +
+    estimateCostUsd(3, 12_000, 500, 10_000);
+  let reservation: ReturnType<typeof reserveAndEnforceCostCap>;
   try {
-    enforceCostCap(TRIAGE_DEFAULTS.dailyCostCapUsd);
+    reservation = reserveAndEnforceCostCap(
+      TRIAGE_DEFAULTS.dailyCostCapUsd,
+      pessimisticEstimate,
+    );
   } catch (err) {
     logger.error({ err: String(err) }, 'Triage worker: cost cap hit');
     return { outcome: 'error', reason: String(err) };
@@ -65,6 +77,7 @@ export async function triageEmail(
       account: input.account,
     });
   } catch (err) {
+    reservation.settle(0);
     logger.error(
       { trackedItemId: input.trackedItemId, err: String(err) },
       'Triage worker: classifier failed',
@@ -85,6 +98,16 @@ export async function triageEmail(
   }
 
   const latencyMs = Date.now() - start;
+  // Trace is authoritative for persisted cost; release the reservation so
+  // later calls don't count this one twice.
+  reservation.settle(
+    estimateCostUsd(
+      result.tier,
+      result.usage.inputTokens,
+      result.usage.outputTokens,
+      result.usage.cacheReadTokens,
+    ),
+  );
   emitTrace({
     trackedItemId: input.trackedItemId,
     tier: result.tier,

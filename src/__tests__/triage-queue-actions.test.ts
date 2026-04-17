@@ -33,8 +33,8 @@ describe('queue-actions', () => {
       telegram_message_id: null,
       classification_reason: null,
       metadata: { sender: 'noreply@foo.com' },
-      confidence: null,
-      model_tier: null,
+      confidence: 0.9,
+      model_tier: 1,
       action_intent: null,
       facts_extracted: null,
       repo_candidates: null,
@@ -67,6 +67,45 @@ describe('queue-actions', () => {
 
   it('handleArchive is a no-op when item is missing', () => {
     expect(() => handleArchive('missing')).not.toThrow();
+  });
+
+  it('handleArchive does NOT promote skip-list for legacy (pre-triage) items', () => {
+    // model_tier: null means the item was never triage-classified. Archives
+    // from the legacy flow must not pollute the triage skip-list.
+    insertTrackedItem({
+      id: 'legacy1',
+      source: 'gmail',
+      source_id: 'gmail:legacy',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'legacy archive',
+      summary: null,
+      thread_id: 'tl',
+      detected_at: Date.now(),
+      pushed_at: Date.now(),
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: { sender: 'legacy@pre-triage.com' },
+      confidence: null,
+      model_tier: null,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
+    });
+
+    handleArchive('legacy1');
+
+    const skip = getDb()
+      .prepare(`SELECT hit_count FROM triage_skip_list WHERE pattern = ?`)
+      .get('legacy@pre-triage.com') as { hit_count: number } | undefined;
+    expect(skip).toBeUndefined();
   });
 
   it('handleDismiss marks item resolved', () => {

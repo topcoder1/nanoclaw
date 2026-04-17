@@ -546,10 +546,7 @@ export async function handleCallback(
             );
           }
         } else {
-          logger.warn(
-            { sub, data: query.data },
-            'Unknown triage sub-action',
-          );
+          logger.warn({ sub, data: query.data }, 'Unknown triage sub-action');
         }
         if (channel?.editMessageButtons) {
           await channel.editMessageButtons(query.chatJid, query.messageId, []);

@@ -6,9 +6,7 @@ export interface AgreementReport {
   bySlice: Record<string, { rate: number; total: number }>;
 }
 
-export function computeAgreement(opts: {
-  windowMs: number;
-}): AgreementReport {
+export function computeAgreement(opts: { windowMs: number }): AgreementReport {
   const cutoff = Date.now() - opts.windowMs;
   const rows = getDb()
     .prepare(

@@ -43,12 +43,9 @@ export async function appendExtractedFacts(
   fs.appendFileSync(file, lines.join('\n') + '\n');
 
   try {
-    const { storeFactWithVector } = await import(
-      '../memory/knowledge-store.js'
-    );
-    const factText = input.facts
-      .map((f) => `${f.key}: ${f.value}`)
-      .join('; ');
+    const { storeFactWithVector } =
+      await import('../memory/knowledge-store.js');
+    const factText = input.facts.map((f) => `${f.key}: ${f.value}`).join('; ');
     await storeFactWithVector({
       text: `[email:${input.subject}] ${factText} (from ${input.sender}, thread ${input.threadId}, account ${input.account})`,
       domain: 'email',

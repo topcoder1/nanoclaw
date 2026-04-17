@@ -66,9 +66,7 @@ async function upsertDashboard(
 ): Promise<void> {
   const db = getDb();
   const row = db
-    .prepare(
-      `SELECT pinned_msg_id FROM triage_dashboards WHERE topic = ?`,
-    )
+    .prepare(`SELECT pinned_msg_id FROM triage_dashboards WHERE topic = ?`)
     .get(topic) as { pinned_msg_id: number | null } | undefined;
 
   if (!row || row.pinned_msg_id === null) {

@@ -127,7 +127,12 @@ describe('classifyFromSSE', () => {
   it('skips triage worker when TRIAGE_V1_ENABLED is falsy', async () => {
     delete process.env.TRIAGE_V1_ENABLED;
     const emails: SSEEmail[] = [
-      { thread_id: 't1-flag-off', account: 'a@b.com', subject: 's', sender: 'x@y.com' },
+      {
+        thread_id: 't1-flag-off',
+        account: 'a@b.com',
+        subject: 's',
+        sender: 'x@y.com',
+      },
     ];
     const res = classifyFromSSE(emails);
     expect(res).toHaveLength(1);

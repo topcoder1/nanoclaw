@@ -88,6 +88,21 @@ export function validateTriageDecision(raw: unknown): ValidationResult {
   if (!Array.isArray(d.facts_extracted)) {
     return { ok: false, error: 'facts_extracted must be an array' };
   }
+  for (let i = 0; i < d.facts_extracted.length; i++) {
+    const f = d.facts_extracted[i] as Record<string, unknown> | null;
+    if (
+      !f ||
+      typeof f !== 'object' ||
+      typeof f.key !== 'string' ||
+      typeof f.value !== 'string' ||
+      typeof f.source_span !== 'string'
+    ) {
+      return {
+        ok: false,
+        error: `facts_extracted[${i}] must have string key/value/source_span`,
+      };
+    }
+  }
   if (!Array.isArray(d.repo_candidates)) {
     return { ok: false, error: 'repo_candidates must be an array' };
   }

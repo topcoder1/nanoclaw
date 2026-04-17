@@ -9,12 +9,13 @@ interface ItemRow {
   classification: string | null;
   title: string;
   metadata: string | null;
+  model_tier: number | null;
 }
 
 function getItem(id: string): ItemRow | undefined {
   return getDb()
     .prepare(
-      `SELECT id, classification, title, metadata FROM tracked_items WHERE id = ?`,
+      `SELECT id, classification, title, metadata, model_tier FROM tracked_items WHERE id = ?`,
     )
     .get(id) as ItemRow | undefined;
 }
@@ -38,8 +39,10 @@ export function handleArchive(itemId: string): void {
     )
     .run(Date.now(), itemId);
 
+  // Only promote to skip-list if this item was triage-classified. Legacy
+  // archive actions on pre-triage items must not pollute the skip-list.
   const sender = parseSender(item.metadata);
-  if (sender) {
+  if (sender && item.model_tier !== null) {
     const { promoted } = recordSkip(
       sender,
       TRIAGE_DEFAULTS.skiplistPromotionHits,
@@ -92,10 +95,7 @@ export function handleSnooze(itemId: string, duration: SnoozeDuration): void {
 
 export type OverrideQueue = 'attention' | 'archive_candidate';
 
-export function handleOverride(
-  itemId: string,
-  userQueue: OverrideQueue,
-): void {
+export function handleOverride(itemId: string, userQueue: OverrideQueue): void {
   const item = getItem(itemId);
   if (!item || !item.classification) return;
 
