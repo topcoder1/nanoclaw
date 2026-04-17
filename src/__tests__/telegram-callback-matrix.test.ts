@@ -148,9 +148,7 @@ describe('Telegram callback matrix — happy paths', () => {
   });
 
   it('forward_person with unambiguous host match → injects resolved email', async () => {
-    const { resolveSingleContactEmail } = await import(
-      '../contacts-lookup.js'
-    );
+    const { resolveSingleContactEmail } = await import('../contacts-lookup.js');
     (resolveSingleContactEmail as any).mockReturnValueOnce(
       'philip.ye@whoisxmlapi.com',
     );

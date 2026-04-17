@@ -64,9 +64,8 @@ describe('contacts-lookup', () => {
         ]),
       ),
     }));
-    const { lookupContactEmails, resolveSingleContactEmail } = await import(
-      '../contacts-lookup.js'
-    );
+    const { lookupContactEmails, resolveSingleContactEmail } =
+      await import('../contacts-lookup.js');
     const matches = lookupContactEmails('Philip Ye');
     expect(matches).toHaveLength(3);
     expect(matches.map((m) => m.email).sort()).toEqual([
@@ -97,12 +96,8 @@ describe('contacts-lookup', () => {
         ]),
       ),
     }));
-    const { resolveSingleContactEmail } = await import(
-      '../contacts-lookup.js'
-    );
-    expect(resolveSingleContactEmail('Alice Smith')).toBe(
-      'alice@example.com',
-    );
+    const { resolveSingleContactEmail } = await import('../contacts-lookup.js');
+    expect(resolveSingleContactEmail('Alice Smith')).toBe('alice@example.com');
   });
 
   it('filters out rows without an @ in the email', async () => {
