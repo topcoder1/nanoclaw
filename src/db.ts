@@ -405,6 +405,28 @@ function createSchema(database: Database.Database): void {
     )
   `);
 
+  // Triage v1: positive/negative example store for prompt injection
+  database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS triage_examples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        tracked_item_id TEXT NOT NULL,
+        email_summary TEXT NOT NULL,
+        agent_queue TEXT NOT NULL,
+        user_queue TEXT NOT NULL,
+        reasons_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`,
+    )
+    .run();
+  database
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS idx_triage_examples_kind_created
+       ON triage_examples(kind, created_at DESC)`,
+    )
+    .run();
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (
       key TEXT PRIMARY KEY,
