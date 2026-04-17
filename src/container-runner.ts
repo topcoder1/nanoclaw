@@ -1131,6 +1131,15 @@ async function spawnContainer(
             .join('\n'),
           ``,
         );
+        // Even on exit 0, surface MCP probe results and any MCP errors so
+        // "Gmail tools offline" complaints have forensic evidence. Filter
+        // to the relevant lines to keep the log small.
+        const diagLines = stderr
+          .split('\n')
+          .filter((l) => /\[mcp-probe\]|MCP server|mcp server|gmail/i.test(l));
+        if (diagLines.length > 0) {
+          logLines.push(`=== MCP Diagnostics (from stderr) ===`, diagLines.join('\n'), ``);
+        }
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));

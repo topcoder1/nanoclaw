@@ -37,7 +37,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code @playwright/mcp
+RUN npm install -g agent-browser @anthropic-ai/claude-code @playwright/mcp @gongrzhe/server-gmail-autoauth-mcp @notionhq/notion-mcp-server
 
 # Create app directory
 WORKDIR /app
