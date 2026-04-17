@@ -46,6 +46,11 @@ export class GmailChannel implements Channel {
   private threadMeta = new Map<string, ThreadMeta>();
   private consecutiveErrors = 0;
   private userEmail = '';
+
+  get emailAddress(): string {
+    return this.userEmail;
+  }
+
   private accountAlias: string;
   private credDir: string;
 
@@ -175,6 +180,66 @@ export class GmailChannel implements Channel {
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Gmail reply');
     }
+  }
+
+  async forwardThread(threadId: string, recipient: string): Promise<void> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+
+    // Get the latest message in the thread
+    const thread = await this.gmail.users.threads.get({
+      userId: 'me',
+      id: threadId,
+      format: 'full',
+    });
+
+    const messages = thread.data.messages;
+    if (!messages || messages.length === 0) {
+      throw new Error(`No messages found in thread ${threadId}`);
+    }
+
+    const lastMsg = messages[messages.length - 1];
+    const headers = lastMsg.payload?.headers || [];
+    const subject =
+      headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+    const from =
+      headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+    const date =
+      headers.find((h) => h.name?.toLowerCase() === 'date')?.value || '';
+
+    const body = this.extractTextBody(lastMsg.payload);
+    const fwdSubject = subject.startsWith('Fwd:')
+      ? subject
+      : `Fwd: ${subject}`;
+
+    const rawEmail = [
+      `To: ${recipient}`,
+      `From: ${this.userEmail}`,
+      `Subject: ${fwdSubject}`,
+      `Content-Type: text/plain; charset=utf-8`,
+      '',
+      `---------- Forwarded message ---------`,
+      `From: ${from}`,
+      `Date: ${date}`,
+      `Subject: ${subject}`,
+      '',
+      body || '(no body)',
+    ].join('\r\n');
+
+    const encoded = Buffer.from(rawEmail)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    await this.gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: encoded },
+    });
+
+    logger.info(
+      { threadId, recipient, subject: fwdSubject },
+      'Email forwarded',
+    );
   }
 
   isConnected(): boolean {
