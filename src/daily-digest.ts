@@ -137,9 +137,9 @@ export function generateDigest(mainGroupJid: string, now?: number): string {
 /**
  * Compute archive-candidate counts for the triage archive dashboard.
  *
- * Source: `tracked_items` rows with `classification = 'digest'` AND
- * `state = 'queued'` — the legacy archive-candidate marker used before a
- * dedicated queue column exists. Counts are grouped by `action_intent`
+ * Prefers the explicit `queue = 'archive_candidate'` marker; falls back to
+ * the legacy heuristic (`classification = 'digest'` AND `state = 'queued'`)
+ * for rows predating the migration. Counts are grouped by `action_intent`
  * (falling back to `'uncategorized'` when null/empty).
  *
  * Exported for tests.
@@ -151,7 +151,9 @@ export function computeArchiveDashboardCounts(): {
   const rows = getDb()
     .prepare(
       `SELECT action_intent FROM tracked_items
-       WHERE classification = 'digest' AND state = 'queued'`,
+       WHERE state = 'queued'
+         AND (queue = 'archive_candidate'
+              OR (queue IS NULL AND classification = 'digest'))`,
     )
     .all() as Array<{ action_intent: string | null }>;
   const counts: Record<string, number> = {};

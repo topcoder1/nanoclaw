@@ -63,6 +63,7 @@ async function upsertDashboard(
   topic: string,
   chatId: string,
   text: string,
+  replyMarkup?: unknown,
 ): Promise<void> {
   const db = getDb();
   const row = db
@@ -71,7 +72,11 @@ async function upsertDashboard(
 
   if (!row || row.pinned_msg_id === null) {
     try {
-      const sent = await sendTelegramMessage(chatId, text);
+      const sent = await sendTelegramMessage(
+        chatId,
+        text,
+        replyMarkup ? { reply_markup: replyMarkup } : undefined,
+      );
       await pinTelegramMessage(chatId, sent.message_id);
       db.prepare(
         `INSERT INTO triage_dashboards (topic, telegram_chat_id, pinned_msg_id, last_rendered_at)
@@ -91,7 +96,13 @@ async function upsertDashboard(
   }
 
   try {
-    await editTelegramMessage(chatId, row.pinned_msg_id, text);
+    if (replyMarkup) {
+      await editTelegramMessage(chatId, row.pinned_msg_id, text, {
+        reply_markup: replyMarkup,
+      });
+    } else {
+      await editTelegramMessage(chatId, row.pinned_msg_id, text);
+    }
     db.prepare(
       `UPDATE triage_dashboards SET last_rendered_at = ? WHERE topic = ?`,
     ).run(Date.now(), topic);
@@ -112,5 +123,26 @@ export async function renderAttentionDashboard(
 export async function renderArchiveDashboard(
   input: ArchiveDashboardInput,
 ): Promise<void> {
-  await upsertDashboard('archive', input.chatId, fmtArchive(input));
+  // Inline "Archive all" button on the archive dashboard — one click to
+  // mass-resolve everything in the queue. Only attach when there's
+  // something to archive; otherwise the keyboard is a no-op.
+  const replyMarkup =
+    input.total > 0
+      ? {
+          inline_keyboard: [
+            [
+              {
+                text: `🗃 Archive all ${input.total}`,
+                callback_data: 'triage:archive_all',
+              },
+            ],
+          ],
+        }
+      : undefined;
+  await upsertDashboard(
+    'archive',
+    input.chatId,
+    fmtArchive(input),
+    replyMarkup,
+  );
 }

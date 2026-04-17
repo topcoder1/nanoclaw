@@ -398,6 +398,27 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  // Triage v1.1: dedicated queue column so dashboards don't heuristically
+  // infer from classification+action_intent. Backfills from existing rows:
+  //   classification='push'                   -> 'attention'
+  //   classification='digest' state='queued'  -> 'archive_candidate'
+  //   classification='ignore'                 -> 'ignore'
+  //   everything else                         -> NULL (untagged/legacy)
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN queue TEXT`);
+    database.exec(`
+      UPDATE tracked_items
+      SET queue = CASE
+        WHEN classification = 'push' THEN 'attention'
+        WHEN classification = 'digest' AND state = 'queued' THEN 'archive_candidate'
+        WHEN classification = 'ignore' THEN 'ignore'
+        ELSE NULL
+      END
+      WHERE queue IS NULL
+    `);
+  } catch {
+    /* column already exists */
+  }
 
   // Triage v1: skip-list for learned pre-filter patterns
   database.exec(`

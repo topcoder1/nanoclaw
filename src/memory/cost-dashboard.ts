@@ -73,7 +73,8 @@ export function formatCostReport(days: number = 7): string {
 export type AssistantCommand =
   | { type: 'cost_report'; days: number }
   | { type: 'teach'; description: string }
-  | { type: 'archive_dashboard' };
+  | { type: 'archive_dashboard' }
+  | { type: 'archive_all' };
 
 /**
  * Parse assistant commands from trigger-stripped message text.
@@ -96,6 +97,12 @@ export function parseAssistantCommand(text: string): AssistantCommand | null {
   const teachMatch = text.trim().match(/^teach[:\s]+(.+)$/i);
   if (teachMatch) {
     return { type: 'teach', description: teachMatch[1].trim() };
+  }
+
+  // Archive all: "archive all", "/archive all", "archive queue all"
+  // (check before the plain archive matcher so "all" isn't swallowed)
+  if (/^\/?archive(\s+queue)?\s+all$/.test(lower)) {
+    return { type: 'archive_all' };
   }
 
   // Archive dashboard: "archive", "/archive", "archive dashboard"
@@ -129,6 +136,31 @@ export function executeAssistantCommand(
         await postArchiveDashboard();
       })();
       return '🗂 Posting archive dashboard…';
+
+    case 'archive_all': {
+      // Mass-archive every currently-queued archive_candidate item. Sync
+      // DB sweep (cheap) + fire-and-forget dashboard refresh. Returns the
+      // affected count so the user sees immediate feedback.
+      const info = getDb()
+        .prepare(
+          `UPDATE tracked_items
+           SET state = 'resolved',
+               resolution_method = 'manual:archive_all',
+               resolved_at = ?
+           WHERE state = 'queued'
+             AND (queue = 'archive_candidate'
+                  OR (queue IS NULL AND classification = 'digest'))`,
+        )
+        .run(Date.now());
+      const n = info.changes;
+      void (async () => {
+        const { postArchiveDashboard } = await import('../daily-digest.js');
+        await postArchiveDashboard();
+      })();
+      return n === 0
+        ? '🗂 Archive queue is already empty.'
+        : `🗂 Archived ${n} item${n === 1 ? '' : 's'}.`;
+    }
   }
 }
 

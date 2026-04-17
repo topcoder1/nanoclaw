@@ -694,7 +694,7 @@ export async function editTelegramMessage(
   chatId: string | number,
   messageId: number,
   text: string,
-  opts: { parse_mode?: string } = {},
+  opts: { parse_mode?: string; reply_markup?: unknown } = {},
 ): Promise<{ message_id: number }> {
   const body: Record<string, unknown> = {
     chat_id: normalizeChatId(chatId),
@@ -702,6 +702,7 @@ export async function editTelegramMessage(
     text,
   };
   if (opts.parse_mode) body.parse_mode = opts.parse_mode;
+  if (opts.reply_markup) body.reply_markup = opts.reply_markup;
   return callBotApi<{ message_id: number }>('editMessageText', body);
 }
 

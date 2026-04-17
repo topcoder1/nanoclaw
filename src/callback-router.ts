@@ -603,6 +603,33 @@ export async function handleCallback(
         //   triage:override:archive:<itemId>
         // After initial split: action='triage', entityId=<sub>, extra, extra2.
         const sub = entityId;
+        if (sub === 'archive_all') {
+          // Mass-archive the whole archive queue. Shares the SQL with the
+          // `archive all` chat command (see memory/cost-dashboard.ts).
+          if (deps.db) {
+            const info = deps.db
+              .prepare(
+                `UPDATE tracked_items
+                 SET state = 'resolved',
+                     resolution_method = 'manual:archive_all',
+                     resolved_at = ?
+                 WHERE state = 'queued'
+                   AND (queue = 'archive_candidate'
+                        OR (queue IS NULL AND classification = 'digest'))`,
+              )
+              .run(Date.now());
+            logger.info(
+              { count: info.changes, chatJid: query.chatJid },
+              'Mass archive via dashboard button',
+            );
+            // Refresh the dashboard immediately so the user sees 0 pending.
+            const { postArchiveDashboard } = await import(
+              './daily-digest.js'
+            );
+            await postArchiveDashboard();
+          }
+          break;
+        }
         if (sub === 'archive') {
           handleTriageArchive(extra);
         } else if (sub === 'dismiss') {

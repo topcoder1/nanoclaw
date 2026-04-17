@@ -130,7 +130,8 @@ export async function triageEmail(
          action_intent = ?,
          facts_extracted_json = ?,
          repo_candidates_json = ?,
-         reasons_json = ?
+         reasons_json = ?,
+         queue = ?
        WHERE id = ?`,
     )
     .run(
@@ -140,6 +141,7 @@ export async function triageEmail(
       JSON.stringify(result.decision.facts_extracted),
       JSON.stringify(result.decision.repo_candidates),
       JSON.stringify(result.decision.reasons),
+      result.decision.queue ?? null,
       input.trackedItemId,
     );
 

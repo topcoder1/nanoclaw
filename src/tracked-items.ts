@@ -303,12 +303,15 @@ export function getTrackedItemsByState(
  */
 export function getOpenAttentionItems(groupName: string): TrackedItem[] {
   const db = getDb();
+  // Prefer the explicit `queue` column (v1.1+); fall back to the legacy
+  // heuristic for rows predating the migration backfill.
   const rows = db
     .prepare(
       `SELECT * FROM tracked_items
        WHERE group_name = ?
          AND state IN ('pushed', 'pending', 'held')
-         AND (classification = 'push' OR reasons_json IS NOT NULL)
+         AND (queue = 'attention'
+              OR (queue IS NULL AND (classification = 'push' OR reasons_json IS NOT NULL)))
        ORDER BY detected_at DESC
        LIMIT 50`,
     )
