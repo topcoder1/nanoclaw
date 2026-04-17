@@ -17,7 +17,9 @@ export interface CallbackRouterDeps {
   autoApproval: AutoApprovalTimer;
   statusBar: StatusBarManager;
   gmailOps?: GmailOps;
-  calendarOps?: { rsvp(account: string, eventId: string, response: string): Promise<void> };
+  calendarOps?: {
+    rsvp(account: string, eventId: string, response: string): Promise<void>;
+  };
   draftWatcher?: DraftEnrichmentWatcher;
   findChannel: (jid: string) => (Channel & Record<string, any>) | undefined;
 }
@@ -154,7 +156,7 @@ export async function handleCallback(
             [
               {
                 label: '📧 Collapse',
-                callbackData: `collapse:${entityId}`,
+                callbackData: `collapse:${entityId}:${account}`,
                 style: 'secondary',
               },
               {
@@ -177,6 +179,7 @@ export async function handleCallback(
       }
 
       case 'collapse': {
+        const account = extra;
         const body = getCachedEmailBody(entityId);
         if (body && channel?.editMessageTextAndButtons) {
           const summary = truncatePreview(body, 300);
@@ -187,14 +190,16 @@ export async function handleCallback(
             [
               {
                 label: '📧 Expand',
-                callbackData: `expand:${entityId}`,
+                callbackData: account
+                  ? `expand:${entityId}:${account}`
+                  : `expand:${entityId}`,
                 style: 'secondary',
               },
               {
                 label: '🌐 Full Email',
                 callbackData: `noop:${entityId}`,
                 webAppUrl: MINI_APP_URL
-                  ? `${MINI_APP_URL}/email/${entityId}`
+                  ? `${MINI_APP_URL}/email/${entityId}${account ? '?account=' + account : ''}`
                   : undefined,
                 style: 'secondary',
               },
@@ -331,7 +336,10 @@ export async function handleCallback(
             [],
           );
         }
-        logger.info({ actionId: entityId }, 'Open URL confirmed — delegating to browser sidecar');
+        logger.info(
+          { actionId: entityId },
+          'Open URL confirmed — delegating to browser sidecar',
+        );
         break;
       }
 
@@ -354,7 +362,8 @@ export async function handleCallback(
         if (deps.calendarOps) {
           try {
             await deps.calendarOps.rsvp('personal', entityId, response);
-            const label = response === 'accepted' ? "✅ RSVP'd — attending" : '❌ Declined';
+            const label =
+              response === 'accepted' ? "✅ RSVP'd — attending" : '❌ Declined';
             if (channel?.editMessageTextAndButtons) {
               await channel.editMessageTextAndButtons(
                 query.chatJid,
@@ -364,7 +373,10 @@ export async function handleCallback(
               );
             }
           } catch (err) {
-            logger.warn({ err: String(err), entityId, response }, 'RSVP failed');
+            logger.warn(
+              { err: String(err), entityId, response },
+              'RSVP failed',
+            );
             if (channel?.editMessageTextAndButtons) {
               await channel.editMessageTextAndButtons(
                 query.chatJid,

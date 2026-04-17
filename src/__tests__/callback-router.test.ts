@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { handleCallback } from '../callback-router.js';
 import type { CallbackRouterDeps } from '../callback-router.js';
 
+vi.mock('../config.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../config.js')>();
+  return { ...original, MINI_APP_URL: 'https://app.example.com' };
+});
+
 function makeDeps(): CallbackRouterDeps {
   return {
     archiveTracker: {
@@ -101,6 +106,40 @@ describe('handleCallback', () => {
     expect(channel.editMessageTextAndButtons).toHaveBeenCalled();
   });
 
+  it('expand passes account through to Collapse callback data', async () => {
+    const deps = makeDeps();
+    await handleCallback(makeQuery('expand:msg1:personal'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    const [, , , buttons] = channel.editMessageTextAndButtons.mock.calls[0];
+    const collapseBtn = buttons.find((b: any) => b.label.includes('Collapse'));
+    expect(collapseBtn.callbackData).toBe('collapse:msg1:personal');
+  });
+
+  it('collapse passes account through to Expand and Full Email buttons', async () => {
+    const deps = makeDeps();
+    const { cacheEmailBody } = await import('../email-preview.js');
+    cacheEmailBody('msg1', 'B'.repeat(500));
+    await handleCallback(makeQuery('collapse:msg1:personal'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    const [, , , buttons] = channel.editMessageTextAndButtons.mock.calls[0];
+    const expandBtn = buttons.find((b: any) => b.label.includes('Expand'));
+    expect(expandBtn.callbackData).toBe('expand:msg1:personal');
+    const fullEmailBtn = buttons.find((b: any) => b.label.includes('Full Email'));
+    expect(fullEmailBtn.webAppUrl).toContain('?account=personal');
+  });
+
+  it('collapse without account still works (graceful degradation)', async () => {
+    const deps = makeDeps();
+    const { cacheEmailBody } = await import('../email-preview.js');
+    cacheEmailBody('msg1', 'C'.repeat(500));
+    await handleCallback(makeQuery('collapse:msg1'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalled();
+    const [, , , buttons] = channel.editMessageTextAndButtons.mock.calls[0];
+    const expandBtn = buttons.find((b: any) => b.label.includes('Expand'));
+    expect(expandBtn.callbackData).toBe('expand:msg1');
+  });
+
   it('revert calls draftWatcher.revert and edits message', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('revert:draft1'), deps);
@@ -188,7 +227,9 @@ describe('handleCallback', () => {
         expect.objectContaining({
           callbackData: 'confirm_forward:thread1:alice@example.com:personal',
         }),
-        expect.objectContaining({ callbackData: expect.stringContaining('cancel_forward') }),
+        expect.objectContaining({
+          callbackData: expect.stringContaining('cancel_forward'),
+        }),
       ]),
     );
   });
