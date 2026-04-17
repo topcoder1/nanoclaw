@@ -1,6 +1,7 @@
 // src/memory/shared/paths.ts
 import path from 'path';
 import fs from 'fs';
+import { GROUPS_DIR } from '../../config.js';
 
 /**
  * Resolve the host-side root of the shared memory store.
@@ -11,7 +12,7 @@ export function memoryRoot(): string {
   if (process.env.NANOCLAW_MEMORY_DIR) {
     return process.env.NANOCLAW_MEMORY_DIR;
   }
-  return path.join(process.cwd(), 'groups', 'global', 'memory');
+  return path.join(GROUPS_DIR, 'global', 'memory');
 }
 
 export function candidateDir(): string {
@@ -35,12 +36,22 @@ export function indexPath(): string {
 }
 
 export function factPath(slug: string): string {
-  return path.join(memoryRoot(), `${slug}.md`);
+  const resolved = path.resolve(memoryRoot(), `${slug}.md`);
+  const rel = path.relative(memoryRoot(), resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Invalid fact slug (path escapes memory root): ${slug}`);
+  }
+  return resolved;
 }
 
 /** Create all directories used by the store (idempotent). */
 export function ensureMemoryDirs(): void {
-  for (const dir of [memoryRoot(), candidateDir(), rejectedDir(), archivedDir()]) {
+  for (const dir of [
+    memoryRoot(),
+    candidateDir(),
+    rejectedDir(),
+    archivedDir(),
+  ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
