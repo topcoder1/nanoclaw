@@ -394,6 +394,17 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Triage v1: skip-list for learned pre-filter patterns
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS triage_skip_list (
+      pattern TEXT PRIMARY KEY,
+      pattern_type TEXT NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      last_hit_at INTEGER NOT NULL,
+      promoted_at INTEGER
+    )
+  `);
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (
       key TEXT PRIMARY KEY,
