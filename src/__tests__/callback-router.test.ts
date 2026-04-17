@@ -131,4 +131,46 @@ describe('handleCallback', () => {
     await handleCallback(makeQuery('dismiss:item1'), deps);
     expect(deps.statusBar.removePendingItem).toHaveBeenCalledWith('item1');
   });
+
+  it('confirm_archive retries on error and shows retry button', async () => {
+    const deps = makeDeps();
+    (deps.archiveTracker.getUnarchived as any).mockReturnValue([
+      {
+        email_id: 'email1',
+        thread_id: 'thread1',
+        account: 'topcoder1@gmail.com',
+        action_taken: 'replied',
+        acted_at: new Date().toISOString(),
+        archived_at: null,
+      },
+    ]);
+    (deps.gmailOps!.archiveThread as any).mockRejectedValue(
+      new Error('No Gmail channel registered for account: topcoder1@gmail.com'),
+    );
+    await handleCallback(makeQuery('confirm_archive:email1'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining("Couldn't archive"),
+      expect.arrayContaining([
+        expect.objectContaining({
+          callbackData: 'retry_archive:email1',
+        }),
+      ]),
+    );
+  });
+
+  it('retry_archive re-attempts archiveThread', async () => {
+    const deps = makeDeps();
+    await handleCallback(makeQuery('retry_archive:email1'), deps);
+    expect(deps.gmailOps!.archiveThread).toHaveBeenCalledWith(
+      'personal',
+      'thread1',
+    );
+    expect(deps.archiveTracker.markArchived).toHaveBeenCalledWith(
+      'email1',
+      'replied',
+    );
+  });
 });

@@ -65,15 +65,41 @@ export async function handleCallback(
         const unarchived = deps.archiveTracker.getUnarchived();
         const email = unarchived.find((e) => e.email_id === entityId);
         if (email && deps.gmailOps) {
-          await deps.gmailOps.archiveThread(email.account, email.thread_id);
-          deps.archiveTracker.markArchived(entityId, email.action_taken);
-          if (channel?.editMessageTextAndButtons) {
-            await channel.editMessageTextAndButtons(
-              query.chatJid,
-              query.messageId,
-              '✅ Archived',
-              [],
+          try {
+            await deps.gmailOps.archiveThread(email.account, email.thread_id);
+            deps.archiveTracker.markArchived(entityId, email.action_taken);
+            if (channel?.editMessageTextAndButtons) {
+              await channel.editMessageTextAndButtons(
+                query.chatJid,
+                query.messageId,
+                '✅ Archived',
+                [],
+              );
+            }
+          } catch (archiveErr) {
+            logger.warn(
+              { err: String(archiveErr), entityId, account: email.account },
+              'Archive failed, showing retry',
             );
+            if (channel?.editMessageTextAndButtons) {
+              await channel.editMessageTextAndButtons(
+                query.chatJid,
+                query.messageId,
+                "⚠️ Couldn't archive. Try again later.",
+                [
+                  {
+                    label: '🔄 Retry',
+                    callbackData: `retry_archive:${entityId}`,
+                    style: 'primary',
+                  },
+                  {
+                    label: '❌ Dismiss',
+                    callbackData: `dismiss:${entityId}`,
+                    style: 'secondary',
+                  },
+                ],
+              );
+            }
           }
         }
         break;
@@ -88,6 +114,24 @@ export async function handleCallback(
               style: 'secondary',
             },
           ]);
+        }
+        break;
+      }
+
+      case 'retry_archive': {
+        const unarchived = deps.archiveTracker.getUnarchived();
+        const email = unarchived.find((e) => e.email_id === entityId);
+        if (email && deps.gmailOps) {
+          await deps.gmailOps.archiveThread(email.account, email.thread_id);
+          deps.archiveTracker.markArchived(entityId, email.action_taken);
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              '✅ Archived',
+              [],
+            );
+          }
         }
         break;
       }
