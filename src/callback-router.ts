@@ -9,6 +9,7 @@ import {
   truncatePreview,
   getCachedEmailBody,
   cacheEmailBody,
+  cacheEmailMeta,
 } from './email-preview.js';
 import { logger } from './logger.js';
 
@@ -144,8 +145,17 @@ export async function handleCallback(
         const account = extra;
         let body = getCachedEmailBody(entityId);
         if (!body && deps.gmailOps && account) {
-          body = await deps.gmailOps.getMessageBody(account, entityId);
-          if (body) cacheEmailBody(entityId, body);
+          if ('getMessageMeta' in deps.gmailOps) {
+            const meta = await (deps.gmailOps as any).getMessageMeta(account, entityId);
+            if (meta) {
+              cacheEmailMeta(entityId, meta);
+              body = meta.body;
+            }
+          }
+          if (!body) {
+            body = await deps.gmailOps.getMessageBody(account, entityId);
+            if (body) cacheEmailBody(entityId, body);
+          }
         }
         if (body && channel?.editMessageTextAndButtons) {
           const preview = truncatePreview(body, 800);

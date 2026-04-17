@@ -106,6 +106,24 @@ describe('handleCallback', () => {
     expect(channel.editMessageTextAndButtons).toHaveBeenCalled();
   });
 
+  it('expand uses getMessageMeta when available to populate cache', async () => {
+    const deps = makeDeps();
+    const metaMock = vi.fn().mockResolvedValue({
+      subject: 'Test Subject',
+      from: 'sender@example.com',
+      to: 'me@example.com',
+      date: '2026-04-16',
+      body: 'Meta email body',
+    });
+    (deps.gmailOps as any).getMessageMeta = metaMock;
+    // Override getMessageBody to return null to confirm it is not used
+    (deps.gmailOps!.getMessageBody as any).mockResolvedValue(null);
+    await handleCallback(makeQuery('expand:msg-meta-test:personal'), deps);
+    expect(metaMock).toHaveBeenCalledWith('personal', 'msg-meta-test');
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalled();
+  });
+
   it('expand passes account through to Collapse callback data', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('expand:msg1:personal'), deps);
@@ -124,7 +142,9 @@ describe('handleCallback', () => {
     const [, , , buttons] = channel.editMessageTextAndButtons.mock.calls[0];
     const expandBtn = buttons.find((b: any) => b.label.includes('Expand'));
     expect(expandBtn.callbackData).toBe('expand:msg1:personal');
-    const fullEmailBtn = buttons.find((b: any) => b.label.includes('Full Email'));
+    const fullEmailBtn = buttons.find((b: any) =>
+      b.label.includes('Full Email'),
+    );
     expect(fullEmailBtn.webAppUrl).toContain('?account=personal');
   });
 
