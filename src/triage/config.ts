@@ -1,23 +1,53 @@
 /**
  * Triage v1 configuration. Sourced from env vars with sane defaults.
  * See docs/superpowers/specs/2026-04-16-email-triage-pipeline-design.md.
+ *
+ * Values are read from both process.env AND the repo's `.env` file.
+ * readEnvFile intentionally does not populate process.env (security), so we
+ * look there manually. launchd does not inject .env keys into the process
+ * environment either, so without this the flags silently default to off.
  */
 
+import { readEnvFile } from '../env.js';
+
+const TRIAGE_ENV_KEYS = [
+  'TRIAGE_V1_ENABLED',
+  'TRIAGE_SHADOW_MODE',
+  'TRIAGE_MODEL_TIER1',
+  'TRIAGE_MODEL_TIER2',
+  'TRIAGE_MODEL_TIER3',
+  'TRIAGE_ATTENTION_THRESHOLD',
+  'TRIAGE_ARCHIVE_THRESHOLD',
+  'TRIAGE_ESCALATE_LOW',
+  'TRIAGE_ESCALATE_HIGH',
+  'TRIAGE_SKIPLIST_PROMOTION_HITS',
+  'TRIAGE_ATTENTION_REMIND_HOURS',
+  'TRIAGE_NEGATIVE_EXAMPLES_RETAINED',
+  'TRIAGE_POSITIVE_EXAMPLES_RETAINED',
+  'TRIAGE_DAILY_COST_CAP_USD',
+];
+
+const envFile = readEnvFile(TRIAGE_ENV_KEYS);
+
+function envRaw(key: string): string | undefined {
+  return process.env[key] ?? envFile[key];
+}
+
 function envNum(key: string, fallback: number): number {
-  const raw = process.env[key];
+  const raw = envRaw(key);
   if (!raw) return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }
 
 function envBool(key: string, fallback: boolean): boolean {
-  const raw = process.env[key];
+  const raw = envRaw(key);
   if (raw === undefined) return fallback;
   return raw === '1' || raw.toLowerCase() === 'true';
 }
 
 function envStr(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+  return envRaw(key) ?? fallback;
 }
 
 export const TRIAGE_DEFAULTS = {
