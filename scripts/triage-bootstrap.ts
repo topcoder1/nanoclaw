@@ -25,6 +25,7 @@ import { recordSkip } from '../src/triage/prefilter.js';
 import { recordExample } from '../src/triage/examples.js';
 import { SUPERPILOT_API_URL, NANOCLAW_SERVICE_TOKEN } from '../src/config.js';
 import { TRIAGE_DEFAULTS } from '../src/triage/config.js';
+import { readEnvValue } from '../src/env.js';
 import { logger } from '../src/logger.js';
 
 interface CliArgs {
@@ -110,9 +111,13 @@ async function fetchTriagedEmails(
   url.searchParams.set('since', since);
 
   const token = NANOCLAW_SERVICE_TOKEN.split(',')[0].split('@')[0].trim();
+  // SuperPilot service-token auth uses the x-service-token header, not
+  // OAuth2 Bearer — see backend/app/middleware/auth.py. The SSE endpoint
+  // works because email-sse.ts uses the correct header; the bootstrap
+  // script was sending Bearer and getting 401.
   const res = await fetch(url.toString(), {
     headers: {
-      Authorization: `Bearer ${token}`,
+      'x-service-token': token,
       Accept: 'application/json',
     },
   });
@@ -146,9 +151,16 @@ interface Stats {
 }
 
 async function run(args: CliArgs): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY is not set');
+  // Bridge .env -> process.env for the one key the Anthropic SDK reads
+  // directly at connection time. readEnvValue prefers an existing
+  // process.env value, so explicit shell exports still take precedence.
+  const anthropicKey = readEnvValue('ANTHROPIC_API_KEY');
+  if (!anthropicKey) {
+    throw new Error(
+      'ANTHROPIC_API_KEY is not set (checked process.env and .env)',
+    );
   }
+  process.env.ANTHROPIC_API_KEY = anthropicKey;
 
   process.stdout.write(
     `Fetching up to ${args.limit} archived emails` +
