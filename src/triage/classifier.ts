@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { logger } from '../logger.js';
-import { readEnvFile } from '../env.js';
+import { readEnvValue } from '../env.js';
 import { buildPrompt, type BuildPromptInput } from './prompt-builder.js';
 import { TRIAGE_DEFAULTS } from './config.js';
 import { validateTriageDecision, type TriageDecision } from './schema.js';
@@ -17,16 +17,11 @@ export interface ClassifierResult {
   };
 }
 
-// Lazy provider — constructed once at module load. API key read from
-// process.env with a fallback to the repo's .env file. readEnvFile does
-// not populate process.env (security), and launchd does not inject .env
-// keys into the process environment, so without the bridge the classifier
-// receives an empty apiKey and every call fails with "x-api-key required".
+// Lazy provider — constructed once at module load. readEnvValue bridges
+// from process.env to the repo's .env file, since launchd does not inject
+// .env keys and readEnvFile intentionally does not populate process.env.
 const anthropic = createAnthropic({
-  apiKey:
-    process.env.ANTHROPIC_API_KEY ??
-    readEnvFile(['ANTHROPIC_API_KEY']).ANTHROPIC_API_KEY ??
-    '',
+  apiKey: readEnvValue('ANTHROPIC_API_KEY') ?? '',
 });
 
 function modelForTier(tier: 1 | 2 | 3) {

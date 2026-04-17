@@ -15,6 +15,7 @@
 
 import { TIMEZONE } from './config.js';
 import { getDb, getPendingTrustApprovalIds } from './db.js';
+import { readEnvValue } from './env.js';
 import { queryEvents } from './event-log.js';
 import { formatLocalTime } from './timezone.js';
 import { logger } from './logger.js';
@@ -173,7 +174,7 @@ export function computeArchiveDashboardCounts(): {
  */
 export async function postArchiveDashboard(): Promise<void> {
   if (!TRIAGE_DEFAULTS.enabled) return;
-  const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+  const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
   if (!chatId) return;
   try {
     const { counts, total } = computeArchiveDashboardCounts();

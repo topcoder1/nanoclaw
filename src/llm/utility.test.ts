@@ -17,6 +17,13 @@ vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => vi.fn(() => 'mock-model')),
 }));
 
+// The .env file in the repo root is a real fallback source for env values now.
+// Stub it so these tests only exercise the process.env path.
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+  readEnvValue: vi.fn((name: string) => process.env[name] || undefined),
+}));
+
 import { generateText, embed } from 'ai';
 import {
   resolveUtilityModel,

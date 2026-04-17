@@ -53,3 +53,19 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+/**
+ * Read a single config value from process.env, falling back to the repo's
+ * .env file. Use this for any main-process code that needs an API key,
+ * credential, or config flag — launchd does not inject .env into the
+ * process environment, and readEnvFile intentionally does not populate it.
+ *
+ * Returns undefined if the key is absent from both sources. Empty-string
+ * values are treated as absent so callers can safely use `??` for defaults.
+ */
+export function readEnvValue(name: string): string | undefined {
+  const fromEnv = process.env[name];
+  if (fromEnv) return fromEnv;
+  const fromFile = readEnvFile([name])[name];
+  return fromFile || undefined;
+}

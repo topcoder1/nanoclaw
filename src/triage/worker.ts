@@ -1,6 +1,7 @@
 import path from 'path';
 import { logger } from '../logger.js';
 import { getDb } from '../db.js';
+import { readEnvValue } from '../env.js';
 import { shouldSkip } from './prefilter.js';
 import { classifyWithLlm } from './classifier.js';
 import { emitTrace } from './traces.js';
@@ -164,7 +165,7 @@ export async function triageEmail(
   }
 
   if (!shadowMode && result.decision.queue === 'attention') {
-    const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+    const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
     if (chatId) {
       try {
         const { pushAttentionItem } = await import('./push-attention.js');

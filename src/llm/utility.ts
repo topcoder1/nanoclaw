@@ -3,23 +3,13 @@ import { generateText, embed } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { readEnvFile } from '../env.js';
+import { readEnvValue } from '../env.js';
 
 type ProviderFactory = ReturnType<
   typeof createOpenAI | typeof createGoogleGenerativeAI | typeof createAnthropic
 >;
 
-/**
- * Read an API key from process.env, falling back to the project .env file.
- * The host process does not auto-load .env into process.env (see env.ts), so
- * host-side utility LLM calls need this explicit lookup.
- */
-function readKey(name: string): string | undefined {
-  const fromEnv = process.env[name];
-  if (fromEnv) return fromEnv;
-  const fromFile = readEnvFile([name])[name];
-  return fromFile || undefined;
-}
+const readKey = readEnvValue;
 
 export function isEmbeddingAvailable(): boolean {
   return Boolean(readKey('OPENAI_API_KEY'));
@@ -119,7 +109,7 @@ export async function embedText(
   const [providerName, ...modelParts] = spec.split(':');
   const modelId = modelParts.join(':');
 
-  const provider = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' });
+  const provider = createOpenAI({ apiKey: readKey('OPENAI_API_KEY') ?? '' });
   if (providerName !== 'openai') {
     throw new Error(
       `Embedding only supported for openai, got: ${providerName}`,

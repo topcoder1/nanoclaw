@@ -17,6 +17,12 @@ vi.mock('../config.js', () => ({
 const { mockRenderArchiveDashboard } = vi.hoisted(() => ({
   mockRenderArchiveDashboard: vi.fn().mockResolvedValue(undefined),
 }));
+// Stub .env fallback so tests only see process.env.
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+  readEnvValue: vi.fn((name: string) => process.env[name] || undefined),
+}));
+
 vi.mock('../triage/dashboards.js', () => ({
   renderArchiveDashboard: mockRenderArchiveDashboard,
   renderAttentionDashboard: vi.fn(),

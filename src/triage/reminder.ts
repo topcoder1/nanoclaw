@@ -1,5 +1,6 @@
 import { getDb } from '../db.js';
 import { sendTelegramMessage } from '../channels/telegram.js';
+import { readEnvValue } from '../env.js';
 import { logger } from '../logger.js';
 
 /**
@@ -11,7 +12,7 @@ import { logger } from '../logger.js';
 export async function runAttentionReminderSweep(opts: {
   windowHours: number;
 }): Promise<void> {
-  const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+  const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
   if (!chatId) return;
 
   const windowMs = opts.windowHours * 60 * 60 * 1000;

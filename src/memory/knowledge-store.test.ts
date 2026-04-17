@@ -1,4 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Stub .env fallback so tests don't see the developer's real QDRANT_URL /
+// OPENAI_API_KEY from the repo root .env file. Without this, queryFactsSemantic
+// would hit a real Qdrant instance, return [], and the FTS5 fallback branch
+// (which this test is verifying) would never execute.
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+  readEnvValue: vi.fn((name: string) => process.env[name] || undefined),
+}));
 
 import { _initTestDatabase } from '../db.js';
 import {

@@ -1,4 +1,5 @@
 import { getDb } from '../db.js';
+import { readEnvValue } from '../env.js';
 
 export interface AgreementReport {
   overall: number;
@@ -48,7 +49,7 @@ export async function runNightlyAgreementCheck(opts: {
   if (r.total < 20) return; // not enough data
   if (r.overall >= opts.agreementFloor) return;
 
-  const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
+  const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
   if (!chatId) return;
 
   const { sendTelegramMessage } = await import('../channels/telegram.js');
