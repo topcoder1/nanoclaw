@@ -180,6 +180,11 @@ import type {
   SystemStartupEvent,
   ProactiveSuggestionEvent,
 } from './events.js';
+import { extractCandidates } from './memory/shared/extractor.js';
+import { runVerifierSweep } from './memory/shared/verifier.js';
+import { regenerateIndex } from './memory/shared/store.js';
+import { ensureMemoryDirs } from './memory/shared/paths.js';
+import { NANOCLAW_MEMORY_EXTRACT, NANOCLAW_MEMORY_VERIFY } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -620,6 +625,9 @@ async function runAgent(
   let realCostUsd = 0;
   let sawRealCost = false;
 
+  // Accumulate agent reply parts for turn.completed event.
+  const replyParts: string[] = [];
+
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
@@ -655,6 +663,9 @@ async function runAgent(
     if (typeof output.totalCostUsd === 'number') {
       realCostUsd += output.totalCostUsd;
       sawRealCost = true;
+    }
+    if (typeof output.result === 'string' && output.result.length > 0) {
+      replyParts.push(output.result);
     }
     if (onOutput) await onOutput(output);
   };
@@ -846,6 +857,26 @@ async function runAgent(
           );
         }
       }
+    }
+
+    try {
+      eventBus.emit('turn.completed', {
+        type: 'turn.completed',
+        source: 'orchestrator',
+        groupId: group.folder,
+        timestamp: Date.now(),
+        payload: {
+          groupName: group.folder,
+          userMessage: prompt,
+          agentReply: replyParts.join('\n'),
+          durationMs: Date.now() - startMs,
+        },
+      });
+    } catch (emitErr) {
+      logger.warn(
+        { err: emitErr instanceof Error ? emitErr.message : String(emitErr) },
+        'failed to emit turn.completed',
+      );
     }
 
     return 'success';
@@ -1141,6 +1172,36 @@ async function main(): Promise<void> {
   initOutcomeStore();
   logger.info('Database initialized');
   loadState();
+
+  // Shared memory — init dirs and index, wire extractor + verifier.
+  try {
+    ensureMemoryDirs();
+    regenerateIndex();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'shared memory init failed (continuing without it)',
+    );
+  }
+
+  if (NANOCLAW_MEMORY_EXTRACT === '1') {
+    eventBus.on('turn.completed', (event) => {
+      void extractCandidates({
+        groupName: event.payload.groupName,
+        userMessage: event.payload.userMessage,
+        agentReply: event.payload.agentReply,
+      });
+    });
+  }
+
+  if (NANOCLAW_MEMORY_VERIFY === '1') {
+    const MEMORY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+    const memorySweepTimer = setInterval(() => {
+      void runVerifierSweep();
+    }, MEMORY_SWEEP_INTERVAL_MS);
+    process.on('SIGTERM', () => clearInterval(memorySweepTimer));
+    process.on('SIGINT', () => clearInterval(memorySweepTimer));
+  }
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
