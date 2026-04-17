@@ -7,6 +7,13 @@ vi.mock('../config.js', async (importOriginal) => {
   return { ...original, MINI_APP_URL: 'https://app.example.com' };
 });
 
+// Stub the host-side contacts lookup so tests never touch the real
+// macOS AddressBook DB. Individual tests override via mockReturnValue.
+vi.mock('../contacts-lookup.js', () => ({
+  resolveSingleContactEmail: vi.fn(() => null),
+  lookupContactEmails: vi.fn(() => []),
+}));
+
 /**
  * Exhaustive matrix covering every callback action the Telegram bot emits.
  * Runs headlessly against mocked channel + gmailOps so we don't need a real
@@ -132,12 +139,27 @@ describe('Telegram callback matrix — happy paths', () => {
     expect(ctx.deps.autoApproval.cancel).toHaveBeenCalledWith('timer1');
   });
 
-  it('forward_person → injects lookup-and-forward instruction into agent', async () => {
+  it('forward_person with no host match → delegates lookup to agent', async () => {
     await handleCallback(query('forward_person:act_1:Philip%20Ye'), ctx.deps);
     expect(ctx.injectUserReply).toHaveBeenCalledWith(
       'tg:123',
       expect.stringMatching(/Philip Ye.*search_contacts/i),
     );
+  });
+
+  it('forward_person with unambiguous host match → injects resolved email', async () => {
+    const { resolveSingleContactEmail } = await import('../contacts-lookup.js');
+    (resolveSingleContactEmail as any).mockReturnValueOnce(
+      'philip.ye@whoisxmlapi.com',
+    );
+    await handleCallback(query('forward_person:act_2:Philip%20Ye'), ctx.deps);
+    expect(ctx.injectUserReply).toHaveBeenCalledWith(
+      'tg:123',
+      expect.stringContaining('philip.ye@whoisxmlapi.com'),
+    );
+    // Should NOT tell the agent to look up — we already did.
+    const reply = (ctx.injectUserReply.mock.calls[0]?.[1] ?? '') as string;
+    expect(reply).not.toMatch(/search_contacts/);
   });
 
   it('unknown action → logs warning (no throw)', async () => {
