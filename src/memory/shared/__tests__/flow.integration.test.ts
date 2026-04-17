@@ -6,11 +6,7 @@ import path from 'path';
 import { extractCandidates } from '../extractor.js';
 import { runVerifierSweep } from '../verifier.js';
 import { listFacts } from '../store.js';
-import {
-  ensureMemoryDirs,
-  candidateDir,
-  indexPath,
-} from '../paths.js';
+import { ensureMemoryDirs, candidateDir, indexPath } from '../paths.js';
 
 vi.mock('../../../llm/utility.js', () => ({
   resolveUtilityModel: vi.fn(() => ({ id: 'mock' })),
@@ -61,7 +57,9 @@ describe('memory flow integration', () => {
       agentReply: 'Got it, I will keep replies short.',
     });
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(1);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(1);
 
     await runVerifierSweep();
 
@@ -75,7 +73,9 @@ describe('memory flow integration', () => {
     expect(index).toContain('Prefers terse responses');
     expect(index).toContain('feedback_prefers_terse_responses.md');
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 
   it('reinforcement from a second group merges and updates count + sources', async () => {
@@ -104,8 +104,9 @@ describe('memory flow integration', () => {
 
     await extractCandidates({
       groupName: 'telegram_main',
-      userMessage: 'be terse from now on',
-      agentReply: 'OK',
+      userMessage:
+        'Be terse from now on, please skip the preamble and trailing summaries.',
+      agentReply: 'Got it, I will keep replies short and direct.',
     });
     await runVerifierSweep();
 
