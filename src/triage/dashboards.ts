@@ -117,6 +117,12 @@ async function upsertDashboard(
 export async function renderAttentionDashboard(
   input: DashboardInput,
 ): Promise<void> {
+  // Skip posting/editing when the queue is empty. Every classified email
+  // triggered an attention-dashboard render even when nothing needed
+  // attention, which refreshed the pinned "Attention — 0 open" message on
+  // each new event and added noise. The last non-empty state stays
+  // visible until real attention traffic arrives.
+  if (input.items.length === 0) return;
   await upsertDashboard('attention', input.chatId, fmtAttention(input.items));
 }
 

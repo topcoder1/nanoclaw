@@ -54,7 +54,7 @@ describe('renderAttentionDashboard', () => {
     expect(row.pinned_msg_id).toBe(42);
   });
 
-  it('edits the existing pinned message on subsequent calls', async () => {
+  it('edits the existing pinned message on subsequent non-empty calls', async () => {
     getDb()
       .prepare(
         `INSERT INTO triage_dashboards (topic, telegram_chat_id, pinned_msg_id, last_rendered_at)
@@ -66,13 +66,31 @@ describe('renderAttentionDashboard', () => {
 
     await renderAttentionDashboard({
       chatId: '-100123',
-      items: [],
+      items: [
+        { id: 'a', title: 'Invoice pending', reason: 'invoice', ageMins: 5 },
+      ],
     });
     expect(mockEdit).toHaveBeenCalledWith(
       '-100123',
       99,
       expect.stringContaining('Attention'),
     );
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('skips editing the pinned dashboard when the queue is empty', async () => {
+    getDb()
+      .prepare(
+        `INSERT INTO triage_dashboards (topic, telegram_chat_id, pinned_msg_id, last_rendered_at)
+         VALUES ('attention', '-100123', 99, ?)`,
+      )
+      .run(Date.now());
+
+    await renderAttentionDashboard({
+      chatId: '-100123',
+      items: [],
+    });
+    expect(mockEdit).not.toHaveBeenCalled();
     expect(mockSend).not.toHaveBeenCalled();
   });
 });
