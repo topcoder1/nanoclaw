@@ -1681,6 +1681,9 @@ async function main(): Promise<void> {
       // agent echoed back "thread: abc123 [personal]"), infer it so the
       // user still gets the buttons. Instructions drift; code doesn't.
       let effectiveContext = context;
+      let contextSource: 'explicit' | 'inferred' | 'none' = context?.emailId
+        ? 'explicit'
+        : 'none';
       if (!effectiveContext?.emailId) {
         const inferred = inferEmailContext(clean);
         if (inferred) {
@@ -1688,7 +1691,22 @@ async function main(): Promise<void> {
             emailId: inferred.emailId,
             emailAccount: inferred.emailAccount ?? context?.emailAccount,
           };
+          contextSource = 'inferred';
         }
+      }
+      // Telemetry — logs let us answer "are instructions sticking?" without
+      // sampling message bodies. Log only when a context was resolved (the
+      // interesting signal); 'none' would flood the log with every stray
+      // status update.
+      if (contextSource !== 'none') {
+        logger.info(
+          {
+            contextSource,
+            emailId: effectiveContext?.emailId,
+            emailAccount: effectiveContext?.emailAccount,
+          },
+          'Email context resolved for agent message',
+        );
       }
 
       // When the agent explicitly tags the message with an email_id, attach

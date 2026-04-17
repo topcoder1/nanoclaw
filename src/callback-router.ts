@@ -27,6 +27,7 @@ import {
   cacheEmailBody,
   cacheEmailMeta,
 } from './email-preview.js';
+import { resolveSingleContactEmail } from './contacts-lookup.js';
 import { logger } from './logger.js';
 
 export interface CallbackRouterDeps {
@@ -527,17 +528,25 @@ export async function handleCallback(
 
       case 'forward_person': {
         // entityId = action id (transient), extra = URI-encoded person name.
-        // No email in the original question — route back to the agent with
-        // explicit instructions to look up the name and forward.
+        // Try to resolve the name against the macOS Contacts DB on the host
+        // first — skips an agent round-trip when the contact is unambiguous.
+        // Falls back to delegating the lookup to the agent (which has the
+        // container-side search_contacts MCP tool) when no single match
+        // exists on the host.
         const person = decodeURIComponent(extra || '');
         if (!person) {
           logger.warn({ entityId }, 'forward_person missing person name');
           break;
         }
+        const resolvedEmail = resolveSingleContactEmail(person);
         if (deps.injectUserReply) {
-          deps.injectUserReply(
-            query.chatJid,
-            `✅ Yes — forward it. Look up ${person} via search_contacts to get their email address, then send.`,
+          const reply = resolvedEmail
+            ? `✅ Yes — forward it to ${person} <${resolvedEmail}>.`
+            : `✅ Yes — forward it. Look up ${person} via search_contacts to get their email address, then send.`;
+          deps.injectUserReply(query.chatJid, reply);
+          logger.info(
+            { person, resolvedOnHost: Boolean(resolvedEmail) },
+            'forward_person routed',
           );
         }
         if (channel?.editMessageButtons) {

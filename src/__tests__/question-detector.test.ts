@@ -9,9 +9,9 @@ describe('detectQuestion', () => {
     expect(result).not.toBeNull();
     expect(result!.type).toBe('yes-no');
     expect(result!.actions).toHaveLength(3);
-    expect(result!.actions[0].label).toBe('Yes');
-    expect(result!.actions[1].label).toBe('No');
-    expect(result!.actions[2].label).toBe('Let me think...');
+    expect(result!.actions[0].label).toBe('✅ Yes');
+    expect(result!.actions[1].label).toBe('❌ No');
+    expect(result!.actions[2].label).toBe('⏳ Let me think…');
   });
 
   it('detects yes/no question with "Should I"', () => {

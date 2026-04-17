@@ -73,14 +73,18 @@ export function detectQuestion(text: string): DetectedQuestion | null {
       type: 'yes-no',
       questionId: qid,
       actions: [
-        { label: 'Yes', callbackData: `answer:${qid}:yes`, style: 'primary' },
         {
-          label: 'No',
+          label: '✅ Yes',
+          callbackData: `answer:${qid}:yes`,
+          style: 'primary',
+        },
+        {
+          label: '❌ No',
           callbackData: `answer:${qid}:no`,
           style: 'destructive-safe',
         },
         {
-          label: 'Let me think...',
+          label: '⏳ Let me think…',
           callbackData: `answer:${qid}:defer`,
           style: 'secondary',
         },
