@@ -56,8 +56,16 @@ export interface TrackedItem {
   confidence: number | null;
   model_tier: number | null;
   action_intent: string | null;
-  facts_extracted: Array<{ key: string; value: string; source_span: string }> | null;
-  repo_candidates: Array<{ repo: string; score: number; signal: string }> | null;
+  facts_extracted: Array<{
+    key: string;
+    value: string;
+    source_span: string;
+  }> | null;
+  repo_candidates: Array<{
+    repo: string;
+    score: number;
+    signal: string;
+  }> | null;
   reasons: string[] | null;
 }
 
@@ -145,12 +153,8 @@ export function insertTrackedItem(item: TrackedItem): void {
     item.confidence ?? null,
     item.model_tier ?? null,
     item.action_intent ?? null,
-    item.facts_extracted != null
-      ? JSON.stringify(item.facts_extracted)
-      : null,
-    item.repo_candidates != null
-      ? JSON.stringify(item.repo_candidates)
-      : null,
+    item.facts_extracted != null ? JSON.stringify(item.facts_extracted) : null,
+    item.repo_candidates != null ? JSON.stringify(item.repo_candidates) : null,
     item.reasons != null ? JSON.stringify(item.reasons) : null,
   );
 }

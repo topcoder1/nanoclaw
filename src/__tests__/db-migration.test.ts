@@ -7,9 +7,9 @@ describe('triage migration', () => {
 
   it('adds triage columns to tracked_items', () => {
     const db = getDb();
-    const cols = db
-      .prepare("PRAGMA table_info('tracked_items')")
-      .all() as { name: string }[];
+    const cols = db.prepare("PRAGMA table_info('tracked_items')").all() as {
+      name: string;
+    }[];
     const names = cols.map((c) => c.name);
     expect(names).toContain('confidence');
     expect(names).toContain('model_tier');

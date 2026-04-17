@@ -8,7 +8,9 @@ describe('triage config', () => {
     expect(TRIAGE_DEFAULTS.archiveThreshold).toBeGreaterThan(
       TRIAGE_DEFAULTS.attentionThreshold,
     );
-    expect(TRIAGE_DEFAULTS.escalateLow).toBeLessThan(TRIAGE_DEFAULTS.escalateHigh);
+    expect(TRIAGE_DEFAULTS.escalateLow).toBeLessThan(
+      TRIAGE_DEFAULTS.escalateHigh,
+    );
     expect(TRIAGE_DEFAULTS.dailyCostCapUsd).toBeGreaterThan(0);
   });
 

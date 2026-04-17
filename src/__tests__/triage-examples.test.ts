@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { _initTestDatabase, _closeDatabase } from '../db.js';
-import {
-  recordExample,
-  getRecentExamples,
-} from '../triage/examples.js';
+import { recordExample, getRecentExamples } from '../triage/examples.js';
 
 describe('triage examples store', () => {
   beforeEach(() => _initTestDatabase());
