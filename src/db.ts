@@ -427,6 +427,18 @@ function createSchema(database: Database.Database): void {
     )
     .run();
 
+  // Triage v1: pinned live dashboards (one per topic)
+  database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS triage_dashboards (
+        topic TEXT PRIMARY KEY,
+        telegram_chat_id TEXT NOT NULL,
+        pinned_msg_id INTEGER,
+        last_rendered_at INTEGER
+      )`,
+    )
+    .run();
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (
       key TEXT PRIMARY KEY,
