@@ -76,7 +76,7 @@ describe('classifyAndFormat', () => {
       "Want me to reply yes to Florian's exception?",
     );
     expect(result.meta.questionType).toBe('yes-no');
-    expect(result.meta.actions).toHaveLength(3);
+    expect(result.meta.actions).toHaveLength(4);
   });
 
   it('passes through non-question messages without buttons', () => {

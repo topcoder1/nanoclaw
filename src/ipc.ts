@@ -16,7 +16,7 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import type { LlmConfig, RegisteredGroup } from './types.js';
+import type { Action, LlmConfig, RegisteredGroup } from './types.js';
 import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
@@ -41,6 +41,18 @@ export interface IpcDeps {
     text: string,
     context?: { emailId?: string; emailAccount?: string },
   ) => Promise<void>;
+  /**
+   * Send a host-authored message with a pre-built set of inline-keyboard
+   * buttons. Used for FYI cards where the agent has classified a tracked_item
+   * and wants to offer Archive/Dismiss callbacks. Returns the Telegram
+   * message_id (or undefined for channels without inline keyboards) so the
+   * caller can later edit the message if needed.
+   */
+  sendNotificationWithActions?: (
+    jid: string,
+    text: string,
+    actions: Action[],
+  ) => Promise<number | undefined>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -314,6 +326,8 @@ export async function processTaskIpc(
     // For browser_act/extract/observe
     instruction?: string;
     schema?: unknown;
+    // For send_fyi_card
+    trackedItemId?: string;
     _responseFile?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
@@ -743,6 +757,66 @@ export async function processTaskIpc(
         },
         'Message relayed to target group',
       );
+      break;
+    }
+
+    case 'send_fyi_card': {
+      // Host-side FYI notification with Archive/Dismiss buttons. The agent
+      // provides a tracked_item_id; the host attaches callbacks that route
+      // through the existing triage:archive / triage:dismiss handlers, so
+      // clicks flow into handleTriageArchive and record a learning example
+      // for the triage classifier.
+      const jid = (data.jid as string | undefined) ?? '';
+      const text = (data.text as string | undefined) ?? '';
+      const trackedItemId = data.trackedItemId as string | undefined;
+
+      if (!jid || !text) {
+        logger.warn(
+          { sourceGroup, hasJid: Boolean(jid), hasText: Boolean(text) },
+          'send_fyi_card: missing jid or text',
+        );
+        break;
+      }
+
+      if (!trackedItemId) {
+        // No tracked item to act on — fall back to a plain message. This
+        // keeps the path safe for purely informational pushes that don't
+        // correspond to a triage row.
+        await deps.sendMessage(jid, text);
+        logger.debug(
+          { jid, sourceGroup },
+          'send_fyi_card without trackedItemId, sent as plain text',
+        );
+        break;
+      }
+
+      const actions: Action[] = [
+        {
+          label: '🗄 Archive',
+          callbackData: `triage:archive:${trackedItemId}`,
+          style: 'primary',
+        },
+        {
+          label: '✕ Dismiss',
+          callbackData: `triage:dismiss:${trackedItemId}`,
+          style: 'secondary',
+        },
+      ];
+
+      if (deps.sendNotificationWithActions) {
+        await deps.sendNotificationWithActions(jid, text, actions);
+        logger.info(
+          { jid, trackedItemId, sourceGroup },
+          'FYI card sent with archive/dismiss buttons',
+        );
+      } else {
+        // Channel without button support — fall back to plain text.
+        await deps.sendMessage(jid, text);
+        logger.debug(
+          { jid, trackedItemId, sourceGroup },
+          'send_fyi_card: channel lacks button support, fell back to plain text',
+        );
+      }
       break;
     }
 
