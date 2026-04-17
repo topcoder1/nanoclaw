@@ -30,14 +30,15 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   app.use(express.json());
 
   // Root page — opened when user taps the "📱 App" menu button in Telegram.
-  // Lists the attention and archive queues with live counts so the user has
-  // somewhere to land. Individual item links go to existing /email/:id etc.
+  // Lists the attention and archive queues with live counts. The archive
+  // queue supports bulk-select + "Archive selected" (POST /api/archive/bulk).
   app.get('/', (_req, res) => {
     const attention = opts.db
       .prepare(
         `SELECT id, title, detected_at FROM tracked_items
          WHERE state IN ('pushed','pending','held')
-           AND classification = 'push'
+           AND (queue = 'attention'
+                OR (queue IS NULL AND classification = 'push'))
          ORDER BY detected_at DESC
          LIMIT 20`,
       )
@@ -45,9 +46,11 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     const archive = opts.db
       .prepare(
         `SELECT id, title, action_intent, detected_at FROM tracked_items
-         WHERE classification = 'digest' AND state = 'queued'
+         WHERE state = 'queued'
+           AND (queue = 'archive_candidate'
+                OR (queue IS NULL AND classification = 'digest'))
          ORDER BY detected_at DESC
-         LIMIT 20`,
+         LIMIT 50`,
       )
       .all() as Array<{
       id: string;
@@ -68,31 +71,122 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
             "'": '&#39;',
           })[c] ?? c,
       );
-    const row = (it: { id: string; title: string; detected_at: number }) => {
+    const attentionRow = (it: {
+      id: string;
+      title: string;
+      detected_at: number;
+    }) => {
       const mins = Math.round((Date.now() - it.detected_at) / 60_000);
       return `<li><a href="/email/${esc(it.id)}">${esc(it.title || '(no subject)')}</a> <span class="age">${mins}m</span></li>`;
+    };
+    const archiveRow = (it: {
+      id: string;
+      title: string;
+      detected_at: number;
+    }) => {
+      const mins = Math.round((Date.now() - it.detected_at) / 60_000);
+      return `<li><label class="check"><input type="checkbox" class="sel" value="${esc(it.id)}"><a href="/email/${esc(it.id)}">${esc(it.title || '(no subject)')}</a> <span class="age">${mins}m</span></label></li>`;
     };
 
     res.type('html').send(`<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nanoclaw</title>
 <style>
-body{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:16px;background:#f4f6f8;color:#111}
+body{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:16px 16px 80px;background:#f4f6f8;color:#111}
 h1{font-size:18px;margin:0 0 16px}
-h2{font-size:15px;margin:20px 0 8px;color:#444}
+h2{font-size:15px;margin:20px 0 8px;color:#444;display:flex;align-items:center;gap:10px}
+h2 .tools{font-size:12px;font-weight:400;color:#0366d6;cursor:pointer;user-select:none}
 ul{list-style:none;padding:0;margin:0;background:#fff;border-radius:10px;overflow:hidden}
-li{padding:10px 14px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+li{border-bottom:1px solid #eee}
 li:last-child{border-bottom:none}
-a{color:#0366d6;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li a{color:#0366d6;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .age{color:#888;font-size:12px;flex:none}
 .empty{color:#888;font-style:italic;padding:10px 14px;background:#fff;border-radius:10px}
+#attention li{padding:10px 14px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+#archive label.check{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer}
+#archive input.sel{width:18px;height:18px;flex:none;cursor:pointer}
+#bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #e3e6ea;padding:10px 16px;display:flex;gap:10px;align-items:center;box-shadow:0 -2px 8px rgba(0,0,0,0.04)}
+#bar .count{font-size:14px;color:#444;flex:1}
+#bar button{background:#d9534f;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer}
+#bar button:disabled{background:#c6c9cd;cursor:not-allowed}
 </style></head><body>
 <h1>nanoclaw</h1>
 <h2>📥 Attention (${attention.length})</h2>
-${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul>${attention.map(row).join('')}</ul>`}
-<h2>🗂 Archive queue (${archive.length})</h2>
-${archive.length === 0 ? '<div class="empty">Nothing queued for archive.</div>' : `<ul>${archive.map(row).join('')}</ul>`}
+${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul id="attention">${attention.map(attentionRow).join('')}</ul>`}
+<h2>🗂 Archive queue (${archive.length}) ${archive.length > 0 ? '<span class="tools" id="sel-all">Select all</span> <span class="tools" id="sel-none">Clear</span>' : ''}</h2>
+${archive.length === 0 ? '<div class="empty">Nothing queued for archive.</div>' : `<ul id="archive">${archive.map(archiveRow).join('')}</ul>`}
+${
+  archive.length > 0
+    ? `<div id="bar">
+<span class="count" id="count">0 selected</span>
+<button id="go" disabled>🗃 Archive selected</button>
+</div>
+<script>
+(function(){
+  const boxes=()=>[...document.querySelectorAll('input.sel')];
+  const selected=()=>boxes().filter(b=>b.checked).map(b=>b.value);
+  const count=document.getElementById('count');
+  const go=document.getElementById('go');
+  function refresh(){
+    const n=selected().length;
+    count.textContent=n+' selected';
+    go.disabled=n===0;
+    go.textContent=n===0?'🗃 Archive selected':'🗃 Archive '+n;
+  }
+  document.getElementById('archive').addEventListener('change',refresh);
+  document.getElementById('sel-all').addEventListener('click',()=>{boxes().forEach(b=>b.checked=true);refresh();});
+  document.getElementById('sel-none').addEventListener('click',()=>{boxes().forEach(b=>b.checked=false);refresh();});
+  // Prevent link clicks from toggling the checkbox label.
+  document.querySelectorAll('#archive a').forEach(a=>a.addEventListener('click',e=>e.stopPropagation()));
+  go.addEventListener('click',async()=>{
+    const ids=selected();
+    if(ids.length===0)return;
+    go.disabled=true;go.textContent='Archiving…';
+    try{
+      const r=await fetch('/api/archive/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({itemIds:ids})});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      location.reload();
+    }catch(err){go.disabled=false;go.textContent='Retry — '+err.message;}
+  });
+})();
+</script>`
+    : ''
+}
 </body></html>`);
+  });
+
+  // Bulk archive — takes a list of tracked_item ids and resolves them in
+  // one UPDATE. Shares semantics with the `archive all` chat command but
+  // scoped to the provided set. No-op for missing/already-resolved items.
+  app.post('/api/archive/bulk', (req, res) => {
+    const body = req.body as { itemIds?: unknown } | undefined;
+    const ids = Array.isArray(body?.itemIds)
+      ? (body!.itemIds as unknown[]).filter(
+          (v): v is string => typeof v === 'string' && v.length > 0,
+        )
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: 'itemIds required (non-empty string[])' });
+      return;
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    const info = opts.db
+      .prepare(
+        `UPDATE tracked_items
+         SET state = 'resolved',
+             resolution_method = 'miniapp:bulk_archive',
+             resolved_at = ?
+         WHERE state = 'queued'
+           AND id IN (${placeholders})
+           AND (queue = 'archive_candidate'
+                OR (queue IS NULL AND classification = 'digest'))`,
+      )
+      .run(Date.now(), ...ids);
+    logger.info(
+      { requested: ids.length, archived: info.changes },
+      'Mini-app bulk archive',
+    );
+    res.json({ archived: info.changes, requested: ids.length });
   });
 
   function lookupDraftAccount(draftId: string): string | null {
