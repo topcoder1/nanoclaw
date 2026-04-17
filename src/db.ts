@@ -358,6 +358,42 @@ function createSchema(database: Database.Database): void {
     // Column already exists — ignore
   }
 
+  // Triage v1: add LLM classifier columns to tracked_items (idempotent)
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN confidence REAL`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN model_tier INTEGER`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN action_intent TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE tracked_items ADD COLUMN facts_extracted_json TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE tracked_items ADD COLUMN repo_candidates_json TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN reasons_json TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS ux_config (
       key TEXT PRIMARY KEY,
