@@ -23,7 +23,8 @@ export interface InferredEmailContext {
 //   thread_id: abc123
 //   (threadId: abc123)
 // Thread ids are hex/alphanumeric; capture up to the first non-[A-Za-z0-9_-].
-const THREAD_ID_RE = /thread[\s_]?id\s*[:=]\s*([A-Za-z0-9_-]+)|thread\s*[:=]\s*([A-Za-z0-9_-]+)/gi;
+const THREAD_ID_RE =
+  /thread[\s_]?id\s*[:=]\s*([A-Za-z0-9_-]+)|thread\s*[:=]\s*([A-Za-z0-9_-]+)/gi;
 
 // Account usually appears as `[personal]` or `[whoisxml]` in the trigger
 // summary format the agent parrots back. Match on known-safe alphanumeric

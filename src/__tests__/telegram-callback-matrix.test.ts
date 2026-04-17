@@ -133,10 +133,7 @@ describe('Telegram callback matrix — happy paths', () => {
   });
 
   it('forward_person → injects lookup-and-forward instruction into agent', async () => {
-    await handleCallback(
-      query('forward_person:act_1:Philip%20Ye'),
-      ctx.deps,
-    );
+    await handleCallback(query('forward_person:act_1:Philip%20Ye'), ctx.deps);
     expect(ctx.injectUserReply).toHaveBeenCalledWith(
       'tg:123',
       expect.stringMatching(/Philip Ye.*search_contacts/i),

@@ -50,8 +50,7 @@ describe('detectActions', () => {
     });
 
     it('detects person-name forward (2+ capitalized words) with contact-lookup intent', () => {
-      const text =
-        'Want me to forward 911proxy login info to Philip Ye?';
+      const text = 'Want me to forward 911proxy login info to Philip Ye?';
       const meta = makeMeta({ threadId: 't1' });
       const actions = detectActions(text, meta);
       const fwd = actions.find((a) => a.type === 'forward');
