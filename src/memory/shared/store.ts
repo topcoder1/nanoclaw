@@ -85,23 +85,26 @@ export function archiveFact(slug: string): boolean {
   return true;
 }
 
-function parseFrontmatter(raw: string):
-  | {
-      frontmatter: Record<string, unknown>;
-      body: string;
-    }
-  | null {
+function parseFrontmatter(raw: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} | null {
   if (!raw.startsWith(FRONTMATTER_DELIM)) return null;
   const end = raw.indexOf(`\n${FRONTMATTER_DELIM}`, FRONTMATTER_DELIM.length);
   if (end < 0) return null;
   const front = raw.slice(FRONTMATTER_DELIM.length, end).trim();
   const body = raw.slice(end + FRONTMATTER_DELIM.length + 1).trim();
-  const fm = yaml.load(front) as Record<string, unknown>;
-  return { frontmatter: fm, body };
+  try {
+    const fm = yaml.load(front) as Record<string, unknown>;
+    if (!fm || typeof fm !== 'object') return null;
+    return { frontmatter: fm, body };
+  } catch {
+    return null;
+  }
 }
 
 function summarizeSources(sources: Record<string, number>): string {
-  const groups = Object.keys(sources);
+  const groups = Object.keys(sources).sort();
   if (groups.length === 0) return '';
   if (groups.length <= 2) return groups.join(' + ');
   return `${groups.slice(0, 2).join(' + ')} +${groups.length - 2}`;

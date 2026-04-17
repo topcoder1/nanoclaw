@@ -100,6 +100,17 @@ describe('shared memory store', () => {
     expect(indexA).toContain('# Shared user memory');
   });
 
+  it('skips corrupt fact files without crashing listFacts', () => {
+    const bogusPath = path.join(
+      process.env.NANOCLAW_MEMORY_DIR!,
+      'bogus.md',
+    );
+    fs.writeFileSync(bogusPath, '---\nthis is: not: valid: yaml: {[\n---\n\nbody');
+    // Should not throw; readFact returns null; listFacts excludes it.
+    expect(() => listFacts()).not.toThrow();
+    expect(listFacts()).toEqual([]);
+  });
+
   it('archives a fact (soft-delete)', () => {
     writeFact({
       slug: 'feedback_x',
