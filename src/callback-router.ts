@@ -371,7 +371,9 @@ export async function handleCallback(
                 ? '✅ Yes — proceed.'
                 : answer === 'no'
                   ? '❌ No — do not proceed.'
-                  : `User answered: ${answer}`;
+                  : answer === 'handled'
+                    ? '✓ Already handled out-of-band — stop this task and treat as resolved. Do not take further action or send a reply.'
+                    : `User answered: ${answer}`;
             const delivered = deps.injectUserReply(query.chatJid, reply);
             logger.info(
               { questionId, answer, delivered, chatJid: query.chatJid },

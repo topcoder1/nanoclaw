@@ -106,6 +106,7 @@ export interface Action {
   style?: ActionStyle;
   confirmRequired?: boolean;
   webAppUrl?: string;
+  row?: number;
 }
 
 export interface CallbackQuery {

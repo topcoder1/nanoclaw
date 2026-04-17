@@ -465,14 +465,7 @@ export class TelegramChannel implements Channel {
 
     const chatId = jid.replace(/^tg:/, '');
     const keyboard = {
-      inline_keyboard: [
-        actions.map((a) => ({
-          text: a.label,
-          ...(a.webAppUrl
-            ? { web_app: { url: a.webAppUrl } }
-            : { callback_data: a.callbackData }),
-        })),
-      ],
+      inline_keyboard: buildKeyboardRows(actions),
     };
 
     try {
@@ -575,14 +568,7 @@ export class TelegramChannel implements Channel {
     if (!this.bot) return;
     const chatId = jid.replace(/^tg:/, '');
     const keyboard = {
-      inline_keyboard: [
-        actions.map((a) => ({
-          text: a.label,
-          ...(a.webAppUrl
-            ? { web_app: { url: a.webAppUrl } }
-            : { callback_data: a.callbackData }),
-        })),
-      ],
+      inline_keyboard: buildKeyboardRows(actions),
     };
     try {
       await this.bot.api.editMessageReplyMarkup(chatId, messageId, {
@@ -608,14 +594,7 @@ export class TelegramChannel implements Channel {
     const opts: Record<string, unknown> = { parse_mode: 'HTML' };
     if (actions) {
       opts.reply_markup = {
-        inline_keyboard: [
-          actions.map((a) => ({
-            text: a.label,
-            ...(a.webAppUrl
-              ? { web_app: { url: a.webAppUrl } }
-              : { callback_data: a.callbackData }),
-          })),
-        ],
+        inline_keyboard: buildKeyboardRows(actions),
       };
     }
     try {
@@ -636,6 +615,23 @@ export class TelegramChannel implements Channel {
 function resolveBotToken(): string {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   return process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+}
+
+type KeyboardButton =
+  | { text: string; callback_data: string }
+  | { text: string; web_app: { url: string } };
+
+function buildKeyboardRows(actions: Action[]): KeyboardButton[][] {
+  const rows = new Map<number, KeyboardButton[]>();
+  for (const a of actions) {
+    const r = a.row ?? 0;
+    if (!rows.has(r)) rows.set(r, []);
+    const btn: KeyboardButton = a.webAppUrl
+      ? { text: a.label, web_app: { url: a.webAppUrl } }
+      : { text: a.label, callback_data: a.callbackData };
+    rows.get(r)!.push(btn);
+  }
+  return [...rows.keys()].sort((a, b) => a - b).map((k) => rows.get(k)!);
 }
 
 function normalizeChatId(chatId: string | number): string {
