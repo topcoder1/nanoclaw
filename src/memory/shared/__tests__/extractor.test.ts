@@ -58,7 +58,9 @@ describe('extractor', () => {
       userMessage: 'be terse from now on',
       agentReply: 'OK, will keep it short.',
     });
-    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    const files = fs
+      .readdirSync(candidateDir())
+      .filter((f) => f.endsWith('.md'));
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/telegram_main/);
     const raw = fs.readFileSync(path.join(candidateDir(), files[0]), 'utf8');
@@ -76,8 +78,35 @@ describe('extractor', () => {
       userMessage: 'random question',
       agentReply: 'random answer',
     });
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
+  });
+
+  it('skips malformed candidate objects without throwing', async () => {
+    const { generateText } = await import('ai');
+    (generateText as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({
+        candidates: [
+          { name: null, body: null }, // malformed
+          {
+            type: 'feedback',
+            name: 'Valid one',
+            description: 'd',
+            body: 'b',
+            proposed_action: 'create',
+            confidence: 0.8,
+          },
+        ],
+      }),
+    });
+    await extractCandidates({
+      groupName: 'tg',
+      userMessage: 'this is a substantive turn that exceeds the trivial threshold easily',
+      agentReply: 'OK substantive reply also long enough to skip trivial filtering rules',
+    });
+    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    expect(files).toHaveLength(1); // only the valid one
   });
 
   it('does not throw on malformed LLM output (fail closed)', async () => {

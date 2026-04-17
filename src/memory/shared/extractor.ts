@@ -22,14 +22,18 @@ const TRIVIAL_PATTERNS = [
 const MIN_TURN_TOKENS = 30; // approx tokens; multiply by 4 for char estimate
 const MIN_TURN_CHARS = MIN_TURN_TOKENS * 4; // 120 chars
 
-export function isTrivialTurn(userMessage: string, agentReply: string): boolean {
+export function isTrivialTurn(
+  userMessage: string,
+  agentReply: string,
+): boolean {
   // Pattern check first: single-word greetings/acks are always trivial.
   for (const pattern of TRIVIAL_PATTERNS) {
     if (pattern.test(userMessage.trim())) return true;
   }
   // Short combined length with short individual messages indicates trivial chatter.
   const total = userMessage.length + agentReply.length;
-  if (total < MIN_TURN_CHARS && userMessage.trim().split(/\s+/).length <= 5) return true;
+  if (total < MIN_TURN_CHARS && userMessage.trim().split(/\s+/).length <= 5)
+    return true;
   return false;
 }
 
@@ -71,7 +75,14 @@ export async function extractCandidates(input: ExtractInput): Promise<void> {
   }
 
   for (const cand of result.candidates) {
-    writeCandidate(cand, input);
+    try {
+      writeCandidate(cand, input);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), name: cand.name },
+        'memory extractor: failed to write candidate, skipping',
+      );
+    }
   }
 }
 
@@ -108,12 +119,26 @@ Skip ephemeral things (current task progress, one-off questions, agent confusion
 Return { "candidates": [] } if nothing qualifies. Output JSON ONLY, no prose.`;
 
 function parseLLMOutput(text: string): ExtractorResult {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/, '');
   const parsed = JSON.parse(trimmed) as ExtractorResult;
   if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
     return { candidates: [] };
   }
-  return parsed;
+  const valid = parsed.candidates.filter(
+    (c) =>
+      c &&
+      typeof c.type === 'string' &&
+      typeof c.name === 'string' &&
+      c.name.trim().length > 0 &&
+      typeof c.body === 'string' &&
+      c.body.trim().length > 0 &&
+      typeof c.proposed_action === 'string' &&
+      typeof c.confidence === 'number',
+  );
+  return { candidates: valid };
 }
 
 function readIndexSnippet(): string {
@@ -141,7 +166,10 @@ function writeCandidate(cand: ExtractedCandidate, input: ExtractInput): void {
     scopes: cand.scopes,
     extracted_from: input.groupName,
     extracted_at: new Date().toISOString(),
-    turn_excerpt: truncate(`USER: ${input.userMessage}\nAGENT: ${input.agentReply}`, 600),
+    turn_excerpt: truncate(
+      `USER: ${input.userMessage}\nAGENT: ${input.agentReply}`,
+      600,
+    ),
     proposed_action: cand.proposed_action,
     confidence: cand.confidence,
   };
@@ -152,11 +180,13 @@ function writeCandidate(cand: ExtractedCandidate, input: ExtractInput): void {
 }
 
 function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact'
+  );
 }
 
 function truncate(s: string, max: number): string {
