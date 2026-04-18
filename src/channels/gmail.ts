@@ -112,6 +112,14 @@ export class GmailChannel implements Channel {
     this.userEmail = profile.data.emailAddress || '';
     logger.info({ email: this.userEmail }, 'Gmail channel connected');
 
+    // pollIntervalMs === 0 → ops-only mode. OAuth + API client are ready
+    // (so getMessageBody/archiveThread/etc work) but no inbound polling.
+    // Used when SuperPilot handles ingestion and nanoclaw only needs
+    // Gmail for read/archive from the mini app.
+    if (this.pollIntervalMs <= 0) {
+      return;
+    }
+
     // Start polling with error backoff
     const schedulePoll = () => {
       const backoffMs =

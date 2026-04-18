@@ -35,17 +35,22 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   app.get('/', (_req, res) => {
     const attention = opts.db
       .prepare(
-        `SELECT id, title, detected_at FROM tracked_items
+        `SELECT id, title, detected_at, metadata FROM tracked_items
          WHERE state IN ('pushed','pending','held')
            AND (queue = 'attention'
                 OR (queue IS NULL AND classification = 'push'))
          ORDER BY detected_at DESC
          LIMIT 20`,
       )
-      .all() as Array<{ id: string; title: string; detected_at: number }>;
+      .all() as Array<{
+      id: string;
+      title: string;
+      detected_at: number;
+      metadata: string | null;
+    }>;
     const archive = opts.db
       .prepare(
-        `SELECT id, title, action_intent, detected_at FROM tracked_items
+        `SELECT id, title, action_intent, detected_at, metadata FROM tracked_items
          WHERE state = 'queued'
            AND (queue = 'archive_candidate'
                 OR (queue IS NULL AND classification = 'digest'))
@@ -57,7 +62,18 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       title: string;
       action_intent: string | null;
       detected_at: number;
+      metadata: string | null;
     }>;
+
+    const extractAccount = (metadata: string | null): string => {
+      if (!metadata) return '';
+      try {
+        const m = JSON.parse(metadata) as { account?: string };
+        return m.account ?? '';
+      } catch {
+        return '';
+      }
+    };
 
     const esc = (s: string) =>
       s.replace(
@@ -71,21 +87,39 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
             "'": '&#39;',
           })[c] ?? c,
       );
+    const formatAge = (detectedAt: number) => {
+      const mins = Math.round((Date.now() - detectedAt) / 60_000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m`;
+      const hours = Math.round(mins / 60);
+      if (hours < 24) return `${hours}h`;
+      const days = Math.round(hours / 24);
+      if (days < 7) return `${days}d`;
+      const weeks = Math.round(days / 7);
+      return `${weeks}w`;
+    };
+    const emailHref = (id: string, metadata: string | null) => {
+      const account = extractAccount(metadata);
+      const qs = account ? `?account=${encodeURIComponent(account)}` : '';
+      return `/email/${esc(id)}${qs}`;
+    };
     const attentionRow = (it: {
       id: string;
       title: string;
       detected_at: number;
+      metadata: string | null;
     }) => {
-      const mins = Math.round((Date.now() - it.detected_at) / 60_000);
-      return `<li><a href="/email/${esc(it.id)}">${esc(it.title || '(no subject)')}</a> <span class="age">${mins}m</span></li>`;
+      const age = formatAge(it.detected_at);
+      return `<li><a href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a> <span class="age">${age}</span></li>`;
     };
     const archiveRow = (it: {
       id: string;
       title: string;
       detected_at: number;
+      metadata: string | null;
     }) => {
-      const mins = Math.round((Date.now() - it.detected_at) / 60_000);
-      return `<li><label class="check"><input type="checkbox" class="sel" value="${esc(it.id)}"><a href="/email/${esc(it.id)}">${esc(it.title || '(no subject)')}</a> <span class="age">${mins}m</span></label></li>`;
+      const age = formatAge(it.detected_at);
+      return `<li><label class="check"><input type="checkbox" class="sel" value="${esc(it.id)}"><a href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a> <span class="age">${age}</span></label></li>`;
     };
 
     res.type('html').send(`<!doctype html><html><head>
@@ -155,10 +189,12 @@ ${
 </body></html>`);
   });
 
-  // Bulk archive — takes a list of tracked_item ids and resolves them in
-  // one UPDATE. Shares semantics with the `archive all` chat command but
-  // scoped to the provided set. No-op for missing/already-resolved items.
-  app.post('/api/archive/bulk', (req, res) => {
+  // Bulk archive — takes a list of tracked_item ids, archives each thread
+  // in Gmail (removes INBOX label), then resolves the local row. Items
+  // whose Gmail archive fails stay queued so the user can retry. Requires
+  // gmailOps to be wired up; otherwise falls back to local-only resolve
+  // for backwards compatibility.
+  app.post('/api/archive/bulk', async (req, res) => {
     const body = req.body as { itemIds?: unknown } | undefined;
     const ids = Array.isArray(body?.itemIds)
       ? (body!.itemIds as unknown[]).filter(
@@ -169,24 +205,90 @@ ${
       res.status(400).json({ error: 'itemIds required (non-empty string[])' });
       return;
     }
+
     const placeholders = ids.map(() => '?').join(',');
-    const info = opts.db
+    const rows = opts.db
       .prepare(
-        `UPDATE tracked_items
-         SET state = 'resolved',
-             resolution_method = 'miniapp:bulk_archive',
-             resolved_at = ?
+        `SELECT id, thread_id, metadata FROM tracked_items
          WHERE state = 'queued'
            AND id IN (${placeholders})
            AND (queue = 'archive_candidate'
                 OR (queue IS NULL AND classification = 'digest'))`,
       )
-      .run(Date.now(), ...ids);
+      .all(...ids) as Array<{
+      id: string;
+      thread_id: string | null;
+      metadata: string | null;
+    }>;
+
+    const succeededIds: string[] = [];
+    const failures: Array<{ id: string; error: string }> = [];
+
+    for (const row of rows) {
+      let account: string | null = null;
+      if (row.metadata) {
+        try {
+          const meta = JSON.parse(row.metadata) as { account?: string };
+          account = meta.account ?? null;
+        } catch {
+          // treat as missing account
+        }
+      }
+
+      if (!opts.gmailOps || !account || !row.thread_id) {
+        failures.push({
+          id: row.id,
+          error: !opts.gmailOps
+            ? 'gmail_unavailable'
+            : !account
+              ? 'missing_account'
+              : 'missing_thread_id',
+        });
+        continue;
+      }
+
+      try {
+        await opts.gmailOps.archiveThread(account, row.thread_id);
+        succeededIds.push(row.id);
+      } catch (err) {
+        failures.push({
+          id: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    let archived = 0;
+    if (succeededIds.length > 0) {
+      const ph = succeededIds.map(() => '?').join(',');
+      const info = opts.db
+        .prepare(
+          `UPDATE tracked_items
+           SET state = 'resolved',
+               resolution_method = 'miniapp:bulk_archive',
+               resolved_at = ?
+           WHERE state = 'queued'
+             AND id IN (${ph})`,
+        )
+        .run(Date.now(), ...succeededIds);
+      archived = info.changes;
+    }
+
     logger.info(
-      { requested: ids.length, archived: info.changes },
+      {
+        requested: ids.length,
+        matched: rows.length,
+        archived,
+        failed: failures.length,
+      },
       'Mini-app bulk archive',
     );
-    res.json({ archived: info.changes, requested: ids.length });
+    res.json({
+      archived,
+      requested: ids.length,
+      failed: failures.length,
+      failures: failures.slice(0, 10),
+    });
   });
 
   function lookupDraftAccount(draftId: string): string | null {
@@ -277,7 +379,28 @@ ${
   // --- Email full view ---
   app.get('/email/:emailId', async (req, res) => {
     const { emailId } = req.params;
-    const account = (req.query.account as string) || '';
+    let account = (req.query.account as string) || '';
+
+    // Telegram-pushed buttons sometimes omit ?account=. Fall back to the
+    // account stored in tracked_items.metadata so the detail page can still
+    // load. Match by thread_id or source_id (either can equal the URL id).
+    if (!account) {
+      const row = opts.db
+        .prepare(
+          `SELECT metadata FROM tracked_items
+           WHERE thread_id = ? OR source_id = ?
+           ORDER BY detected_at DESC LIMIT 1`,
+        )
+        .get(emailId, emailId) as { metadata: string | null } | undefined;
+      if (row?.metadata) {
+        try {
+          const m = JSON.parse(row.metadata) as { account?: string };
+          if (m.account) account = m.account;
+        } catch {
+          // ignore
+        }
+      }
+    }
 
     let meta = getCachedEmailMeta(emailId);
 

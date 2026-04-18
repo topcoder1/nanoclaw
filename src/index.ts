@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { OneCLI } from '@onecli-sh/sdk';
@@ -138,7 +139,13 @@ import { handleMessageWithProcedureCheck } from './learning/procedure-match-inte
 import { captureTaskOutcome } from './knowledge-ingestion.js';
 import { resolveModel, getEscalationModel } from './llm/provider.js';
 import { scoreComplexity } from './llm/escalation.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  NewMessage,
+  OnChatMetadata,
+  OnInboundMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 import { runAttentionReminderSweep } from './triage/reminder.js';
 import { runNightlyAgreementCheck } from './triage/agreement.js';
@@ -1450,6 +1457,54 @@ async function main(): Promise<void> {
       if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
         gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
         logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
+      }
+    }
+  }
+
+  // --- Ops-only Gmail providers ---
+  // Gmail channel polling is disabled (SuperPilot handles ingestion), but
+  // the mini app still needs to read/archive threads. Stand up ops-only
+  // Gmail API clients for every configured account and register them with
+  // the ops router. No polling, no channel routing — read/archive only.
+  {
+    const { GmailChannel } = await import('./channels/gmail.js');
+    const opsAccounts: Array<{ alias: string; credDir: string }> = [
+      { alias: 'personal', credDir: path.join(os.homedir(), '.gmail-mcp') },
+      {
+        alias: 'whoisxml',
+        credDir: path.join(os.homedir(), '.gmail-mcp-jonathan'),
+      },
+      {
+        alias: 'attaxion',
+        credDir: path.join(os.homedir(), '.gmail-mcp-attaxion'),
+      },
+      { alias: 'dev', credDir: path.join(os.homedir(), '.gmail-mcp-dev') },
+    ];
+    const noop = async () => {};
+    const noopMeta = async () => {};
+    const opsOpts = {
+      onMessage: noop as unknown as OnInboundMessage,
+      onChatMetadata: noopMeta as unknown as OnChatMetadata,
+      registeredGroups: () => ({}),
+    };
+    for (const { alias, credDir } of opsAccounts) {
+      if (!fs.existsSync(path.join(credDir, 'credentials.json'))) continue;
+      try {
+        const opsChannel = new GmailChannel(opsOpts, alias, credDir, 0);
+        await opsChannel.connect();
+        gmailOpsRouter.register(
+          alias,
+          opsChannel as unknown as GmailOpsProvider,
+        );
+        logger.info(
+          { alias, email: opsChannel.emailAddress },
+          'Registered ops-only Gmail provider',
+        );
+      } catch (err) {
+        logger.warn(
+          { alias, err },
+          'Failed to initialize ops-only Gmail provider',
+        );
       }
     }
   }
