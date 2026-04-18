@@ -683,9 +683,7 @@ export interface QACapturedCall {
 let qaCaptureHook:
   | ((call: QACapturedCall) => Promise<{ message_id: number }>)
   | null = null;
-export function __setTelegramQACapture(
-  hook: typeof qaCaptureHook,
-): void {
+export function __setTelegramQACapture(hook: typeof qaCaptureHook): void {
   qaCaptureHook = hook;
 }
 
