@@ -106,8 +106,13 @@ interface Scenario {
   expect: ScenarioExpect;
 }
 
-interface ScenarioResult {
+export interface ScenarioResult {
   name: string;
+  /**
+   * Human-readable description copied from the scenario file so the monitor
+   * can include it in Telegram regression cards without re-reading the JSON.
+   */
+  description: string;
   ok: boolean;
   failures: string[];
 }
@@ -373,7 +378,12 @@ async function runScenario(
     _closeDatabase();
   }
 
-  return { name: scn.name, ok: failures.length === 0, failures };
+  return {
+    name: scn.name,
+    description: scn.description,
+    ok: failures.length === 0,
+    failures,
+  };
 }
 
 function formatReport(results: ScenarioResult[]): string {
@@ -390,36 +400,29 @@ function formatReport(results: ScenarioResult[]): string {
   return lines.join('\n');
 }
 
-async function main(): Promise<void> {
-  try {
-    const scenarios = await loadScenarios();
-    if (scenarios.length === 0) {
-      process.stdout.write(`no scenarios in ${SCENARIO_DIR}\n`);
-      process.exit(0);
+/**
+ * Load and run every scenario. Pure function of on-disk state — no
+ * process.exit, no stdout. Imported by the scenarios monitor so it can
+ * diff verdicts against last run's state and alert on transitions.
+ */
+export async function runAll(): Promise<ScenarioResult[]> {
+  const scenarios = await loadScenarios();
+  const results: ScenarioResult[] = [];
+  for (const s of scenarios) {
+    try {
+      results.push(await runScenario(s));
+    } catch (err) {
+      results.push({
+        name: s.name,
+        description: s.description,
+        ok: false,
+        failures: [
+          `runner threw: ${err instanceof Error ? err.message : String(err)}`,
+        ],
+      });
     }
-    const results: ScenarioResult[] = [];
-    for (const s of scenarios) {
-      try {
-        results.push(await runScenario(s));
-      } catch (err) {
-        results.push({
-          name: s.name,
-          ok: false,
-          failures: [
-            `runner threw: ${err instanceof Error ? err.message : String(err)}`,
-          ],
-        });
-      }
-    }
-    process.stdout.write(formatReport(results) + '\n');
-    const failed = results.filter((r) => !r.ok).length;
-    process.exit(failed > 0 ? 1 : 0);
-  } catch (err) {
-    process.stderr.write(
-      `QA scenarios runner crashed: ${err instanceof Error ? err.message : err}\n`,
-    );
-    process.exit(2);
   }
+  return results;
 }
 
-main();
+export { formatReport, SCENARIO_DIR };

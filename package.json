@@ -22,7 +22,8 @@
     "triage:bootstrap": "tsx scripts/triage-bootstrap.ts",
     "qa:check": "tsx scripts/qa-check.ts",
     "qa:monitor": "tsx scripts/qa-monitor.ts",
-    "qa:scenarios": "tsx scripts/qa/scenarios.ts",
+    "qa:scenarios": "tsx scripts/qa-scenarios.ts",
+    "qa:monitor-scenarios": "tsx scripts/qa-monitor-scenarios.ts",
     "qa:all": "npm run qa:check && npm run qa:scenarios",
     "qa:propose-fix": "tsx scripts/qa/propose-fix.ts"
   },
