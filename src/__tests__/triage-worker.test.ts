@@ -3,11 +3,28 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const { mockClassify } = vi.hoisted(() => ({
-  mockClassify: vi.fn(),
-}));
+const { mockClassify, mockPushAttentionItem, mockRenderAttentionDashboard } =
+  vi.hoisted(() => ({
+    mockClassify: vi.fn(),
+    mockPushAttentionItem: vi.fn(),
+    mockRenderAttentionDashboard: vi.fn(),
+  }));
 vi.mock('../triage/classifier.js', () => ({
   classifyWithLlm: mockClassify,
+}));
+// CRITICAL: mock both Telegram-bound side effects at the top level so
+// every test in this file is silent. triageEmail dynamic-imports these
+// when not in shadow mode, and the real pushAttentionItem hits the
+// Telegram Bot API using TELEGRAM_BOT_TOKEN + EMAIL_INTEL_TG_CHAT_ID
+// from .env — without these mocks, running `npm test` spams real
+// attention cards at the user's Telegram chat. (Discovered 2026-04-19:
+// several "PR review from alice@example.com reason: x" cards had landed
+// in the live chat from repeated test runs.)
+vi.mock('../triage/push-attention.js', () => ({
+  pushAttentionItem: mockPushAttentionItem,
+}));
+vi.mock('../triage/dashboards.js', () => ({
+  renderAttentionDashboard: mockRenderAttentionDashboard,
 }));
 vi.mock('../logger.js', () => ({
   logger: {
@@ -30,6 +47,8 @@ describe('triageEmail', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-worker-'));
     setTraceDir(dir);
     mockClassify.mockReset();
+    mockPushAttentionItem.mockReset();
+    mockRenderAttentionDashboard.mockReset();
   });
   afterEach(() => {
     _closeDatabase();
@@ -113,12 +132,6 @@ describe('triageEmail', () => {
       },
     });
 
-    const pushSpy = vi.fn();
-    vi.resetModules();
-    vi.doMock('../triage/push-attention.js', () => ({
-      pushAttentionItem: pushSpy,
-    }));
-
     const out = await triageEmail({
       trackedItemId: 'x3',
       emailBody: 'x',
@@ -130,9 +143,11 @@ describe('triageEmail', () => {
       shadowMode: true,
     });
     expect(out.outcome).toBe('classified');
-    expect(pushSpy).not.toHaveBeenCalled();
+    // Top-level mocks let us assert the shadowMode=true path doesn't
+    // invoke either Telegram-bound helper, without per-test doMock dance.
+    expect(mockPushAttentionItem).not.toHaveBeenCalled();
+    expect(mockRenderAttentionDashboard).not.toHaveBeenCalled();
 
-    vi.doUnmock('../triage/push-attention.js');
     delete process.env.EMAIL_INTEL_TG_CHAT_ID;
   });
 
