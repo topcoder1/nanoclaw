@@ -28,6 +28,15 @@ import { logger } from '../logger.js';
 export const RECONCILE_INTERVAL_MS = 2 * 60 * 1000;
 export const RACE_GUARD_MS = 60 * 1000;
 export const MAX_ITEMS_PER_TICK = 100;
+/**
+ * Per-Gmail-call deadline. googleapis has no default timeout, so a hung
+ * Google serving node would pin the tick forever — which is exactly the
+ * failure we saw in prod (totalTicks stuck at 2 for 30+ minutes while
+ * the process itself was otherwise healthy). 15s is generous for a
+ * metadata-format threads.get; anything slower is indistinguishable
+ * from hung.
+ */
+export const GMAIL_CALL_TIMEOUT_MS = 15 * 1000;
 
 export interface ReconcileDeps {
   db: Database.Database;
@@ -40,6 +49,11 @@ export interface ReconcileDeps {
    * module-level Set used by the production loop.
    */
   missingSeen?: Set<string>;
+  /**
+   * Per-Gmail-call timeout in ms. Defaults to GMAIL_CALL_TIMEOUT_MS.
+   * Tests override this to verify hang behavior without waiting 15s.
+   */
+  gmailCallTimeoutMs?: number;
 }
 
 // Tracks threads that returned 'missing' on the previous tick. A thread
@@ -87,6 +101,28 @@ interface QueuedRow {
   thread_id: string;
   metadata: string | null;
   state?: string;
+}
+
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`timeout after ${ms}ms: ${label}`));
+    }, ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 /**
@@ -150,9 +186,10 @@ export async function reconcileOnce(
 
     result.checked++;
     try {
-      const status = await deps.gmailOps.getThreadInboxStatus(
-        account,
-        row.thread_id,
+      const status = await withTimeout(
+        deps.gmailOps.getThreadInboxStatus(account, row.thread_id),
+        deps.gmailCallTimeoutMs ?? GMAIL_CALL_TIMEOUT_MS,
+        `getThreadInboxStatus(${account}, ${row.thread_id})`,
       );
       if (status === 'in') {
         missingSeen.delete(row.thread_id);
@@ -211,13 +248,26 @@ export function startGmailReconciler(
 ): () => void {
   const log = deps.logger ?? logger;
   let stopped = false;
+  let inFlight = false;
 
   const tick = async () => {
     if (stopped) return;
+    // Concurrency guard: if a previous tick is still running (e.g. stuck
+    // on a slow Gmail call before we added the timeout), skip rather
+    // than stacking overlapping ticks that all wait on the same hung
+    // request. With the per-call timeout this should rarely fire, but
+    // it's a cheap safety net if the timeout is ever raised.
+    if (inFlight) {
+      log.warn('Gmail reconciler: previous tick still in flight, skipping');
+      return;
+    }
+    inFlight = true;
     try {
       await reconcileOnce(deps);
     } catch (err) {
       log.error({ err }, 'Gmail reconciler tick crashed');
+    } finally {
+      inFlight = false;
     }
   };
 

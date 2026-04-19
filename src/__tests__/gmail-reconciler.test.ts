@@ -247,6 +247,35 @@ describe('gmail-reconciler', () => {
     expect(gmailOps.getThreadInboxStatus).not.toHaveBeenCalled();
   });
 
+  it('times out hung Gmail calls and counts them as errors', async () => {
+    insertTrackedItem(makeGmailItem('item-hang', 'thread-hang', OLD));
+
+    // Simulate a hung Gmail call that never resolves. Without the
+    // per-call timeout the tick would hang forever — which is the bug
+    // this test guards against regressing.
+    const gmailOps = {
+      getThreadInboxStatus: vi.fn(
+        () => new Promise<'in' | 'out' | 'missing'>(() => {}),
+      ),
+    };
+
+    const result = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen: new Set(),
+      gmailCallTimeoutMs: 50,
+    });
+
+    expect(result.checked).toBe(1);
+    expect(result.errors).toBe(1);
+    const row = getDb()
+      .prepare('SELECT state FROM tracked_items WHERE id = ?')
+      .get('item-hang') as { state: string };
+    // Stays queued; reconciler retries next tick.
+    expect(row.state).toBe('queued');
+  });
+
   it('continues past transient errors on individual items', async () => {
     insertTrackedItem(makeGmailItem('item-err', 'thread-err', OLD));
     insertTrackedItem(makeGmailItem('item-ok', 'thread-ok', OLD));
