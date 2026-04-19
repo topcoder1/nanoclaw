@@ -53,7 +53,50 @@ interface Proposal {
   testStatus: 'pass' | 'fail' | 'skipped';
   proposedAt: number;
   pushed: boolean;
+  blocked?: boolean;
+  blockedReasons?: string[];
 }
+
+interface GuardrailCheck {
+  blocked: boolean;
+  reasons: string[];
+}
+
+/**
+ * Paths where an auto-generated diff is NEVER auto-mergeable, regardless
+ * of test result. Rationale per entry:
+ *   - scripts/qa/**          an AI that's grading itself can weaken the graders
+ *   - **\/\*.test.ts          tests can be relaxed to make red turn green
+ *   - .env*                  credentials surface
+ *   - container/             container recipe — affects every agent run
+ *   - src/channels/registry  channel fan-in — breakage is cross-cutting
+ *   - package(-lock).json    dependency supply chain
+ *   - .github/workflows/     CI surface — same self-grading concern
+ *   - .claude/               ops/worktree metadata
+ *
+ * src/db.ts is intentionally NOT here — benign query helpers are fine to
+ * auto-merge. The migrations gate (DDL_PATTERN check) handles the actual
+ * danger: schema changes that need human review.
+ */
+const PROTECTED_PATHS: RegExp[] = [
+  /^scripts\/qa\//,
+  /\.test\.ts$/,
+  /^\.env($|\.)/,
+  /^container\//,
+  /^src\/channels\/registry\.ts$/,
+  /^package(-lock)?\.json$/,
+  /^\.github\/workflows\//,
+  /^\.claude\//,
+];
+
+/**
+ * SQL DDL pattern for the migrations gate. Matched against added diff
+ * lines (not removed lines — removing a CREATE TABLE happens when a
+ * migration moves). Triggers on any *.ts file, not just src/db.ts, so
+ * migration helpers stashed elsewhere are also caught.
+ */
+const DDL_PATTERN =
+  /\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|VIEW|TRIGGER|UNIQUE)\b/i;
 
 const REPO = path.resolve('.');
 const PROPOSALS_DIR = path.join(REPO, 'data/qa-proposals');
@@ -221,6 +264,51 @@ function changedFiles(worktreePath: string): string[] {
   }
 }
 
+/**
+ * Guardrails run BEFORE push and BEFORE the approval card. A blocked
+ * proposal is NOT pushed to origin and NOT offered for one-tap merge —
+ * the card that's posted has no merge button, only a pointer at the
+ * local worktree for manual inspection. Unlike classifyRisk (which
+ * merely adjusts the risk label on the card), this function is the
+ * hard gate.
+ */
+export function checkGuardrails(
+  files: string[],
+  worktreePath: string,
+): GuardrailCheck {
+  const reasons: string[] = [];
+
+  const hitProtected = files.filter((f) =>
+    PROTECTED_PATHS.some((re) => re.test(f)),
+  );
+  if (hitProtected.length > 0) {
+    reasons.push(`protected path(s): ${hitProtected.join(', ')}`);
+  }
+
+  // Migration gate: DDL in added lines of any *.ts file.
+  const tsFiles = files.filter((f) => f.endsWith('.ts'));
+  for (const f of tsFiles) {
+    let diff = '';
+    try {
+      diff = execSync(`git diff main -- ${JSON.stringify(f)}`, {
+        cwd: worktreePath,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    } catch {
+      continue; // diff failed — don't block on a tooling issue
+    }
+    const addedLines = diff
+      .split('\n')
+      .filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+    if (addedLines.some((l) => DDL_PATTERN.test(l))) {
+      reasons.push(`DDL (schema change) detected in ${f}`);
+    }
+  }
+
+  return { blocked: reasons.length > 0, reasons };
+}
+
 function classifyRisk(
   files: string[],
   stat: { files: number; insertions: number; deletions: number },
@@ -357,10 +445,16 @@ async function main(): Promise<void> {
     }
 
     const testStatus = runBuildAndTest(worktreePath);
-    const risk = classifyRisk(files, stat);
+    const guardrails = checkGuardrails(files, worktreePath);
+    // Blocked proposals are ALWAYS reported as HIGH regardless of size —
+    // they're for manual inspection, and we don't want a small-looking
+    // diff to mislead the reviewer.
+    const risk = guardrails.blocked ? 'HIGH' : classifyRisk(files, stat);
 
+    // Guardrail hits suppress push (and the approval card). Tests still
+    // run above so the manual-review card can report the status.
     let pushed = false;
-    if (testStatus === 'pass' && !dryRun) {
+    if (testStatus === 'pass' && !dryRun && !guardrails.blocked) {
       pushed = pushBranch(worktreePath, branch);
     }
 
@@ -376,6 +470,9 @@ async function main(): Promise<void> {
       testStatus,
       proposedAt: Date.now(),
       pushed,
+      ...(guardrails.blocked
+        ? { blocked: true, blockedReasons: guardrails.reasons }
+        : {}),
     };
     fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
     fs.writeFileSync(
@@ -383,9 +480,44 @@ async function main(): Promise<void> {
       JSON.stringify(proposal, null, 2),
     );
 
+    const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
+
+    if (guardrails.blocked) {
+      // No merge button — a blocked diff must never be one-tap mergeable.
+      // Worktree is retained so the user can `cd` in and review / fix / merge
+      // by hand; they can also tap Close to clean up.
+      const lines: string[] = [];
+      lines.push(`🛡️ *QA autopilot: manual review required*`);
+      lines.push('');
+      lines.push(
+        `*Failure:* ${failureReport.failures[0]?.name ?? '(multi)'}`,
+      );
+      lines.push(`*Blocked by:*`);
+      for (const r of guardrails.reasons) lines.push(`  • ${r}`);
+      lines.push(
+        `*Diff:* +${stat.insertions}  −${stat.deletions}  across ${stat.files} file(s)`,
+      );
+      lines.push(`*Tests:* ${testStatus}`);
+      lines.push(`*Worktree:* \`${worktreePath}\``);
+      lines.push(`*ID:* \`${id}\``);
+      if (chatId && !dryRun) {
+        await sendTelegram(chatId, lines.join('\n'), {
+          inline_keyboard: [
+            [
+              { text: '✕ Close', callback_data: `qa:close:${id}` },
+              { text: '🔍 Details', callback_data: `qa:details:${id}` },
+            ],
+          ],
+        });
+      }
+      process.stdout.write(
+        `qa-propose-fix: proposal ${id} BLOCKED (${guardrails.reasons.join('; ')}), tests=${testStatus}\n`,
+      );
+      process.exit(0);
+    }
+
     if (!pushed) {
       // Tests failed or dry-run.
-      const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
       if (chatId && !dryRun) {
         await sendTelegram(
           chatId,
@@ -399,7 +531,6 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
-    const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
     if (chatId) {
       const card = formatCard(proposal);
       await sendTelegram(chatId, card, {
@@ -427,4 +558,10 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Only auto-run when invoked as a script, so test harnesses can import
+// checkGuardrails without triggering the full agent pipeline.
+const invokedDirectly =
+  process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname);
+if (invokedDirectly) {
+  main();
+}
