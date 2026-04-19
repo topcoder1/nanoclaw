@@ -162,12 +162,23 @@ export async function reconcileOnce(
         // First observation — wait one more tick before resolving, to
         // absorb transient 404s from Gmail's serving layer.
         missingSeen.add(row.thread_id);
+        log.info(
+          { itemId: row.id, threadId: row.thread_id, account },
+          'Gmail reconciler: thread missing once → deferred (transient-404 guard)',
+        );
         continue;
       }
+      const wasMissing = missingSeen.has(row.thread_id);
       // Either status === 'out', or 'missing' seen twice in a row.
       missingSeen.delete(row.thread_id);
       resolveStmt.run(now, row.id);
       result.resolved++;
+      if (status === 'missing' && wasMissing) {
+        log.info(
+          { itemId: row.id, threadId: row.thread_id, account },
+          'Gmail reconciler: thread missing twice in a row → resolved',
+        );
+      }
     } catch (err) {
       result.errors++;
       log.warn(

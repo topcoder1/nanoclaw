@@ -1724,6 +1724,12 @@ async function main(): Promise<void> {
       await import('./triage/gmail-reconciler.js');
     startGmailReconciler({ db: getDb(), gmailOps: gmailOpsRouter });
     logger.info('Gmail→local reconciler started');
+
+    const { startReconcilerHealthWatcher } = await import(
+      './triage/reconciler-health.js'
+    );
+    startReconcilerHealthWatcher();
+    logger.info('Reconciler health watcher started');
   }
 
   // --- Notify on draft enrichment ---
