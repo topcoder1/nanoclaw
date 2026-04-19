@@ -256,9 +256,12 @@ describe('Mini App extended routes', () => {
     // account — ?authuser= alone is unreliable in practice (Gmail often
     // ignores it and falls back to account 0). Email is URL-encoded so the
     // "@" becomes %40.
-    // Email must appear LITERAL — "%40" (percent-encoded @) makes Gmail 404.
-    expect(res.text).toContain('/mail/u/jonathan@attaxion.com/');
-    expect(res.text).not.toContain('/mail/u/jonathan%40attaxion.com/');
+    // Attaxion is a Google Workspace domain; /a/DOMAIN/ routes to the
+    // signed-in user of that Workspace (or prompts Workspace sign-in),
+    // which works even when the user hasn't added that specific email
+    // address to Chrome's account picker. /u/EMAIL/ 404s in that case.
+    expect(res.text).toContain('/a/attaxion.com/#inbox/19da1d9492deadbeef');
+    expect(res.text).not.toContain('%40');
     // And the anchor must use the Gmail thread id, not nanoclaw's internal id.
     expect(res.text).toContain('#inbox/19da1d9492deadbeef');
     expect(res.text).not.toContain('#inbox/sse-xyz');

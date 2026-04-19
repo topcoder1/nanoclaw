@@ -34,6 +34,25 @@ function looksLikeHtml(body: string): boolean {
   );
 }
 
+// Gmail deep-link URL, routed by account type:
+// - Workspace domain (e.g. @attaxion.com): /a/DOMAIN/ — Gmail looks up
+//   the signed-in user for that Workspace domain, or prompts sign-in if
+//   none. Works even when the user hasn't added that specific email to
+//   Chrome's account picker.
+// - Personal gmail.com (or no account): /mail/u/EMAIL/ or bare /mail/.
+// The previous /u/EMAIL/ form 404'd for the user because the Attaxion
+// Workspace account wasn't in their browser session even though our
+// backend had OAuth for it.
+function buildGmailOpenUrl(account: string, threadId: string): string {
+  const id = threadId || '';
+  if (!account) return `https://mail.google.com/mail/#inbox/${id}`;
+  const domain = (account.split('@')[1] || '').toLowerCase();
+  if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
+    return `https://mail.google.com/a/${domain}/#inbox/${id}`;
+  }
+  return `https://mail.google.com/mail/u/${account}/#inbox/${id}`;
+}
+
 function renderPlainTextBody(body: string): string {
   // Escape, then linkify bare URLs, then convert newlines.
   const escaped = escapeHtml(body);
@@ -80,7 +99,7 @@ export function renderEmailFull(data: EmailFullData): string {
     data-account="${escapeHtml(data.account || '')}"
     data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/u/${escapeHtml(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
+  <a class="btn" href="${escapeHtml(buildGmailOpenUrl(data.account || '', data.gmailId || data.emailId || ''))}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>
