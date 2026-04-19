@@ -12,6 +12,10 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  STATE_MACHINE_INVARIANTS,
+  RESOLUTION_METHOD_PREFIXES,
+} from './invariant-predicates.js';
 
 export type Category = 'db' | 'log' | 'http' | 'env';
 
@@ -70,27 +74,64 @@ export async function runAll(): Promise<Result[]> {
   const results: Result[] = [];
   const now = Date.now();
 
-  // ── DB: state-machine orphans ─────────────────────────────────────────
-  {
-    const n = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM tracked_items WHERE state='queued' AND queue='ignore'`,
-        )
-        .get() as { n: number }
-    ).n;
+  // ── DB: state-machine invariants ──────────────────────────────────────
+  // Predicates live in ./invariant-predicates.ts and are reused verbatim
+  // by the runtime-proof test suite — see
+  // src/__tests__/invariants-runtime-proof.test.ts. Any violation here
+  // means a real mutation path wrote state that breaks a structural
+  // property (terminal flags, pairing, monotonicity, etc.), not user
+  // behavior or traffic level.
+  for (const inv of STATE_MACHINE_INVARIANTS) {
+    const n = (db.prepare(inv.countSql).get() as { n: number }).n;
     results.push({
-      name: 'no-orphan-ignore-items',
+      name: inv.name,
       category: 'db',
       ok: n === 0,
       message:
         n === 0
-          ? 'no queued items with queue=ignore'
-          : `${n} ignore-classified items stuck in queued state`,
+          ? `✓ ${inv.description}`
+          : `${n} row(s) violate: ${inv.description}`,
       details: { count: n },
     });
   }
 
+  // ── DB: resolution_method known-prefix check ──────────────────────────
+  // Adjunct to the "well-formed" predicate: also reject category prefixes
+  // that aren't in the audited allowlist. Kept here (not in the shared
+  // predicates module) because the allowlist itself is lexical code, not
+  // a SQL expression.
+  {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT resolution_method FROM tracked_items
+         WHERE state='resolved' AND resolution_method IS NOT NULL
+           AND instr(resolution_method, ':') > 0`,
+      )
+      .all() as Array<{ resolution_method: string }>;
+    const unknown = rows
+      .map((r) => r.resolution_method)
+      .filter(
+        (m) =>
+          !(RESOLUTION_METHOD_PREFIXES as readonly string[]).includes(
+            m.split(':')[0]!,
+          ),
+      );
+    results.push({
+      name: 'resolution-method-known-prefix',
+      category: 'db',
+      ok: unknown.length === 0,
+      message:
+        unknown.length === 0
+          ? 'every resolution_method uses an allowlisted category prefix'
+          : `unknown category prefix(es): ${unknown.join(', ')}`,
+      details: { unknown },
+    });
+  }
+
+  // ── DB: push-latency liveness (NOT a state-machine invariant) ─────────
+  // A 5-minute threshold is time-dependent; this is an SLO, not an
+  // invariant. Kept for operational signal — if push is backed up we
+  // want to know — but don't confuse with the structural checks above.
   {
     const n = (
       db
