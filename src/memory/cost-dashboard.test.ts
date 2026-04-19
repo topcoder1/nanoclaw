@@ -179,7 +179,11 @@ describe('executeAssistantCommand', () => {
         .prepare(
           `SELECT id, state, resolution_method FROM tracked_items ORDER BY id`,
         )
-        .all() as Array<{ id: string; state: string; resolution_method: string }>;
+        .all() as Array<{
+        id: string;
+        state: string;
+        resolution_method: string;
+      }>;
       for (const r of rows) {
         expect(r.state).toBe('resolved');
         expect(r.resolution_method).toBe('manual:archive_all');
