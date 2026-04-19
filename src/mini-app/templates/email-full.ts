@@ -80,7 +80,7 @@ export function renderEmailFull(data: EmailFullData): string {
     data-account="${escapeHtml(data.account || '')}"
     data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/u/${encodeURIComponent(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
+  <a class="btn" href="https://mail.google.com/mail/u/${escapeHtml(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>
@@ -248,7 +248,9 @@ function renderReplyControls(
       editBtn.addEventListener('click', async () => {
         try {
           await saveBody();
-          const url = 'https://mail.google.com/mail/u/' + encodeURIComponent(account) + '/#drafts?compose=' + encodeURIComponent(draftId);
+          // Gmail's /u/EMAIL/ router needs a literal "@", not "%40" —
+          // encodeURIComponent would percent-encode it and trigger a 404.
+          const url = 'https://mail.google.com/mail/u/' + account + '/#drafts?compose=' + encodeURIComponent(draftId);
           window.open(url, '_blank');
         } catch (e) {
           showError(String(e.message || e));
