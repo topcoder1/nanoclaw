@@ -37,9 +37,17 @@ function looksLikeHtml(body: string): boolean {
 function renderPlainTextBody(body: string): string {
   // Escape, then linkify bare URLs, then convert newlines.
   const escaped = escapeHtml(body);
+  // Capture URL greedily, then peel trailing punctuation/closing brackets
+  // that are almost never part of the URL itself — common in plain-text
+  // emails that wrap links like "[Gusto] (https://gusto.com)".
   const linkified = escaped.replace(
     /(https?:\/\/[^\s<>"]+)/g,
-    '<a href="$1" target="_blank" rel="noopener" style="color:#58a6ff;">$1</a>',
+    (url) => {
+      const m = url.match(/^(.*?)([).,;:!?]+)$/);
+      const clean = m ? m[1] : url;
+      const trail = m ? m[2] : '';
+      return `<a href="${clean}" target="_blank" rel="noopener" style="color:#58a6ff;">${clean}</a>${trail}`;
+    },
   );
   // Double-newline => paragraph; single => <br>.
   const paragraphs = linkified
