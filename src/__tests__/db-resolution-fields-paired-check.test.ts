@@ -108,15 +108,15 @@ describe('tracked_items CHECK constraint: resolution_fields_paired', () => {
     });
     expect(() =>
       getDb()
-        .prepare(`UPDATE tracked_items SET resolved_at = NULL WHERE id = 'live-3'`)
+        .prepare(
+          `UPDATE tracked_items SET resolved_at = NULL WHERE id = 'live-3'`,
+        )
         .run(),
     ).toThrow(CHECK_ERROR);
   });
 
   it('allows INSERT with both NULL (active row)', () => {
-    expect(() =>
-      insertRaw({ id: 'ok-active', source_id: 's6' }),
-    ).not.toThrow();
+    expect(() => insertRaw({ id: 'ok-active', source_id: 's6' })).not.toThrow();
   });
 
   it('allows INSERT with both set (resolved row)', () => {
