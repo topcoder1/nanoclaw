@@ -374,15 +374,23 @@ describe('invariants runtime proof — every mutation path preserves every state
     expect(n).toBe(1);
   });
 
-  it('predicate catches: no-orphan-ignore-items when queue=ignore but state=queued', () => {
+  // `no-orphan-ignore-items` was upgraded from predicate-detected to
+  // schema-enforced via a CHECK constraint (see src/db.ts). The violation
+  // is now *literally impossible to construct* from the app layer, so the
+  // counter-example instead proves the constraint rejects the raw SQL
+  // that would have been required. Predicate count stays at 0 because the
+  // row never lands.
+  it('schema rejects: no-orphan-ignore-items (CHECK constraint fires on raw UPDATE)', () => {
     seedItem({ id: 'bad-i', source_id: 'src-bad-i', state: 'queued' });
-    getDb()
-      .prepare(`UPDATE tracked_items SET queue = 'ignore' WHERE id = ?`)
-      .run('bad-i');
+    expect(() =>
+      getDb()
+        .prepare(`UPDATE tracked_items SET queue = 'ignore' WHERE id = ?`)
+        .run('bad-i'),
+    ).toThrow(/CHECK constraint/i);
     const inv = STATE_MACHINE_INVARIANTS.find(
       (i) => i.name === 'no-orphan-ignore-items',
     )!;
     const n = (getDb().prepare(inv.countSql).get() as { n: number }).n;
-    expect(n).toBe(1);
+    expect(n).toBe(0);
   });
 });

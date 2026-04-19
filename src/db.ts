@@ -420,6 +420,105 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Invariant hardening: enforce `no-orphan-ignore-items` at the schema
+  // layer. queue='ignore' rows are auto-resolved by the classifier, so a
+  // row with state='queued' AND queue='ignore' is always a bug — the
+  // invariant checker (scripts/qa/invariant-predicates.ts) detects it
+  // after the fact; this CHECK constraint makes it literally impossible.
+  //
+  // SQLite has no `ALTER TABLE ADD CONSTRAINT`, so we rewrite the table.
+  // Idempotent via sqlite_master.sql sniff; wrapped in a transaction so
+  // an abort can never leave the DB with a dropped tracked_items.
+  try {
+    const meta = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='tracked_items'`,
+      )
+      .get() as { sql?: string } | undefined;
+    const hasCheck = meta?.sql?.toUpperCase().includes('CHECK') ?? false;
+    if (!hasCheck) {
+      // Self-heal any live violators before the rewrite would fail on them.
+      // Resolves them via the same path the classifier would take.
+      const orphan = database
+        .prepare(
+          `SELECT COUNT(*) AS n FROM tracked_items WHERE state='queued' AND queue='ignore'`,
+        )
+        .get() as { n: number };
+      if (orphan.n > 0) {
+        logger.warn(
+          `[db] auto-resolving ${orphan.n} orphan-ignore row(s) before CHECK-constraint migration`,
+        );
+        database
+          .prepare(
+            `UPDATE tracked_items
+             SET state='resolved', resolved_at=?, resolution_method='classifier:ignore'
+             WHERE state='queued' AND queue='ignore'`,
+          )
+          .run(Date.now());
+      }
+      database.exec(`
+        BEGIN;
+        CREATE TABLE tracked_items_new (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          group_name TEXT NOT NULL,
+          state TEXT NOT NULL,
+          classification TEXT,
+          superpilot_label TEXT,
+          trust_tier TEXT,
+          title TEXT NOT NULL,
+          summary TEXT,
+          thread_id TEXT,
+          detected_at INTEGER NOT NULL,
+          pushed_at INTEGER,
+          resolved_at INTEGER,
+          resolution_method TEXT,
+          digest_count INTEGER NOT NULL DEFAULT 0,
+          telegram_message_id INTEGER,
+          classification_reason TEXT,
+          metadata TEXT,
+          confidence REAL,
+          model_tier INTEGER,
+          action_intent TEXT,
+          facts_extracted_json TEXT,
+          repo_candidates_json TEXT,
+          reasons_json TEXT,
+          reminded_at INTEGER,
+          queue TEXT,
+          CHECK (NOT (state = 'queued' AND queue = 'ignore'))
+        );
+        INSERT INTO tracked_items_new SELECT
+          id, source, source_id, group_name, state, classification,
+          superpilot_label, trust_tier, title, summary, thread_id,
+          detected_at, pushed_at, resolved_at, resolution_method,
+          digest_count, telegram_message_id, classification_reason,
+          metadata, confidence, model_tier, action_intent,
+          facts_extracted_json, repo_candidates_json, reasons_json,
+          reminded_at, queue
+        FROM tracked_items;
+        DROP TABLE tracked_items;
+        ALTER TABLE tracked_items_new RENAME TO tracked_items;
+        CREATE INDEX IF NOT EXISTS idx_tracked_state
+          ON tracked_items(group_name, state);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source
+          ON tracked_items(source, source_id);
+        CREATE INDEX IF NOT EXISTS idx_tracked_dashboard
+          ON tracked_items(group_name, state, detected_at);
+        CREATE INDEX IF NOT EXISTS idx_tracked_thread
+          ON tracked_items(thread_id);
+        COMMIT;
+      `);
+      logger.info(
+        '[db] tracked_items CHECK constraint (no orphan ignore) installed',
+      );
+    }
+  } catch (err) {
+    logger.error(
+      `[db] failed to install tracked_items CHECK constraint: ${String(err)}`,
+    );
+  }
+
   // Triage v1: skip-list for learned pre-filter patterns
   database.exec(`
     CREATE TABLE IF NOT EXISTS triage_skip_list (
