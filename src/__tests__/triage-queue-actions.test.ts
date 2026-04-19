@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
 import {
   handleArchive,
@@ -12,7 +12,7 @@ describe('queue-actions', () => {
   beforeEach(() => _initTestDatabase());
   afterEach(() => _closeDatabase());
 
-  it('handleArchive marks item resolved and records skip + negative example', () => {
+  it('handleArchive marks item resolved and records skip + negative example', async () => {
     insertTrackedItem({
       id: 'a1',
       source: 'gmail',
@@ -32,7 +32,7 @@ describe('queue-actions', () => {
       digest_count: 0,
       telegram_message_id: null,
       classification_reason: null,
-      metadata: { sender: 'noreply@foo.com' },
+      metadata: { sender: 'noreply@foo.com', account: 'me@gmail.com' },
       confidence: 0.9,
       model_tier: 1,
       action_intent: null,
@@ -41,7 +41,10 @@ describe('queue-actions', () => {
       reasons: null,
     });
 
-    handleArchive('a1');
+    const gmailOps = { archiveThread: vi.fn().mockResolvedValue(undefined) };
+    const result = await handleArchive('a1', { gmailOps });
+    expect(result).toEqual({ archived: true });
+    expect(gmailOps.archiveThread).toHaveBeenCalledWith('me@gmail.com', 't');
 
     const row = getDb()
       .prepare(
@@ -68,11 +71,57 @@ describe('queue-actions', () => {
     expect(ex?.user_queue).toBe('archive_candidate');
   });
 
-  it('handleArchive is a no-op when item is missing', () => {
-    expect(() => handleArchive('missing')).not.toThrow();
+  it('handleArchive is a no-op when item is missing', async () => {
+    await expect(handleArchive('missing')).resolves.toEqual({
+      archived: false,
+      reason: 'missing',
+    });
   });
 
-  it('handleArchive does NOT promote skip-list for legacy (pre-triage) items', () => {
+  it('handleArchive leaves item queued when Gmail archive fails', async () => {
+    insertTrackedItem({
+      id: 'gfail',
+      source: 'gmail',
+      source_id: 'gmail:gfail',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'gmail fail',
+      summary: null,
+      thread_id: 'tgfail',
+      detected_at: Date.now(),
+      pushed_at: Date.now(),
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: { sender: 'x@y.com', account: 'me@gmail.com' },
+      confidence: 0.9,
+      model_tier: 1,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
+    });
+
+    const gmailOps = {
+      archiveThread: vi.fn().mockRejectedValue(new Error('429 rate limit')),
+    };
+    const result = await handleArchive('gfail', { gmailOps });
+    expect(result.archived).toBe(false);
+    expect(result.reason).toBe('gmail_failed');
+
+    const row = getDb()
+      .prepare(`SELECT state FROM tracked_items WHERE id = ?`)
+      .get('gfail') as { state: string };
+    // Stays queued for reconciler/retry — did NOT local-resolve.
+    expect(row.state).toBe('pushed');
+  });
+
+  it('handleArchive does NOT promote skip-list for legacy (pre-triage) items', async () => {
     // model_tier: null means the item was never triage-classified. Archives
     // from the legacy flow must not pollute the triage skip-list.
     insertTrackedItem({
@@ -103,7 +152,8 @@ describe('queue-actions', () => {
       reasons: null,
     });
 
-    handleArchive('legacy1');
+    const gmailOps = { archiveThread: vi.fn().mockResolvedValue(undefined) };
+    await handleArchive('legacy1', { gmailOps });
 
     const skip = getDb()
       .prepare(`SELECT hit_count FROM triage_skip_list WHERE pattern = ?`)

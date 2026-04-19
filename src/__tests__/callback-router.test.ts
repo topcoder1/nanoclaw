@@ -383,7 +383,9 @@ describe('handleCallback', () => {
     const mod = await import('../triage/queue-actions.js');
     (mod.handleArchive as any).mockClear();
     await handleCallback(makeQuery('triage:archive:item-1'), deps);
-    expect(mod.handleArchive).toHaveBeenCalledWith('item-1');
+    expect(mod.handleArchive).toHaveBeenCalledWith('item-1', {
+      gmailOps: deps.gmailOps,
+    });
   });
 
   it('triage:dismiss dispatches to handleDismiss', async () => {

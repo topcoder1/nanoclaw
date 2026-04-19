@@ -605,22 +605,93 @@ export async function handleCallback(
         // After initial split: action='triage', entityId=<sub>, extra, extra2.
         const sub = entityId;
         if (sub === 'archive_all') {
-          // Mass-archive the whole archive queue. Shares the SQL with the
-          // `archive all` chat command (see memory/cost-dashboard.ts).
+          // Mass-archive the whole archive queue.
+          //
+          // Gmail is source of truth: for every gmail-sourced candidate, we
+          // archive the thread in Gmail first and only resolve locally on
+          // success. Items that fail (or are missing metadata) stay queued
+          // so the user can retry — the reconciler would re-surface them
+          // anyway if we local-resolved without archiving in Gmail.
           if (deps.db) {
-            const info = deps.db
+            const rows = deps.db
               .prepare(
-                `UPDATE tracked_items
-                 SET state = 'resolved',
-                     resolution_method = 'manual:archive_all',
-                     resolved_at = ?
+                `SELECT id, source, thread_id, metadata FROM tracked_items
                  WHERE state = 'queued'
                    AND (queue = 'archive_candidate'
                         OR (queue IS NULL AND classification = 'digest'))`,
               )
-              .run(Date.now());
+              .all() as Array<{
+              id: string;
+              source: string;
+              thread_id: string | null;
+              metadata: string | null;
+            }>;
+
+            const succeededIds: string[] = [];
+            let failed = 0;
+
+            for (const row of rows) {
+              let account: string | null = null;
+              if (row.metadata) {
+                try {
+                  const m = JSON.parse(row.metadata) as { account?: string };
+                  account = typeof m.account === 'string' ? m.account : null;
+                } catch {
+                  // malformed metadata — treat as missing account
+                }
+              }
+
+              // Non-gmail items: resolve locally with no Gmail call.
+              if (row.source !== 'gmail' || !row.thread_id) {
+                succeededIds.push(row.id);
+                continue;
+              }
+
+              if (!deps.gmailOps || !account) {
+                failed++;
+                continue;
+              }
+
+              try {
+                await deps.gmailOps.archiveThread(account, row.thread_id);
+                succeededIds.push(row.id);
+              } catch (err) {
+                failed++;
+                logger.warn(
+                  {
+                    itemId: row.id,
+                    account,
+                    threadId: row.thread_id,
+                    err: err instanceof Error ? err.message : String(err),
+                  },
+                  'archive_all: Gmail archive failed, leaving item queued',
+                );
+              }
+            }
+
+            let archived = 0;
+            if (succeededIds.length > 0) {
+              const ph = succeededIds.map(() => '?').join(',');
+              const info = deps.db
+                .prepare(
+                  `UPDATE tracked_items
+                   SET state = 'resolved',
+                       resolution_method = 'manual:archive_all',
+                       resolved_at = ?
+                   WHERE state = 'queued'
+                     AND id IN (${ph})`,
+                )
+                .run(Date.now(), ...succeededIds);
+              archived = info.changes;
+            }
+
             logger.info(
-              { count: info.changes, chatJid: query.chatJid },
+              {
+                count: archived,
+                failed,
+                matched: rows.length,
+                chatJid: query.chatJid,
+              },
               'Mass archive via dashboard button',
             );
             // Refresh the dashboard immediately so the user sees 0 pending.
@@ -630,7 +701,7 @@ export async function handleCallback(
           break;
         }
         if (sub === 'archive') {
-          handleTriageArchive(extra);
+          await handleTriageArchive(extra, { gmailOps: deps.gmailOps });
         } else if (sub === 'dismiss') {
           handleTriageDismiss(extra);
         } else if (sub === 'snooze') {

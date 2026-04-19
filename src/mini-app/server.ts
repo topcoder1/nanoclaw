@@ -381,9 +381,8 @@ ${
   // timestamp, duration, counts, and totals since process start. Returns
   // 503 if the reconciler has never run yet.
   app.get('/api/health/reconciler', async (_req, res) => {
-    const { getReconcilerStatus } = await import(
-      '../triage/gmail-reconciler.js'
-    );
+    const { getReconcilerStatus } =
+      await import('../triage/gmail-reconciler.js');
     const s = getReconcilerStatus();
     if (s.lastTickAt === null) {
       res.status(503).json({ status: 'pending', ...s });

@@ -196,7 +196,9 @@ describe('gmail-reconciler', () => {
     });
     expect(result.resolved).toBe(1);
     const row = getDb()
-      .prepare('SELECT state, resolution_method FROM tracked_items WHERE id = ?')
+      .prepare(
+        'SELECT state, resolution_method FROM tracked_items WHERE id = ?',
+      )
       .get('item-att') as { state: string; resolution_method: string };
     expect(row.state).toBe('resolved');
     expect(row.resolution_method).toBe('gmail:external');

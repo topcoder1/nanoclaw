@@ -3,11 +3,14 @@ import { recordExample } from './examples.js';
 import { recordSkip } from './prefilter.js';
 import { TRIAGE_DEFAULTS } from './config.js';
 import { logger } from '../logger.js';
+import type { GmailOps } from '../gmail-ops.js';
 
 interface ItemRow {
   id: string;
+  source: string;
   classification: string | null;
   title: string;
+  thread_id: string | null;
   metadata: string | null;
   model_tier: number | null;
 }
@@ -15,7 +18,7 @@ interface ItemRow {
 function getItem(id: string): ItemRow | undefined {
   return getDb()
     .prepare(
-      `SELECT id, classification, title, metadata, model_tier FROM tracked_items WHERE id = ?`,
+      `SELECT id, source, classification, title, thread_id, metadata, model_tier FROM tracked_items WHERE id = ?`,
     )
     .get(id) as ItemRow | undefined;
 }
@@ -29,9 +32,73 @@ function parseSender(metadata: string | null): string {
   }
 }
 
-export function handleArchive(itemId: string): void {
+function parseAccount(metadata: string | null): string | null {
+  try {
+    const m = metadata ? JSON.parse(metadata) : {};
+    return typeof m.account === 'string' ? m.account : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface HandleArchiveOpts {
+  gmailOps?: Pick<GmailOps, 'archiveThread'>;
+}
+
+export interface HandleArchiveResult {
+  archived: boolean;
+  reason?: 'missing' | 'gmail_failed' | 'gmail_unavailable';
+  error?: string;
+}
+
+/**
+ * Archive a tracked item from a Telegram button / attention card.
+ *
+ * For gmail-sourced items with an account + thread_id, this archives the
+ * thread in Gmail first and only resolves locally if Gmail succeeds. This
+ * preserves the "Gmail is source of truth" invariant — a local resolve
+ * without a Gmail archive would cause the reconciler to immediately
+ * re-surface the item (it'd still be in INBOX).
+ *
+ * Non-gmail items (or gmail items missing metadata) resolve locally
+ * as before.
+ */
+export async function handleArchive(
+  itemId: string,
+  opts: HandleArchiveOpts = {},
+): Promise<HandleArchiveResult> {
   const item = getItem(itemId);
-  if (!item) return;
+  if (!item) return { archived: false, reason: 'missing' };
+
+  // Source-of-truth archive in Gmail for gmail-sourced items.
+  if (item.source === 'gmail' && item.thread_id) {
+    const account = parseAccount(item.metadata);
+    if (account && opts.gmailOps) {
+      try {
+        await opts.gmailOps.archiveThread(account, item.thread_id);
+      } catch (err) {
+        logger.warn(
+          {
+            itemId,
+            account,
+            threadId: item.thread_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'handleArchive: Gmail archive failed, leaving item queued',
+        );
+        return {
+          archived: false,
+          reason: 'gmail_failed',
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    } else if (!opts.gmailOps) {
+      logger.warn(
+        { itemId },
+        'handleArchive: gmailOps unavailable, resolving locally only',
+      );
+    }
+  }
 
   getDb()
     .prepare(
@@ -67,6 +134,8 @@ export function handleArchive(itemId: string): void {
       reasons: ['user archived from attention card'],
     });
   }
+
+  return { archived: true };
 }
 
 export function handleDismiss(itemId: string): void {
