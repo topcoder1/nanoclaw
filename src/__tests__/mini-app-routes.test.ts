@@ -15,6 +15,11 @@ describe('Mini App extended routes', () => {
         draft_id TEXT PRIMARY KEY, account TEXT, original_body TEXT,
         enriched_at TEXT, expires_at TEXT
       );
+      CREATE TABLE tracked_items (
+        id TEXT PRIMARY KEY, source TEXT, source_id TEXT, group_name TEXT,
+        state TEXT, title TEXT, thread_id TEXT, detected_at INTEGER,
+        metadata TEXT
+      );
     `);
 
     const mockGmailOps = {
@@ -140,6 +145,70 @@ describe('Mini App extended routes', () => {
       'personal',
       'thread123',
     );
+  });
+
+  it('POST /api/email/:emailId/archive resolves Gmail thread id from tracked_items when not provided', async () => {
+    const { app, db, mockGmailOps } = setup();
+    (mockGmailOps.archiveThread as ReturnType<typeof vi.fn>).mockResolvedValue(
+      undefined,
+    );
+    db.prepare(
+      `INSERT INTO tracked_items (id, source, source_id, group_name, state, title, detected_at, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'sse-123',
+      'email',
+      'gmail:19da1d9492abcdef',
+      'g',
+      'pending',
+      't',
+      Date.now(),
+      JSON.stringify({ account: 'personal' }),
+    );
+
+    const res = await request(app)
+      .post('/api/email/sse-123/archive')
+      .send({ account: 'personal' });
+
+    expect(res.status).toBe(200);
+    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
+      'personal',
+      '19da1d9492abcdef',
+    );
+  });
+
+  it('GET /email/:emailId renders Open-in-Gmail URL scoped to the account and gmail id', async () => {
+    const { app, db, mockGmailOps } = setup();
+    db.prepare(
+      `INSERT INTO tracked_items (id, source, source_id, group_name, state, title, detected_at, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'sse-xyz',
+      'email',
+      'gmail:19da1d9492deadbeef',
+      'g',
+      'pending',
+      't',
+      Date.now(),
+      JSON.stringify({ account: 'attaxion' }),
+    );
+    (mockGmailOps as any).getMessageMeta = vi.fn().mockResolvedValue({
+      subject: 'S',
+      from: 'f',
+      to: 't',
+      date: 'd',
+      body: 'B',
+    });
+
+    const res = await request(app).get('/email/sse-xyz');
+    expect(res.status).toBe(200);
+    // Account must appear in the /u/ path segment so Gmail opens the right inbox.
+    expect(res.text).toContain('mail.google.com/mail/u/attaxion/');
+    // And the anchor must use the Gmail thread id, not nanoclaw's internal id.
+    expect(res.text).toContain('#inbox/19da1d9492deadbeef');
+    expect(res.text).not.toContain('#inbox/sse-xyz');
+    // Archive button should carry data-thread-id with the resolved Gmail id.
+    expect(res.text).toContain('data-thread-id="19da1d9492deadbeef"');
   });
 
   it('GET /draft-diff/:draftId shows diff view', async () => {

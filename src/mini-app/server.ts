@@ -498,6 +498,7 @@ ${
       attachments: [],
       emailId,
       account,
+      gmailId: gmailId || undefined,
     });
     res.type('html').send(html);
   });
@@ -510,8 +511,34 @@ ${
       res.status(400).json({ error: 'Missing account or gmailOps' });
       return;
     }
+    // emailId in the URL is nanoclaw's internal tracked_items.id (e.g.
+    // "sse-..."), not a Gmail thread id. If the client didn't pass an explicit
+    // threadId, look the row up and extract the Gmail id from source_id —
+    // same resolution logic as GET /email/:emailId.
+    let resolvedThreadId = threadId as string | undefined;
+    if (!resolvedThreadId) {
+      try {
+        const row = opts.db
+          .prepare(
+            `SELECT source_id, thread_id FROM tracked_items
+             WHERE id = ? OR thread_id = ? OR source_id = ?
+             ORDER BY detected_at DESC LIMIT 1`,
+          )
+          .get(emailId, emailId, emailId) as
+          | { source_id: string | null; thread_id: string | null }
+          | undefined;
+        if (row) {
+          const raw = row.source_id || row.thread_id || '';
+          resolvedThreadId = raw.startsWith('gmail:')
+            ? raw.slice('gmail:'.length)
+            : raw || emailId;
+        }
+      } catch {
+        /* tracked_items may not exist in minimal test DBs */
+      }
+    }
     try {
-      await opts.gmailOps.archiveThread(account, threadId || emailId);
+      await opts.gmailOps.archiveThread(account, resolvedThreadId || emailId);
       res.json({ success: true });
     } catch (err) {
       logger.error({ emailId, err }, 'Mini app archive failed');

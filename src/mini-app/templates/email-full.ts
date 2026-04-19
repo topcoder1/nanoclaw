@@ -3,6 +3,10 @@ export interface EmailFullData {
   draftId?: string; // required when mode === 'reply'
   account?: string; // used by both reply mode and view-mode archive button
   emailId?: string; // used by view-mode archive button
+  // Real Gmail thread/message id (source_id stripped of "gmail:" prefix). Used
+  // by the Archive button (so the server can call Gmail API directly) and by
+  // the "Open in Gmail" link (anchor must be a Gmail id, not nanoclaw's id).
+  gmailId?: string;
   from: string;
   to: string;
   subject: string;
@@ -40,8 +44,9 @@ export function renderEmailFull(data: EmailFullData): string {
   <button class="btn" style="background:#276749;color:#c6f6d5;"
     data-email-id="${escapeHtml(data.emailId || '')}"
     data-account="${escapeHtml(data.account || '')}"
+    data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/u/0/#inbox/${escapeHtml(data.emailId || '')}"
+  <a class="btn" href="https://mail.google.com/mail/u/${encodeURIComponent(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>
@@ -52,7 +57,10 @@ async function archiveEmail(btn) {
     const resp = await fetch('/api/email/' + btn.dataset.emailId + '/archive', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: btn.dataset.account }),
+      body: JSON.stringify({
+        account: btn.dataset.account,
+        threadId: btn.dataset.threadId || undefined,
+      }),
     });
     if (resp.ok) {
       btn.textContent = 'Archived';
