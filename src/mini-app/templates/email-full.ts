@@ -24,6 +24,31 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// Gmail's extractTextBody prefers text/plain, so many messages arrive as raw
+// plaintext (URLs in "(https://...)" form, no tags). Rendering that inside an
+// iframe srcdoc makes everything one unformatted blob. Detect HTML vs plain
+// text and render each appropriately.
+function looksLikeHtml(body: string): boolean {
+  return /<(html|body|div|p|br|table|tr|td|span|a\s|img|h[1-6]|ul|ol|li)\b/i.test(
+    body,
+  );
+}
+
+function renderPlainTextBody(body: string): string {
+  // Escape, then linkify bare URLs, then convert newlines.
+  const escaped = escapeHtml(body);
+  const linkified = escaped.replace(
+    /(https?:\/\/[^\s<>"]+)/g,
+    '<a href="$1" target="_blank" rel="noopener" style="color:#58a6ff;">$1</a>',
+  );
+  // Double-newline => paragraph; single => <br>.
+  const paragraphs = linkified
+    .split(/\n{2,}/)
+    .map((p) => `<p style="margin:0 0 12px 0;">${p.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+  return `<div class="body" style="font-size:14px;line-height:1.6;color:#c9d1d9;word-wrap:break-word;">${paragraphs}</div>`;
+}
+
 export function renderEmailFull(data: EmailFullData): string {
   const mode = data.mode ?? 'view';
   const attachmentsHtml =
@@ -31,14 +56,18 @@ export function renderEmailFull(data: EmailFullData): string {
       ? `<div style="border-top:1px solid #21262d;padding-top:12px;margin-top:12px;"><div style="font-size:11px;color:#484f58;margin-bottom:8px;">ATTACHMENTS</div>${data.attachments.map((a) => `<div style="font-size:13px;color:#58a6ff;">📎 ${escapeHtml(a.name)} (${escapeHtml(a.size)})</div>`).join('')}</div>`
       : '';
 
-  const viewControls = `<div class="body">
+  const bodyHtml = looksLikeHtml(data.body)
+    ? `<div class="body">
   <iframe
     sandbox=""
     srcdoc="${escapeHtml(data.body)}"
     style="width:100%;border:none;min-height:300px;background:#0d1117;color-scheme:dark;"
     onload="this.style.height=this.contentDocument.body.scrollHeight+'px'"
   ></iframe>
-</div>
+</div>`
+    : renderPlainTextBody(data.body);
+
+  const viewControls = `${bodyHtml}
   ${attachmentsHtml}
   <div class="actions">
   <button class="btn" style="background:#276749;color:#c6f6d5;"
@@ -46,7 +75,7 @@ export function renderEmailFull(data: EmailFullData): string {
     data-account="${escapeHtml(data.account || '')}"
     data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/u/0/?authuser=${encodeURIComponent(data.account || '')}#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
+  <a class="btn" href="https://mail.google.com/mail/?authuser=${encodeURIComponent(data.account || '')}#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>

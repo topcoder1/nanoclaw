@@ -94,7 +94,8 @@ describe('Mini App extended routes', () => {
 
   it('GET /email/:emailId does not render raw script tags in body', async () => {
     const { app, db } = setup();
-    const xssBody = '<script>alert("xss")</script>';
+    // HTML-shaped body — routed through the iframe+sandbox path.
+    const xssBody = '<div><script>alert("xss")</script></div>';
     const mockGmailOpsXss = {
       getMessageBody: vi.fn().mockResolvedValue(xssBody),
       archiveThread: vi.fn(),
@@ -111,6 +112,55 @@ describe('Mini App extended routes', () => {
     expect(res.status).toBe(200);
     expect(res.text).not.toContain('<script>alert');
     expect(res.text).toContain('sandbox');
+  });
+
+  it('GET /email/:emailId renders plain-text body as formatted HTML with clickable links', async () => {
+    const { app, db } = setup();
+    const plainBody =
+      'Hello world.\n\nVisit https://example.com for details.\n\nCheers';
+    const mockOps = {
+      getMessageBody: vi.fn().mockResolvedValue(plainBody),
+      archiveThread: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+    };
+    const app2 = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps: mockOps as any,
+      draftWatcher: undefined,
+    });
+    const res = await request(app2).get('/email/plainmsg?account=personal');
+    expect(res.status).toBe(200);
+    // Bare URLs turned into anchors.
+    expect(res.text).toContain(
+      '<a href="https://example.com" target="_blank" rel="noopener"',
+    );
+    // Paragraph structure preserved.
+    expect(res.text).toMatch(/<p[^>]*>Hello world\.<\/p>/);
+    // Must NOT use the plaintext-hostile iframe srcdoc path for plain bodies.
+    expect(res.text).not.toContain('srcdoc="Hello world');
+  });
+
+  it('GET /email/:emailId escapes plain-text HTML-like fragments safely', async () => {
+    const { app, db } = setup();
+    const body = 'not html <script>alert(1)</script> end';
+    const mockOps = {
+      getMessageBody: vi.fn().mockResolvedValue(body),
+      archiveThread: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+    };
+    const app2 = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps: mockOps as any,
+      draftWatcher: undefined,
+    });
+    const res = await request(app2).get('/email/safemsg?account=personal');
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('<script>alert(1)</script>');
+    expect(res.text).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
   });
 
   it('GET /email/:emailId renders Open in Gmail as a link', async () => {
@@ -207,6 +257,10 @@ describe('Mini App extended routes', () => {
     // And the anchor must use the Gmail thread id, not nanoclaw's internal id.
     expect(res.text).toContain('#inbox/19da1d9492deadbeef');
     expect(res.text).not.toContain('#inbox/sse-xyz');
+    // Must NOT hardcode /u/0/ — Gmail prefers that path-index over
+    // ?authuser=, opening the wrong account whenever account 0 isn't the
+    // target inbox.
+    expect(res.text).not.toContain('/mail/u/0/');
     // Archive button should carry data-thread-id with the resolved Gmail id.
     expect(res.text).toContain('data-thread-id="19da1d9492deadbeef"');
   });
