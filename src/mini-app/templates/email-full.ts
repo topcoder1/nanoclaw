@@ -46,7 +46,7 @@ export function renderEmailFull(data: EmailFullData): string {
     data-account="${escapeHtml(data.account || '')}"
     data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/u/${encodeURIComponent(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
+  <a class="btn" href="https://mail.google.com/mail/u/0/?authuser=${encodeURIComponent(data.account || '')}#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>
