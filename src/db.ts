@@ -214,7 +214,10 @@ function createSchema(database: Database.Database): void {
       digest_count INTEGER NOT NULL DEFAULT 0,
       telegram_message_id INTEGER,
       classification_reason TEXT,
-      metadata TEXT
+      metadata TEXT,
+      CONSTRAINT resolution_fields_paired CHECK (
+        (resolved_at IS NULL) = (resolution_method IS NULL)
+      )
     );
     CREATE INDEX IF NOT EXISTS idx_tracked_state ON tracked_items(group_name, state);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source ON tracked_items(source, source_id);
@@ -435,8 +438,13 @@ function createSchema(database: Database.Database): void {
         `SELECT sql FROM sqlite_master WHERE type='table' AND name='tracked_items'`,
       )
       .get() as { sql?: string } | undefined;
-    const hasCheck = meta?.sql?.toUpperCase().includes('CHECK') ?? false;
-    if (!hasCheck) {
+    // Specific sniff rather than `includes('CHECK')`: the resolution-
+    // fields-paired CHECK (added in a later migration block) would
+    // otherwise fool a plain 'CHECK' substring match and cause this
+    // orphan-ignore block to silently skip on fresh DBs.
+    const hasOrphanIgnoreCheck =
+      meta?.sql?.includes("queue = 'ignore'") ?? false;
+    if (!hasOrphanIgnoreCheck) {
       // Self-heal any live violators before the rewrite would fail on them.
       // Resolves them via the same path the classifier would take.
       const orphan = database
@@ -517,6 +525,119 @@ function createSchema(database: Database.Database): void {
     logger.error(
       `[db] failed to install tracked_items CHECK constraint: ${String(err)}`,
     );
+  }
+
+  // Resolution-fields pairing CHECK constraint — pushes the
+  // `resolution-fields-paired` invariant (see
+  // scripts/qa/invariant-predicates.ts) down to the DB layer. SQLite
+  // can't ALTER TABLE ADD CONSTRAINT, so pre-existing tables need a
+  // full rebuild; new DBs pick it up from the CREATE TABLE above.
+  // Detection: the constraint is named, so we check sqlite_master.sql
+  // for the name. Idempotent.
+  //
+  // Co-exists with the no-orphan-ignore-items CHECK above (named
+  // detection here is specific enough not to confuse the two, and
+  // this rebuild's inner CREATE TABLE carries BOTH constraints so
+  // running it after the orphan-ignore rebuild preserves that CHECK).
+  {
+    const row = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='tracked_items'`,
+      )
+      .get() as { sql: string } | undefined;
+    if (row && !row.sql.includes('resolution_fields_paired')) {
+      // Safety net: refuse to rebuild if existing data would violate
+      // the new constraint. The runtime checker has been green for
+      // months, but fail loudly rather than DROP-ing data on a
+      // surprise. Operator can clean up and re-run.
+      const bad = (
+        database
+          .prepare(
+            `SELECT COUNT(*) AS n FROM tracked_items
+             WHERE (resolved_at IS NULL) != (resolution_method IS NULL)`,
+          )
+          .get() as { n: number }
+      ).n;
+      if (bad > 0) {
+        throw new Error(
+          `Cannot add resolution_fields_paired CHECK: ${bad} existing row(s) violate the pairing (resolved_at and resolution_method disagree on NULL-ness). Reconcile before retrying.`,
+        );
+      }
+      const tx = database.transaction(() => {
+        database.exec(`
+          CREATE TABLE tracked_items__rebuild (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            state TEXT NOT NULL,
+            classification TEXT,
+            superpilot_label TEXT,
+            trust_tier TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            thread_id TEXT,
+            detected_at INTEGER NOT NULL,
+            pushed_at INTEGER,
+            resolved_at INTEGER,
+            resolution_method TEXT,
+            digest_count INTEGER NOT NULL DEFAULT 0,
+            telegram_message_id INTEGER,
+            classification_reason TEXT,
+            metadata TEXT,
+            confidence REAL,
+            model_tier INTEGER,
+            action_intent TEXT,
+            facts_extracted_json TEXT,
+            repo_candidates_json TEXT,
+            reasons_json TEXT,
+            reminded_at INTEGER,
+            queue TEXT,
+            CONSTRAINT resolution_fields_paired CHECK (
+              (resolved_at IS NULL) = (resolution_method IS NULL)
+            ),
+            CHECK (NOT (state = 'queued' AND queue = 'ignore'))
+          )
+        `);
+        database.exec(`
+          INSERT INTO tracked_items__rebuild
+            (id, source, source_id, group_name, state, classification,
+             superpilot_label, trust_tier, title, summary, thread_id,
+             detected_at, pushed_at, resolved_at, resolution_method,
+             digest_count, telegram_message_id, classification_reason,
+             metadata, confidence, model_tier, action_intent,
+             facts_extracted_json, repo_candidates_json, reasons_json,
+             reminded_at, queue)
+          SELECT
+             id, source, source_id, group_name, state, classification,
+             superpilot_label, trust_tier, title, summary, thread_id,
+             detected_at, pushed_at, resolved_at, resolution_method,
+             digest_count, telegram_message_id, classification_reason,
+             metadata, confidence, model_tier, action_intent,
+             facts_extracted_json, repo_candidates_json, reasons_json,
+             reminded_at, queue
+          FROM tracked_items
+        `);
+        database.exec(`DROP TABLE tracked_items`);
+        database.exec(
+          `ALTER TABLE tracked_items__rebuild RENAME TO tracked_items`,
+        );
+        // DROP TABLE drops indexes too; recreate all four.
+        database.exec(
+          `CREATE INDEX IF NOT EXISTS idx_tracked_state ON tracked_items(group_name, state)`,
+        );
+        database.exec(
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_source ON tracked_items(source, source_id)`,
+        );
+        database.exec(
+          `CREATE INDEX IF NOT EXISTS idx_tracked_dashboard ON tracked_items(group_name, state, detected_at)`,
+        );
+        database.exec(
+          `CREATE INDEX IF NOT EXISTS idx_tracked_thread ON tracked_items(thread_id)`,
+        );
+      });
+      tx();
+    }
   }
 
   // Triage v1: skip-list for learned pre-filter patterns

@@ -299,20 +299,50 @@ describe('invariants runtime proof — every mutation path preserves every state
     expect(n).toBe(1);
   });
 
-  it('predicate catches: resolved with resolution_method but NULL resolved_at', () => {
-    seedItem({ id: 'bad-r', source_id: 'src-bad-r', state: 'queued' });
+  it('predicate catches: state=stale with NULL resolved_at (terminal without timestamp)', () => {
+    // Targets resolved-state-has-timestamp specifically. Chosen so that
+    // resolution-fields-paired does NOT also trip (both fields NULL → pair
+    // holds). Without this, #3 has no dedicated counter-example and a
+    // typo'd predicate could go undetected.
+    seedItem({ id: 'bad-s', source_id: 'src-bad-s', state: 'queued' });
     getDb()
       .prepare(
         `UPDATE tracked_items
-         SET state = 'resolved', resolution_method = 'manual:button', resolved_at = NULL
+         SET state = 'stale', resolved_at = NULL, resolution_method = NULL
          WHERE id = ?`,
       )
-      .run('bad-r');
-    const inv = STATE_MACHINE_INVARIANTS.find(
+      .run('bad-s');
+    const resolvedTs = STATE_MACHINE_INVARIANTS.find(
+      (i) => i.name === 'resolved-state-has-timestamp',
+    )!;
+    expect(
+      (getDb().prepare(resolvedTs.countSql).get() as { n: number }).n,
+    ).toBe(1);
+    // Sanity: resolution-fields-paired must NOT trip (both NULL is paired).
+    const paired = STATE_MACHINE_INVARIANTS.find(
       (i) => i.name === 'resolution-fields-paired',
     )!;
-    const n = (getDb().prepare(inv.countSql).get() as { n: number }).n;
-    expect(n).toBe(1);
+    expect((getDb().prepare(paired.countSql).get() as { n: number }).n).toBe(0);
+  });
+
+  it('DB-enforced: CHECK rejects resolved with resolution_method but NULL resolved_at', () => {
+    // The `resolution-fields-paired` invariant is now enforced by the
+    // `resolution_fields_paired` CHECK constraint on tracked_items. A
+    // raw SQL write that breaks the pair can no longer land — SQLite
+    // raises SQLITE_CONSTRAINT_CHECK before the row changes. This test
+    // proves the enforcement; the predicate in the shared module
+    // remains as a belt-and-suspenders audit if the CHECK is ever
+    // removed by a future schema change.
+    seedItem({ id: 'bad-r', source_id: 'src-bad-r', state: 'queued' });
+    expect(() =>
+      getDb()
+        .prepare(
+          `UPDATE tracked_items
+           SET state = 'resolved', resolution_method = 'manual:button', resolved_at = NULL
+           WHERE id = ?`,
+        )
+        .run('bad-r'),
+    ).toThrow(/CHECK constraint/i);
   });
 
   it('predicate catches: held with no snoozed_until metadata', () => {
