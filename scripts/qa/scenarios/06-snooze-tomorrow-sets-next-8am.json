@@ -1,0 +1,33 @@
+{
+  "name": "snooze-tomorrow-sets-next-8am-window",
+  "description": "handleSnooze('tomorrow') must set snoozed_until to 8am of the next local day. Checks the timestamp lands in the [10h, 36h) window from now — a wide enough band to be timezone-robust but tight enough to reject obvious bugs (1h duration written in, or ms vs seconds typo).",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "alice@bank.com",
+        "title": "Sign loan docs",
+        "model_tier": 1,
+        "confidence": 0.8
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleSnooze",
+    "args": { "itemId": "$fixture:0", "duration": "tomorrow" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'held'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND CAST(json_extract(metadata,'$.snoozed_until') AS INTEGER) > strftime('%s','now')*1000 + 5*3600*1000 AND CAST(json_extract(metadata,'$.snoozed_until') AS INTEGER) < strftime('%s','now')*1000 + 36*3600*1000",
+        "expectCount": 1
+      }
+    ]
+  }
+}

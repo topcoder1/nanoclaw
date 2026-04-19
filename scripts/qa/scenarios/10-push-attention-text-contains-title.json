@@ -1,0 +1,24 @@
+{
+  "name": "push-attention-text-contains-title-sender-reason",
+  "description": "pushAttentionItem's outbound sendMessage text must expose the title, sender, and reason verbatim — the three fields a user needs to triage without opening Gmail. If a refactor reorganizes the template and drops any of these, the user loses context on every attention card.",
+  "trigger": {
+    "type": "pushAttentionItem",
+    "args": {
+      "chatId": "99",
+      "itemId": "scn-txt-1",
+      "title": "Board meeting prep deck",
+      "reason": "inbound from board-chair",
+      "sender": "chair@board.example.com"
+    }
+  },
+  "expect": {
+    "outbound": {
+      "totalCalls": 1,
+      "textContains": [
+        "Board meeting prep deck",
+        "chair@board.example.com",
+        "inbound from board-chair"
+      ]
+    }
+  }
+}

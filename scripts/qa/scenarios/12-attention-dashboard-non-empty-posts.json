@@ -1,0 +1,24 @@
+{
+  "name": "attention-dashboard-non-empty-posts-telegram-message",
+  "description": "Complement to scenario 03 (empty dashboard is a no-op): when items.length > 0, renderAttentionDashboard MUST reach Telegram. Without this, the 'skip empty queue' optimization could over-correct — a regression that hides the dashboard for non-empty queues would fail silently because the empty-case test still passes.",
+  "trigger": {
+    "type": "renderAttentionDashboard",
+    "args": {
+      "chatId": "12345",
+      "items": [
+        {
+          "id": "scn-dash-1",
+          "title": "Offer letter waiting",
+          "sender": "hr@acme.example.com",
+          "reason": "action required",
+          "detected_at": 1700000000000
+        }
+      ]
+    }
+  },
+  "expect": {
+    "outbound": {
+      "kinds": ["sendMessage"]
+    }
+  }
+}

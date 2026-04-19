@@ -1,0 +1,33 @@
+{
+  "name": "snooze-preserves-existing-metadata-keys",
+  "description": "handleSnooze writes snoozed_until via json_set(COALESCE(metadata,'{}'), ...), so it MUST preserve other metadata keys (e.g. sender, account) rather than clobbering the blob. If a future refactor switches to a plain UPDATE SET metadata=?, this scenario trips — and the reconciler / learning loop would silently lose sender attribution for every snoozed item.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "founder@startup.io",
+        "title": "Intro request",
+        "model_tier": 2,
+        "confidence": 0.72
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleSnooze",
+    "args": { "itemId": "$fixture:0", "duration": "1h" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND json_extract(metadata,'$.sender') = 'founder@startup.io'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND json_extract(metadata,'$.snoozed_until') IS NOT NULL",
+        "expectCount": 1
+      }
+    ]
+  }
+}

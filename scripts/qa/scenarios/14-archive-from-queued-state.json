@@ -1,0 +1,29 @@
+{
+  "name": "archive-from-queued-state-resolves",
+  "description": "Scenario 02 covered archive from state='pushed' (attention-card path). This covers archive from state='queued' — the archive-dashboard / bulk-archive entry point where the row never went through attention. Must still resolve with resolution_method='manual:button'. If a future code path narrows handleArchive to only accept state='pushed', this trips.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "digest",
+        "queue": "archive_candidate",
+        "state": "queued",
+        "sender": "newsletter@substack.example.com",
+        "title": "Weekly digest",
+        "model_tier": 1,
+        "confidence": 0.6
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleArchive",
+    "args": { "itemId": "$fixture:0" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'resolved' AND resolution_method = 'manual:button' AND resolved_at IS NOT NULL",
+        "expectCount": 1
+      }
+    ]
+  }
+}

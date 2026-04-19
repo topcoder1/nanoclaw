@@ -1,0 +1,36 @@
+{
+  "name": "dismiss-preserves-title-and-classification",
+  "description": "handleDismiss must only update state / resolution_method / resolved_at — the classifier's title, classification, model_tier, and confidence are audit trail (what the classifier saw + decided) and must survive resolution. If a future refactor clears these fields on resolve, historical analysis and the learning loop lose the signal retroactively.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "ops@infra.example.com",
+        "title": "Pager alert acknowledged",
+        "model_tier": 2,
+        "confidence": 0.91
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleDismiss",
+    "args": { "itemId": "$fixture:0" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND title = 'Pager alert acknowledged' AND classification = 'push' AND model_tier = 2",
+        "expectCount": 1
+      }
+    ],
+    "dbValue": [
+      {
+        "query": "SELECT confidence FROM tracked_items WHERE id = $fixture:0",
+        "column": "confidence",
+        "equals": 0.91
+      }
+    ]
+  }
+}

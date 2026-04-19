@@ -1,0 +1,33 @@
+{
+  "name": "snooze-from-held-state-resnoozes-without-error",
+  "description": "A row already in state='held' (previously snoozed) must accept a fresh handleSnooze without crashing or leaving state inconsistent. Common flow: user snoozes 1h, then wants to push it to tomorrow — re-snoozing must just overwrite snoozed_until. Regression guard for any state-machine check that rejects held → held transitions.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "held",
+        "sender": "legal@firm.example.com",
+        "title": "Counter-signed NDA",
+        "model_tier": 1,
+        "confidence": 0.9
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleSnooze",
+    "args": { "itemId": "$fixture:0", "duration": "tomorrow" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'held'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND CAST(json_extract(metadata,'$.snoozed_until') AS INTEGER) > strftime('%s','now')*1000 + 5*3600*1000",
+        "expectCount": 1
+      }
+    ]
+  }
+}

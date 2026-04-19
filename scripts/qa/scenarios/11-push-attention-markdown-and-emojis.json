@@ -1,0 +1,21 @@
+{
+  "name": "push-attention-uses-markdown-and-label-markers",
+  "description": "Outbound text must still carry the '📌' emoji title marker and the 'from:' / 'reason:' labels — these are what Telegram clients render as the card's visual structure. Stripped labels are a common casualty of well-meaning copy refactors; the user-visible shape is load-bearing.",
+  "trigger": {
+    "type": "pushAttentionItem",
+    "args": {
+      "chatId": "99",
+      "itemId": "scn-txt-2",
+      "title": "Password reset requested",
+      "reason": "security-sensitive",
+      "sender": "security@service.example.com"
+    }
+  },
+  "expect": {
+    "outbound": {
+      "totalCalls": 1,
+      "textContains": ["📌", "from:", "reason:"],
+      "textExcludes": ["undefined", "null"]
+    }
+  }
+}
