@@ -1,0 +1,33 @@
+{
+  "name": "dismiss-resolves-without-recording-triage-example",
+  "description": "handleDismiss must resolve the row as manual:button but MUST NOT record any triage_examples row. Archive-from-attention records a negative example (scenario 02) because it implies classifier overreach; dismiss is weaker — the user is saying 'I'm done with this' not 'you were wrong'. Regression guard: if dismiss starts silently training the model, the learning loop gets a bad signal.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "classification": "push",
+        "queue": "attention",
+        "state": "pushed",
+        "sender": "updates@linear.app",
+        "title": "Sprint planning reminder",
+        "model_tier": 1,
+        "confidence": 0.85
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleDismiss",
+    "args": { "itemId": "$fixture:0" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'resolved' AND resolution_method = 'manual:button'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM triage_examples WHERE tracked_item_id = $fixture:0",
+        "expectCount": 0
+      }
+    ]
+  }
+}

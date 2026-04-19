@@ -60,6 +60,10 @@ interface ScenarioExpect {
   outbound?: {
     totalCalls?: number;
     kinds?: Array<TelegramCall['kind']>;
+    // Substring assertions on the first sendMessage's `text` field.
+    // Each entry must appear (textContains) / must not appear (textExcludes).
+    textContains?: string[];
+    textExcludes?: string[];
     keyboard?: {
       rows: number;
       buttons: number;
@@ -84,11 +88,14 @@ interface TrackedItemFixture {
   id?: string;
   title?: string;
   sender?: string;
-  classification?: string;
-  queue?: string;
+  // Nullable fields: scenarios can set `null` to exercise the legacy /
+  // pre-triage path where the classifier never touched the row. `undefined`
+  // (omitted in JSON) falls back to the default (a realistic classified row).
+  classification?: string | null;
+  queue?: string | null;
   state?: string;
-  model_tier?: number;
-  confidence?: number;
+  model_tier?: number | null;
+  confidence?: number | null;
 }
 
 interface Scenario {
@@ -125,6 +132,15 @@ function insertFixture(
   index: number,
 ): string {
   const id = f.id ?? `qa-fixture-${index}-${Math.random().toString(36).slice(2, 8)}`;
+  // Use `'key' in f` rather than `??` so scenarios can distinguish "omitted
+  // → use default" from "explicit null → legacy / pre-triage row". Critical
+  // for edge-case scenarios that exercise the `item.classification` /
+  // `item.model_tier !== null` guards in handleArchive.
+  const classification =
+    'classification' in f ? f.classification : 'digest';
+  const confidence = 'confidence' in f ? f.confidence : null;
+  const model_tier = 'model_tier' in f ? f.model_tier : null;
+  const queue = 'queue' in f ? f.queue : null;
   db.prepare(
     `INSERT INTO tracked_items (
       id, source, source_id, group_name, state, classification, superpilot_label,
@@ -138,14 +154,14 @@ function insertFixture(
     id,
     `gmail:${id}`,
     f.state ?? 'queued',
-    f.classification ?? 'digest',
+    classification,
     f.title ?? 'QA fixture',
     `thread-${id}`,
     Date.now(),
     JSON.stringify({ sender: f.sender ?? 'qa@example.com' }),
-    f.confidence ?? null,
-    f.model_tier ?? null,
-    f.queue ?? null,
+    confidence,
+    model_tier,
+    queue,
   );
   return id;
 }
@@ -232,6 +248,22 @@ async function runScenario(
         for (const k of o.kinds) {
           if (!captured.some((c) => c.kind === k)) {
             failures.push(`outbound: missing expected kind '${k}'`);
+          }
+        }
+      }
+      if (o.textContains || o.textExcludes) {
+        const send = captured.find((c) => c.kind === 'sendMessage');
+        const text = send?.text ?? '';
+        for (const frag of o.textContains ?? []) {
+          if (!text.includes(frag)) {
+            failures.push(`outbound.text: missing expected fragment '${frag}'`);
+          }
+        }
+        for (const frag of o.textExcludes ?? []) {
+          if (text.includes(frag)) {
+            failures.push(
+              `outbound.text: contains forbidden fragment '${frag}'`,
+            );
           }
         }
       }

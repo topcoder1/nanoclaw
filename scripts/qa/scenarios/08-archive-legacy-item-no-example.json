@@ -1,0 +1,37 @@
+{
+  "name": "archive-legacy-item-records-no-example-no-skiplist",
+  "description": "handleArchive on a legacy item (model_tier=NULL AND classification=NULL — i.e. a row that was tracked before triage v1 or by a non-classifier path) must resolve the row but MUST NOT record a triage_examples entry (no classifier decision to learn from) and MUST NOT touch the skip-list (no model signal). Guards the two `if (item.model_tier !== null)` / `if (item.classification)` gates in queue-actions.ts:handleArchive against accidental removal.",
+  "setup": {
+    "insertTrackedItems": [
+      {
+        "state": "queued",
+        "sender": "legacy@noreply.com",
+        "title": "Pre-triage row",
+        "classification": null,
+        "model_tier": null,
+        "confidence": null,
+        "queue": null
+      }
+    ]
+  },
+  "trigger": {
+    "type": "handleArchive",
+    "args": { "itemId": "$fixture:0" }
+  },
+  "expect": {
+    "db": [
+      {
+        "query": "SELECT COUNT(*) AS n FROM tracked_items WHERE id = $fixture:0 AND state = 'resolved' AND resolution_method = 'manual:button'",
+        "expectCount": 1
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM triage_examples WHERE tracked_item_id = $fixture:0",
+        "expectCount": 0
+      },
+      {
+        "query": "SELECT COUNT(*) AS n FROM triage_skip_list WHERE pattern = 'legacy@noreply.com'",
+        "expectCount": 0
+      }
+    ]
+  }
+}
