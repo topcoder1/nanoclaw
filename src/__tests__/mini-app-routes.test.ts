@@ -252,14 +252,16 @@ describe('Mini App extended routes', () => {
 
     const res = await request(app).get('/email/sse-xyz');
     expect(res.status).toBe(200);
-    // Account must be passed via ?authuser= so Gmail redirects to the right /u/N.
-    expect(res.text).toContain('authuser=attaxion');
+    // Path-position /u/EMAIL/ is what Gmail actually uses to route the right
+    // account — ?authuser= alone is unreliable in practice (Gmail often
+    // ignores it and falls back to account 0). Email is URL-encoded so the
+    // "@" becomes %40.
+    expect(res.text).toContain('/mail/u/attaxion/');
     // And the anchor must use the Gmail thread id, not nanoclaw's internal id.
     expect(res.text).toContain('#inbox/19da1d9492deadbeef');
     expect(res.text).not.toContain('#inbox/sse-xyz');
-    // Must NOT hardcode /u/0/ — Gmail prefers that path-index over
-    // ?authuser=, opening the wrong account whenever account 0 isn't the
-    // target inbox.
+    // Must NOT hardcode /u/0/ — that forces Gmail's first-signed-in account,
+    // which is the wrong inbox whenever account 0 isn't the target.
     expect(res.text).not.toContain('/mail/u/0/');
     // Archive button should carry data-thread-id with the resolved Gmail id.
     expect(res.text).toContain('data-thread-id="19da1d9492deadbeef"');

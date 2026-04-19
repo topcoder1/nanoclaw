@@ -40,15 +40,12 @@ function renderPlainTextBody(body: string): string {
   // Capture URL greedily, then peel trailing punctuation/closing brackets
   // that are almost never part of the URL itself — common in plain-text
   // emails that wrap links like "[Gusto] (https://gusto.com)".
-  const linkified = escaped.replace(
-    /(https?:\/\/[^\s<>"]+)/g,
-    (url) => {
-      const m = url.match(/^(.*?)([).,;:!?]+)$/);
-      const clean = m ? m[1] : url;
-      const trail = m ? m[2] : '';
-      return `<a href="${clean}" target="_blank" rel="noopener" style="color:#58a6ff;">${clean}</a>${trail}`;
-    },
-  );
+  const linkified = escaped.replace(/(https?:\/\/[^\s<>"]+)/g, (url) => {
+    const m = url.match(/^(.*?)([).,;:!?]+)$/);
+    const clean = m ? m[1] : url;
+    const trail = m ? m[2] : '';
+    return `<a href="${clean}" target="_blank" rel="noopener" style="color:#58a6ff;">${clean}</a>${trail}`;
+  });
   // Double-newline => paragraph; single => <br>.
   const paragraphs = linkified
     .split(/\n{2,}/)
@@ -83,7 +80,7 @@ export function renderEmailFull(data: EmailFullData): string {
     data-account="${escapeHtml(data.account || '')}"
     data-thread-id="${escapeHtml(data.gmailId || '')}"
     onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="https://mail.google.com/mail/?authuser=${encodeURIComponent(data.account || '')}#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
+  <a class="btn" href="https://mail.google.com/mail/u/${encodeURIComponent(data.account || '0')}/#inbox/${escapeHtml(data.gmailId || data.emailId || '')}"
     target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
 </div>
 <script>
