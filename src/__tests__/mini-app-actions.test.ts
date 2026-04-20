@@ -100,3 +100,114 @@ describe('mini-app actions — mute', () => {
     expect(count.n).toBe(0);
   });
 });
+
+describe('mini-app actions — snooze', () => {
+  let db: Database.Database;
+  let gmailOps: any;
+
+  beforeEach(() => {
+    db = freshDb();
+    gmailOps = {
+      archiveThread: vi.fn().mockResolvedValue(undefined),
+      getMessageBody: vi.fn(),
+      getMessageMeta: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+      getDraftReplyContext: vi.fn(),
+      sendDraft: vi.fn(),
+    };
+  });
+
+  it('POST /api/email/:id/snooze with preset duration writes row and updates state', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const now = Date.now();
+
+    const res = await request(app)
+      .post('/api/email/i1/snooze')
+      .send({ duration: '1h' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.wake_at).toBeGreaterThanOrEqual(now + 3600_000 - 5000);
+    expect(res.body.wake_at).toBeLessThanOrEqual(now + 3600_000 + 5000);
+
+    const snooze = db
+      .prepare(
+        'SELECT wake_at, original_state, original_queue FROM snoozed_items WHERE item_id=?',
+      )
+      .get('i1') as {
+      wake_at: number;
+      original_state: string;
+      original_queue: string;
+    };
+    expect(snooze.original_state).toBe('pushed');
+    expect(snooze.original_queue).toBe('attention');
+
+    const item = db
+      .prepare('SELECT state FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string };
+    expect(item.state).toBe('snoozed');
+  });
+
+  it('POST /api/email/:id/snooze with custom wake_at', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const wakeAt = Date.now() + 4 * 3600_000;
+
+    const res = await request(app)
+      .post('/api/email/i1/snooze')
+      .send({ duration: 'custom', wake_at: new Date(wakeAt).toISOString() });
+
+    expect(res.status).toBe(200);
+    expect(res.body.wake_at).toBe(wakeAt);
+  });
+
+  it('POST /api/email/:id/snooze with invalid duration → 400', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const res = await request(app)
+      .post('/api/email/i1/snooze')
+      .send({ duration: 'six-years' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_DURATION');
+  });
+
+  it('POST /api/email/:id/snooze caps at 90 days', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const res = await request(app)
+      .post('/api/email/i1/snooze')
+      .send({
+        duration: 'custom',
+        wake_at: new Date(Date.now() + 100 * 86400_000).toISOString(),
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_DURATION');
+  });
+
+  it('DELETE /api/email/:id/snooze restores state', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    db.prepare('UPDATE tracked_items SET state=? WHERE id=?').run(
+      'snoozed',
+      'i1',
+    );
+    db.prepare(
+      `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state, original_queue)
+       VALUES (?,?,?,?,?)`,
+    ).run('i1', Date.now(), Date.now() + 3600_000, 'pushed', 'attention');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+
+    const res = await request(app).delete('/api/email/i1/snooze');
+    expect(res.status).toBe(200);
+    const item = db
+      .prepare('SELECT state, queue FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string; queue: string };
+    expect(item.state).toBe('pushed');
+    expect(item.queue).toBe('attention');
+    const count = db
+      .prepare('SELECT COUNT(*) AS n FROM snoozed_items')
+      .get() as { n: number };
+    expect(count.n).toBe(0);
+  });
+});

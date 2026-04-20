@@ -12,13 +12,11 @@ export interface ActionDeps {
 export function createActionsRouter(deps: ActionDeps): express.Router {
   const router = express.Router();
 
-  function lookupItem(id: string):
-    | { id: string; thread_id: string | null; account: string | null }
-    | null {
+  function lookupItem(
+    id: string,
+  ): { id: string; thread_id: string | null; account: string | null } | null {
     const row = deps.db
-      .prepare(
-        'SELECT id, thread_id, metadata FROM tracked_items WHERE id = ?',
-      )
+      .prepare('SELECT id, thread_id, metadata FROM tracked_items WHERE id = ?')
       .get(id) as
       | { id: string; thread_id: string | null; metadata: string | null }
       | undefined;
@@ -26,7 +24,8 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
     let account: string | null = null;
     if (row.metadata) {
       try {
-        account = (JSON.parse(row.metadata) as { account?: string }).account ?? null;
+        account =
+          (JSON.parse(row.metadata) as { account?: string }).account ?? null;
       } catch {
         logger.debug(
           { id, component: 'mini-app-actions' },
@@ -78,5 +77,133 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
     res.json({ ok: true });
   });
 
+  router.post('/api/email/:id/snooze', (req, res) => {
+    const item = lookupItem(req.params.id);
+    if (!item) {
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as { duration?: string; wake_at?: string };
+    const parsed = resolveWakeAt(body.duration ?? '', body.wake_at);
+    if (!parsed.ok) {
+      res.status(400).json({
+        ok: false,
+        error: parsed.reason,
+        code: 'INVALID_DURATION',
+      });
+      return;
+    }
+
+    const existing = deps.db
+      .prepare('SELECT state, queue FROM tracked_items WHERE id = ?')
+      .get(item.id) as { state: string; queue: string | null };
+
+    deps.db.transaction(() => {
+      deps.db
+        .prepare(
+          `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state, original_queue)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(item_id) DO UPDATE SET
+             snoozed_at = excluded.snoozed_at,
+             wake_at = excluded.wake_at,
+             original_state = excluded.original_state,
+             original_queue = excluded.original_queue`,
+        )
+        .run(
+          item.id,
+          Date.now(),
+          parsed.wake_at,
+          existing.state,
+          existing.queue,
+        );
+      deps.db
+        .prepare(`UPDATE tracked_items SET state = 'snoozed' WHERE id = ?`)
+        .run(item.id);
+    })();
+
+    res.json({ ok: true, wake_at: parsed.wake_at });
+  });
+
+  router.delete('/api/email/:id/snooze', (req, res) => {
+    const item = lookupItem(req.params.id);
+    if (!item) {
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
+      return;
+    }
+    const snooze = deps.db
+      .prepare(
+        `SELECT original_state, original_queue FROM snoozed_items WHERE item_id = ?`,
+      )
+      .get(item.id) as
+      | { original_state: string; original_queue: string | null }
+      | undefined;
+    if (!snooze) {
+      res.json({ ok: true });
+      return;
+    }
+    deps.db.transaction(() => {
+      deps.db
+        .prepare(`UPDATE tracked_items SET state = ?, queue = ? WHERE id = ?`)
+        .run(snooze.original_state, snooze.original_queue, item.id);
+      deps.db
+        .prepare(`DELETE FROM snoozed_items WHERE item_id = ?`)
+        .run(item.id);
+    })();
+    res.json({ ok: true });
+  });
+
   return router;
+}
+
+const MAX_SNOOZE_MS = 90 * 86400_000;
+
+function resolveWakeAt(
+  duration: string,
+  customIso: string | undefined,
+): { ok: true; wake_at: number } | { ok: false; reason: string } {
+  const now = Date.now();
+  switch (duration) {
+    case '1h':
+      return { ok: true, wake_at: now + 3600_000 };
+    case 'tomorrow-8am': {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 1);
+      d.setHours(8, 0, 0, 0);
+      return { ok: true, wake_at: d.getTime() };
+    }
+    case 'next-monday-8am': {
+      const d = new Date(now);
+      const daysUntilMonday = (1 - d.getDay() + 7) % 7 || 7;
+      d.setDate(d.getDate() + daysUntilMonday);
+      d.setHours(8, 0, 0, 0);
+      return { ok: true, wake_at: d.getTime() };
+    }
+    case 'next-week': {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 7);
+      d.setHours(8, 0, 0, 0);
+      return { ok: true, wake_at: d.getTime() };
+    }
+    case 'custom': {
+      if (!customIso) return { ok: false, reason: 'custom requires wake_at' };
+      const t = Date.parse(customIso);
+      if (Number.isNaN(t))
+        return { ok: false, reason: 'invalid wake_at ISO string' };
+      if (t <= now)
+        return { ok: false, reason: 'wake_at must be in the future' };
+      if (t > now + MAX_SNOOZE_MS)
+        return { ok: false, reason: 'wake_at exceeds 90-day cap' };
+      return { ok: true, wake_at: t };
+    }
+    default:
+      return { ok: false, reason: `unknown duration: ${duration}` };
+  }
 }
