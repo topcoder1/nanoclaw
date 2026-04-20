@@ -15,6 +15,7 @@ import type { DraftEnrichmentWatcher } from '../draft-enrichment.js';
 import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
 import { PendingSendRegistry } from './pending-send.js';
+import { createActionsRouter } from './actions.js';
 
 export interface MiniAppServerOpts {
   port: number;
@@ -29,6 +30,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   const registry = opts.pendingSendRegistry ?? new PendingSendRegistry();
   const app = express();
   app.use(express.json());
+  app.use(createActionsRouter({ db: opts.db, gmailOps: opts.gmailOps }));
 
   // Root page — opened when user taps the "📱 App" menu button in Telegram.
   // Lists the attention and archive queues with live counts. The archive

@@ -11,6 +11,7 @@
  * Adding an invariant: add an entry here, reference it from invariants.ts
  * and from invariants-runtime-proof.test.ts.
  */
+import type Database from 'better-sqlite3';
 
 export interface InvariantPredicate {
   name: string;
@@ -84,6 +85,34 @@ export const STATE_MACHINE_INVARIANTS: InvariantPredicate[] = [
                  AND (resolution_method IS NULL OR resolution_method = '' OR instr(resolution_method, ':') = 0)`,
   },
 ];
+
+/**
+ * Cross-table invariant: no unresolved tracked_item may share a thread
+ * with a muted_threads row. If a thread is muted, every tracked_item on
+ * that thread must already be terminal (`state='resolved'`). A non-
+ * resolved row in a muted thread means either the mute-filter path
+ * skipped a cascade, or a race let a row land after the mute — both are
+ * bugs the mini-app mute feature must prevent.
+ *
+ * Returns the list of violating rows so the QA report can surface `id`
+ * and `thread_id` directly, not just a count. The existing state-machine
+ * predicates use a count-only SQL shape because they surface as "N rows
+ * violate …"; this one benefits from row-level detail because the fix
+ * usually requires looking at which thread leaked.
+ */
+export function mutedThreadsNeverVisible(
+  db: Database.Database,
+): { ok: boolean; violations: Array<{ id: string; thread_id: string }> } {
+  const rows = db
+    .prepare(
+      `SELECT ti.id, ti.thread_id
+         FROM tracked_items ti
+         JOIN muted_threads m ON m.thread_id = ti.thread_id
+        WHERE ti.state != 'resolved'`,
+    )
+    .all() as Array<{ id: string; thread_id: string }>;
+  return { ok: rows.length === 0, violations: rows };
+}
 
 /**
  * Resolution-method category allowlist. Any category not in this set

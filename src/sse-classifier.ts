@@ -1,4 +1,5 @@
 import { classify } from './classification.js';
+import { getDb } from './db.js';
 import { eventBus } from './event-bus.js';
 import { logger } from './logger.js';
 import {
@@ -8,6 +9,8 @@ import {
   getDigestState,
 } from './tracked-items.js';
 import type { ItemClassifiedEvent } from './events.js';
+import { isThreadMuted } from './triage/mute-filter.js';
+import { classifySender, classifySubtype } from './triage/sender-kind.js';
 import { triageEmail } from './triage/worker.js';
 import { TRIAGE_DEFAULTS } from './triage/config.js';
 
@@ -36,6 +39,24 @@ export function classifyFromSSE(
 
   for (const email of emails) {
     const sourceId = `gmail:${email.thread_id}`;
+
+    // Mute filter — if the thread is muted, skip intake entirely. We do
+    // NOT archive here because classifyFromSSE has no gmailOps handle;
+    // the SSE layer / reconciler is responsible for archiving. Mute
+    // covers the common case where the user muted via the mini-app and
+    // SuperPilot hasn't yet filtered the thread out upstream.
+    if (isThreadMuted(getDb(), email.thread_id)) {
+      logger.info(
+        {
+          thread_id: email.thread_id,
+          component: 'triage',
+          event: 'muted_skip',
+        },
+        'Muted thread — skipping SSE intake',
+      );
+      continue;
+    }
+
     const existing = getTrackedItemBySourceId('gmail', sourceId);
     if (existing) {
       logger.debug(
@@ -47,6 +68,18 @@ export function classifyFromSSE(
 
     const subject = email.subject || '(no subject)';
     const sender = email.sender || 'unknown';
+    // Best-effort sender/subtype classification — SSE doesn't carry raw
+    // headers or body, only subject + sender + snippet. classifySubtype
+    // treats snippet as body (it's all the text we have), and
+    // classifySender falls back to the localpart/domain heuristics when
+    // headers are empty.
+    const senderKind = classifySender({ from: sender, headers: {} });
+    const subtype = classifySubtype({
+      from: sender,
+      gmailCategory: null,
+      subject,
+      body: email.snippet ?? '',
+    });
 
     const result = classify({
       source: 'gmail',
@@ -89,6 +122,8 @@ export function classifyFromSSE(
       facts_extracted: null,
       repo_candidates: null,
       reasons: null,
+      sender_kind: senderKind,
+      subtype,
     });
 
     if (result.decision === 'digest') {

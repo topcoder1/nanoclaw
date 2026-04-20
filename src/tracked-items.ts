@@ -68,6 +68,11 @@ export interface TrackedItem {
   }> | null;
   reasons: string[] | null;
   reminded_at?: number | null;
+  // 2026-04-19 mini-app UX expansion — sender/subtype heuristics populated
+  // at intake (classifyFromSSE). Columns added in the 2026-04-19 migration
+  // block in db.ts. See src/triage/sender-kind.ts.
+  sender_kind?: 'human' | 'bot' | 'unknown' | null;
+  subtype?: 'transactional' | null;
 }
 
 export interface Thread {
@@ -121,7 +126,7 @@ export function insertTrackedItem(item: TrackedItem): void {
       digest_count, telegram_message_id, classification_reason, metadata,
       confidence, model_tier, action_intent,
       facts_extracted_json, repo_candidates_json, reasons_json,
-      reminded_at
+      reminded_at, sender_kind, subtype
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
@@ -129,7 +134,7 @@ export function insertTrackedItem(item: TrackedItem): void {
       ?, ?, ?, ?,
       ?, ?, ?,
       ?, ?, ?,
-      ?
+      ?, ?, ?
     )`,
   ).run(
     item.id,
@@ -160,6 +165,8 @@ export function insertTrackedItem(item: TrackedItem): void {
     item.repo_candidates != null ? JSON.stringify(item.repo_candidates) : null,
     item.reasons != null ? JSON.stringify(item.reasons) : null,
     item.reminded_at ?? null,
+    item.sender_kind ?? null,
+    item.subtype ?? null,
   );
 }
 

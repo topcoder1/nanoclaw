@@ -19,6 +19,7 @@
  * aren't trivially always-zero.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
 import {
   handleArchive,
@@ -30,7 +31,10 @@ import {
   transitionItemState,
   type TrackedItem,
 } from '../tracked-items.js';
-import { STATE_MACHINE_INVARIANTS } from '../../scripts/qa/invariant-predicates.js';
+import {
+  STATE_MACHINE_INVARIANTS,
+  mutedThreadsNeverVisible,
+} from '../../scripts/qa/invariant-predicates.js';
 
 function seedItem(overrides: Partial<TrackedItem> = {}): TrackedItem {
   const now = Date.now();
@@ -422,5 +426,50 @@ describe('invariants runtime proof — every mutation path preserves every state
     )!;
     const n = (getDb().prepare(inv.countSql).get() as { n: number }).n;
     expect(n).toBe(0);
+  });
+});
+
+describe('muted-threads-never-visible', () => {
+  it('muted thread with unresolved tracked_item is flagged', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tracked_items (
+        id TEXT PRIMARY KEY, thread_id TEXT, state TEXT
+      );
+      CREATE TABLE muted_threads (
+        thread_id TEXT PRIMARY KEY, account TEXT NOT NULL, muted_at INTEGER NOT NULL, reason TEXT
+      );
+      INSERT INTO tracked_items (id, thread_id, state) VALUES ('bad', 'T1', 'pushed');
+      INSERT INTO muted_threads (thread_id, account, muted_at) VALUES ('T1', 'x', 1000);
+    `);
+    const result = mutedThreadsNeverVisible(db);
+    expect(result.ok).toBe(false);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].id).toBe('bad');
+  });
+
+  it('passes when all muted-thread tracked_items are resolved', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tracked_items (
+        id TEXT PRIMARY KEY, thread_id TEXT, state TEXT
+      );
+      CREATE TABLE muted_threads (
+        thread_id TEXT PRIMARY KEY, account TEXT NOT NULL, muted_at INTEGER NOT NULL, reason TEXT
+      );
+      INSERT INTO tracked_items (id, thread_id, state) VALUES ('ok', 'T1', 'resolved');
+      INSERT INTO muted_threads (thread_id, account, muted_at) VALUES ('T1', 'x', 1000);
+    `);
+    expect(mutedThreadsNeverVisible(db).ok).toBe(true);
+  });
+
+  it('passes when no muted threads exist', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tracked_items (id TEXT PRIMARY KEY, thread_id TEXT, state TEXT);
+      CREATE TABLE muted_threads (thread_id TEXT PRIMARY KEY, account TEXT NOT NULL, muted_at INTEGER NOT NULL, reason TEXT);
+      INSERT INTO tracked_items (id, thread_id, state) VALUES ('x', 'T1', 'pushed');
+    `);
+    expect(mutedThreadsNeverVisible(db).ok).toBe(true);
   });
 });
