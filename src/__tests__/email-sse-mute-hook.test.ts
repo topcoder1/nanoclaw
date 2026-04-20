@@ -1,145 +1,138 @@
-import { describe, it, expect, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// Mocks mirror src/__tests__/sse-classifier.test.ts. classifyFromSSE
+// reaches into logger, config, and the event bus — stubbing them keeps
+// the test isolated from logging noise and from config-file presence.
+vi.mock('../logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
 vi.mock('../config.js', () => ({
-  DATA_DIR: '/tmp/nanoclaw-test-data',
-  EMAIL_INTELLIGENCE_ENABLED: false,
-  SSE_CONNECTIONS: [],
-  SUPERPILOT_API_URL: 'http://localhost:0',
-  ASSISTANT_NAME: 'test',
-  STORE_DIR: '/tmp/nanoclaw-test-store',
+  CHAT_INTERFACE_CONFIG: {
+    urgencyKeywords: ['urgent', 'deadline', 'asap', 'blocking'],
+    vipList: [],
+    digestThreshold: 5,
+    digestMinIntervalMs: 7200000,
+    staleAfterDigestCycles: 2,
+    pushRateLimit: 3,
+    pushRateWindowMs: 1800000,
+    holdPushDuringMeetings: false,
+    quietHours: {
+      enabled: false,
+      start: '22:00',
+      end: '07:00',
+      weekendMode: false,
+      escalateOverride: true,
+    },
+    morningDashboardTime: '07:30',
+    microBriefingDelayMs: 60000,
+  },
+}));
+vi.mock('../event-bus.js', () => ({
+  eventBus: { emit: vi.fn(), on: vi.fn() },
 }));
 
-import { runMigrations } from '../db.js';
-import { processIncomingEmail } from '../email-sse.js';
+import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
+import { classifyFromSSE, type SSEEmail } from '../sse-classifier.js';
+import { getTrackedItemBySourceId } from '../tracked-items.js';
+import { logger } from '../logger.js';
 
-function seed(): Database.Database {
-  const db = new Database(':memory:');
-  runMigrations(db);
-  return db;
-}
+describe('classifyFromSSE — mute hook + sender/subtype wiring', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    vi.clearAllMocks();
+  });
+  afterEach(() => _closeDatabase());
 
-describe('processIncomingEmail — mute hook + sender/subtype wiring', () => {
-  it('skips tracked_items insert and archives Gmail when thread is muted', async () => {
-    const db = seed();
-    db.prepare(
-      `INSERT INTO muted_threads (thread_id, account, muted_at) VALUES (?, ?, ?)`,
-    ).run('muted-thread', 'alice@example.com', Date.now());
+  it('skips tracked_items insert when thread is muted and logs muted_skip', () => {
+    // Mark thread-abc as muted BEFORE the SSE event arrives. The
+    // classifier's isThreadMuted check must fire before any insert/
+    // classify/event-emit side effects.
+    getDb()
+      .prepare(
+        `INSERT INTO muted_threads (thread_id, account, muted_at) VALUES (?, ?, ?)`,
+      )
+      .run('thread-abc', 'alice@example.com', Date.now());
 
-    const archiveThread = vi.fn().mockResolvedValue(undefined);
-    const gmailOps = { archiveThread };
-
-    const result = await processIncomingEmail({
-      db,
-      gmailOps,
-      event: {
-        threadId: 'muted-thread',
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread-abc',
         account: 'alice@example.com',
-        messageId: 'msg-1',
         subject: 'anything',
-        from: 'someone@example.com',
-        headers: {},
-        body: '',
+        sender: 'someone@example.com',
+        snippet: 'body',
       },
-    });
+    ];
 
-    expect(result.action).toBe('muted_skip');
-    expect(archiveThread).toHaveBeenCalledWith(
-      'alice@example.com',
-      'muted-thread',
+    const results = classifyFromSSE(emails);
+
+    // No results returned, no tracked_items row inserted.
+    expect(results).toHaveLength(0);
+    const count = getDb()
+      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
+      .get() as { n: number };
+    expect(count.n).toBe(0);
+
+    // Muted-skip log event fires so operators can watch the ratio.
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread_id: 'thread-abc',
+        component: 'triage',
+        event: 'muted_skip',
+      }),
+      expect.stringContaining('Muted thread'),
     );
-    const count = db
-      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
-      .get() as { n: number };
-    expect(count.n).toBe(0);
   });
 
-  it('returns muted_skip without throwing when the Gmail archive call fails', async () => {
-    const db = seed();
-    db.prepare(
-      `INSERT INTO muted_threads (thread_id, account, muted_at) VALUES (?, ?, ?)`,
-    ).run('muted-thread-2', 'alice@example.com', Date.now());
-
-    const archiveThread = vi
-      .fn()
-      .mockRejectedValue(new Error('gmail blew up'));
-    const gmailOps = { archiveThread };
-
-    const result = await processIncomingEmail({
-      db,
-      gmailOps,
-      event: {
-        threadId: 'muted-thread-2',
+  it('populates sender_kind=bot and subtype=transactional for Stripe verification-code email', () => {
+    // SSE payload is header-poor — no List-Unsubscribe, no
+    // gmailCategory. The combo below still lands both heuristics:
+    //   classifySender: localpart "noreply" matches BOT_LOCALPART → bot
+    //   classifySubtype: stripe.com domain (+1) + "verification code"
+    //                    subject keyword (+1) = 2 signals → transactional
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread-stripe-otp',
         account: 'alice@example.com',
-        subject: 'anything',
-        from: 'x@y.com',
-        headers: {},
-        body: '',
-      },
-    });
-
-    expect(result.action).toBe('muted_skip');
-    expect(archiveThread).toHaveBeenCalled();
-    const count = db
-      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
-      .get() as { n: number };
-    expect(count.n).toBe(0);
-  });
-
-  it('populates sender_kind and subtype on normal intake', async () => {
-    const db = seed();
-    const archiveThread = vi.fn();
-    const gmailOps = { archiveThread };
-
-    const result = await processIncomingEmail({
-      db,
-      gmailOps,
-      event: {
-        threadId: 'thread-new',
-        account: 'alice@example.com',
-        messageId: 'msg-new',
         subject: 'Your Stripe verification code',
-        from: 'noreply@stripe.com',
-        headers: { 'List-Unsubscribe': '<https://x/unsub>' },
-        body: 'Your verification code is 123456',
-        gmailCategory: 'CATEGORY_UPDATES',
+        sender: 'noreply@stripe.com',
+        snippet: 'Your verification code is 123456',
       },
-    });
+    ];
 
-    expect(result.action).toBe('inserted');
-    expect(archiveThread).not.toHaveBeenCalled();
+    const results = classifyFromSSE(emails);
+    expect(results).toHaveLength(1);
 
-    const row = db
-      .prepare('SELECT sender_kind, subtype FROM tracked_items LIMIT 1')
-      .get() as
-      | { sender_kind: string | null; subtype: string | null }
-      | undefined;
-    expect(row?.sender_kind).toBe('bot');
-    expect(row?.subtype).toBe('transactional');
+    const item = getTrackedItemBySourceId('gmail', 'gmail:thread-stripe-otp');
+    expect(item).not.toBeNull();
+    expect(item!.sender_kind).toBe('bot');
+    expect(item!.subtype).toBe('transactional');
   });
 
-  it('dedups — second call for the same thread_id does not double-insert', async () => {
-    const db = seed();
-    const archiveThread = vi.fn();
-    const gmailOps = { archiveThread };
+  it('populates sender_kind=human and subtype=null for a plain human-sent email', () => {
+    // Counterexample — a human sender on a non-transactional subject
+    // must leave subtype null (don't over-classify) and sender_kind
+    // must fall through the bot heuristics to 'human'.
+    const emails: SSEEmail[] = [
+      {
+        thread_id: 'thread-human',
+        account: 'alice@example.com',
+        subject: 'lunch tomorrow?',
+        sender: 'friend@gmail.com',
+        snippet: 'are you free at noon',
+      },
+    ];
 
-    const ev = {
-      threadId: 'dedup-thread',
-      account: 'alice@example.com',
-      subject: 'hello',
-      from: 'a@b.com',
-      headers: {},
-      body: '',
-    };
+    classifyFromSSE(emails);
 
-    const first = await processIncomingEmail({ db, gmailOps, event: ev });
-    const second = await processIncomingEmail({ db, gmailOps, event: ev });
-
-    expect(first.action).toBe('inserted');
-    expect(second.action).toBe('already_tracked');
-    const count = db
-      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
-      .get() as { n: number };
-    expect(count.n).toBe(1);
+    const item = getTrackedItemBySourceId('gmail', 'gmail:thread-human');
+    expect(item).not.toBeNull();
+    expect(item!.sender_kind).toBe('human');
+    expect(item!.subtype).toBeNull();
   });
 });

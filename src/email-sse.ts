@@ -10,8 +10,6 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 
-import type Database from 'better-sqlite3';
-
 import {
   DATA_DIR,
   EMAIL_INTELLIGENCE_ENABLED,
@@ -20,11 +18,8 @@ import {
 } from './config.js';
 import { eventBus } from './event-bus.js';
 import type { EmailReceivedEvent } from './events.js';
-import type { GmailOps } from './gmail-ops.js';
 import { logger } from './logger.js';
 import type { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
-import { isThreadMuted } from './triage/mute-filter.js';
-import { classifySender, classifySubtype } from './triage/sender-kind.js';
 
 const SSE_RECONNECT_MIN_MS = 5_000;
 const SSE_RECONNECT_MAX_MS = 300_000; // 5 minutes max backoff
@@ -363,164 +358,3 @@ function handleTriagedEmails(data: string, label: string): void {
   }
 }
 
-/**
- * The shape of a single incoming email as consumed by the intake-level
- * pipeline. Richer than the SSE payload (`SSEEmail`) — carries raw
- * headers, full body, and Gmail's category label so the sender/subtype
- * classifiers can do their best work.
- */
-export interface IncomingEmailEvent {
-  threadId: string;
-  account: string;
-  messageId?: string;
-  subject?: string;
-  from?: string;
-  headers?: Record<string, string>;
-  body?: string;
-  gmailCategory?: string | null;
-  snippet?: string;
-  superpilotLabel?: string | null;
-  groupName?: string;
-}
-
-export interface ProcessIncomingEmailOpts {
-  db: Database.Database;
-  gmailOps: Pick<GmailOps, 'archiveThread'>;
-  event: IncomingEmailEvent;
-}
-
-export type ProcessIncomingEmailResult = {
-  action: 'inserted' | 'muted_skip' | 'already_tracked';
-};
-
-/**
- * Testable intake seam for incoming emails. Applies the mute filter
- * first (muted threads archive and return without inserting), then —
- * for fresh threads — writes a `tracked_items` row populated with the
- * sender_kind + subtype heuristics so downstream rendering can
- * classification-aware group/display items.
- *
- * This is deliberately a thin, dependency-injected wrapper. The
- * production SSE hot path still flows through {@link classifyFromSSE}
- * in `sse-classifier.ts`, which applies the same mute check and
- * populates the same heuristic columns via the global DB handle.
- * `processIncomingEmail` exists so the mute-filter + classification
- * wiring can be unit-tested end-to-end without standing up the full
- * classifier pipeline or the global singleton DB.
- */
-export async function processIncomingEmail(
-  opts: ProcessIncomingEmailOpts,
-): Promise<ProcessIncomingEmailResult> {
-  const { db, gmailOps, event } = opts;
-
-  // Mute check runs first — BEFORE any classification, DB write, or
-  // event emission. Muted threads must produce zero side-effects
-  // besides archive + log.
-  if (event.threadId && isThreadMuted(db, event.threadId)) {
-    logger.info(
-      {
-        thread_id: event.threadId,
-        component: 'triage',
-        event: 'muted_skip',
-      },
-      'Muted thread — skipping intake',
-    );
-    try {
-      if (event.account) {
-        await gmailOps.archiveThread(event.account, event.threadId);
-      }
-    } catch (err) {
-      // Archive failure is non-fatal: the item is already skipped; we
-      // just leave the thread in the inbox. Logging lets operators
-      // catch persistent failures (e.g. revoked token).
-      logger.error(
-        { err, thread_id: event.threadId, component: 'triage' },
-        'Muted thread archive failed — left in inbox',
-      );
-    }
-    return { action: 'muted_skip' };
-  }
-
-  const sourceId = `gmail:${event.threadId}`;
-
-  // Short-circuit if this thread is already tracked. Matches the
-  // dedup behavior in classifyFromSSE so reconnect/replay storms
-  // don't double-insert.
-  const existing = db
-    .prepare(`SELECT 1 FROM tracked_items WHERE source = ? AND source_id = ?`)
-    .get('gmail', sourceId);
-  if (existing) {
-    return { action: 'already_tracked' };
-  }
-
-  const from = event.from ?? '';
-  const subject = event.subject ?? '';
-  const body = event.body ?? '';
-  const senderKind = classifySender({
-    from,
-    headers: event.headers ?? {},
-  });
-  const subtype = classifySubtype({
-    from,
-    gmailCategory: event.gmailCategory ?? null,
-    subject,
-    body,
-  });
-
-  const now = Date.now();
-  const itemId = `intake-${now}-${Math.random().toString(36).slice(2, 8)}`;
-
-  // Direct INSERT against the passed DB handle so this seam is
-  // independent of the global singleton used by `insertTrackedItem`.
-  // Kept in sync with the main INSERT in tracked-items.ts.
-  db.prepare(
-    `INSERT OR IGNORE INTO tracked_items (
-      id, source, source_id, group_name, state, classification,
-      superpilot_label, trust_tier, title, summary, thread_id,
-      detected_at, pushed_at, resolved_at, resolution_method,
-      digest_count, telegram_message_id, classification_reason, metadata,
-      confidence, model_tier, action_intent,
-      facts_extracted_json, repo_candidates_json, reasons_json,
-      reminded_at, sender_kind, subtype
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?
-    )`,
-  ).run(
-    itemId,
-    'gmail',
-    sourceId,
-    event.groupName ?? 'main',
-    'detected',
-    null,
-    event.superpilotLabel ?? null,
-    null,
-    subject || '(no subject)',
-    null,
-    event.threadId,
-    now,
-    null,
-    null,
-    null,
-    0,
-    null,
-    null,
-    JSON.stringify({ account: event.account, sender: from }),
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    senderKind,
-    subtype,
-  );
-
-  return { action: 'inserted' };
-}

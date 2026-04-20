@@ -69,8 +69,8 @@ export interface TrackedItem {
   reasons: string[] | null;
   reminded_at?: number | null;
   // 2026-04-19 mini-app UX expansion — sender/subtype heuristics populated
-  // at intake (classifyFromSSE / processIncomingEmail). Columns added in
-  // the 2026-04-19 migration block in db.ts. See src/triage/sender-kind.ts.
+  // at intake (classifyFromSSE). Columns added in the 2026-04-19 migration
+  // block in db.ts. See src/triage/sender-kind.ts.
   sender_kind?: 'human' | 'bot' | 'unknown' | null;
   subtype?: 'transactional' | null;
 }
