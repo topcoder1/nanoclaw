@@ -112,6 +112,7 @@ vi.mock('./db.js', () => ({
 // Channels
 vi.mock('./channels/index.js', () => ({}));
 vi.mock('./channels/registry.js', () => ({
+  registerChannel: vi.fn(),
   getChannelFactory: vi.fn(),
   getRegisteredChannelNames: vi.fn(() => []),
 }));

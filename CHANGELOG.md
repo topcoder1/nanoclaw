@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [1.2.56] - 2026-04-19
+
+### Fixed
+
+- `src/index.test.ts` was failing to load because its `vi.mock('./channels/registry.js')` didn't export `registerChannel`, which `telegram.ts` calls at module top-level. Added the missing mock export. Unblocks 19 previously-dark tests — full suite now 1630/1630 green.
+
 ## [1.2.55] - 2026-04-19
 
 ### Added
