@@ -17,8 +17,8 @@ describe('Mini App extended routes', () => {
       );
       CREATE TABLE tracked_items (
         id TEXT PRIMARY KEY, source TEXT, source_id TEXT, group_name TEXT,
-        state TEXT, title TEXT, thread_id TEXT, detected_at INTEGER,
-        metadata TEXT
+        state TEXT, queue TEXT, title TEXT, thread_id TEXT, detected_at INTEGER,
+        metadata TEXT, classification TEXT, sender_kind TEXT, subtype TEXT
       );
     `);
 
@@ -328,5 +328,30 @@ describe('Mini App extended routes', () => {
     const { app } = setup();
     const res = await request(app).get('/draft-diff/nonexistent');
     expect(res.status).toBe(404);
+  });
+
+  it('GET /email/:emailId renders classification-aware action row', async () => {
+    const { app, db } = setup();
+    db.prepare(
+      `INSERT INTO tracked_items (id, source, state, queue, classification, sender_kind, thread_id, detected_at, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'sse-class-1',
+      'email',
+      'pushed',
+      'attention',
+      'push',
+      'human',
+      'thread-1',
+      Date.now(),
+      JSON.stringify({ account: 'alice@example.com' }),
+    );
+    const res = await request(app).get('/email/sse-class-1');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('data-chip="thanks"');
+    expect(res.text).toContain('data-action="quick-draft"');
+    expect(res.text).toContain('data-action="draft-prompt"');
+    expect(res.text).toContain('data-action="archive"');
+    expect(res.text).toContain('data-action="more"');
   });
 });

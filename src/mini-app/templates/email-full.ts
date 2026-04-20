@@ -1,4 +1,10 @@
 import { escapeHtml } from './escape.js';
+import {
+  renderActionRow,
+  type Classification,
+  type SenderKind,
+  type Subtype,
+} from './action-row.js';
 
 export interface EmailFullData {
   mode?: 'view' | 'reply'; // default: 'view' (backward compatible)
@@ -16,6 +22,10 @@ export interface EmailFullData {
   body: string;
   attachments: Array<{ name: string; size: string }>;
   cc?: string;
+  classification?: Classification;
+  senderKind?: SenderKind;
+  subtype?: Subtype;
+  hasUnsubscribeHeader?: boolean;
 }
 
 // Gmail's extractTextBody prefers text/plain, so many messages arrive as raw
@@ -85,43 +95,249 @@ export function renderEmailFull(data: EmailFullData): string {
 </div>`
     : renderPlainTextBody(data.body);
 
+  const actionRowHtml = renderActionRow({
+    emailId: data.emailId || '',
+    account: data.account || '',
+    threadId: data.gmailId || '',
+    classification: data.classification ?? null,
+    senderKind: data.senderKind ?? null,
+    subtype: data.subtype ?? null,
+    hasUnsubscribeHeader: data.hasUnsubscribeHeader ?? false,
+  });
+
   const viewControls = `${bodyHtml}
   ${attachmentsHtml}
-  <div class="actions">
-  <button class="btn" style="background:#276749;color:#c6f6d5;"
-    data-email-id="${escapeHtml(data.emailId || '')}"
-    data-account="${escapeHtml(data.account || '')}"
-    data-thread-id="${escapeHtml(data.gmailId || '')}"
-    onclick="archiveEmail(this)">Archive</button>
-  <a class="btn" href="${escapeHtml(buildGmailOpenUrl(data.account || '', data.gmailId || data.emailId || ''))}"
-    target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
-</div>
+  ${actionRowHtml}
 <script>
-async function archiveEmail(btn) {
-  btn.disabled = true;
-  btn.textContent = 'Archiving...';
-  try {
-    const resp = await fetch('/api/email/' + btn.dataset.emailId + '/archive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        account: btn.dataset.account,
-        threadId: btn.dataset.threadId || undefined,
-      }),
-    });
-    if (resp.ok) {
-      btn.textContent = 'Archived';
-      btn.style.opacity = '0.5';
-      if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close();
-    } else {
+(function(){
+  const OPEN_GMAIL_URL = ${JSON.stringify(buildGmailOpenUrl(data.account || '', data.gmailId || data.emailId || ''))};
+
+  function showBanner(text, actionLabel, actionFn) {
+    const existing = document.querySelector('.action-banner');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.className = 'action-banner';
+    div.style.cssText = 'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
+    div.textContent = text;
+    if (actionLabel && actionFn) {
+      const a = document.createElement('button');
+      a.textContent = actionLabel;
+      a.style.cssText = 'margin-left:12px;background:#21262d;color:#c9d1d9;padding:6px 12px;border-radius:6px;border:none;';
+      a.onclick = () => { actionFn(); div.remove(); };
+      div.appendChild(a);
+    }
+    document.body.appendChild(div);
+  }
+
+  function toggleMoreRow() {
+    const row = document.getElementById('more-row');
+    if (!row) return;
+    row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  }
+
+  async function handleArchive(id, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Archiving...';
+    try {
+      const resp = await fetch('/api/email/' + encodeURIComponent(id) + '/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: btn.dataset.account,
+          threadId: btn.dataset.threadId || undefined,
+        }),
+      });
+      if (resp.ok) {
+        btn.textContent = 'Archived';
+        btn.style.opacity = '0.5';
+        if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close();
+      } else {
+        btn.textContent = 'Failed - Retry';
+        btn.disabled = false;
+      }
+    } catch (e) {
       btn.textContent = 'Failed - Retry';
       btn.disabled = false;
     }
-  } catch(e) {
-    btn.textContent = 'Failed - Retry';
-    btn.disabled = false;
   }
-}
+
+  async function handleMute(id, btn) {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = 'Muting…';
+    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/mute', {
+      method: 'POST',
+    });
+    const j = await r.json();
+    if (j.ok) {
+      showBanner('🔇 Muted', 'Unmute', () =>
+        fetch('/api/email/' + encodeURIComponent(id) + '/mute', { method: 'DELETE' }),
+      );
+    } else {
+      btn.disabled = false;
+      btn.textContent = original;
+      alert(j.error || 'Mute failed');
+    }
+  }
+
+  async function handleSnooze(id, btn) {
+    const duration = prompt(
+      'Snooze for how long? (1h / tomorrow-8am / next-monday-8am / next-week)',
+      '1h',
+    );
+    if (!duration) return;
+    btn.disabled = true;
+    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/snooze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      showBanner('💤 Snoozed', 'Unsnooze', () =>
+        fetch('/api/email/' + encodeURIComponent(id) + '/snooze', { method: 'DELETE' }),
+      );
+    } else {
+      btn.disabled = false;
+      alert(j.error || 'Snooze failed');
+    }
+  }
+
+  async function handleUnsubscribe(id, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Unsubscribing…';
+    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/unsubscribe', {
+      method: 'POST',
+    });
+    const j = await r.json();
+    if (j.ok) {
+      showBanner('📭 Unsubscribed (' + j.method + ')', null, null);
+    } else {
+      btn.disabled = false;
+      btn.textContent = '📭 Unsubscribe';
+      alert(j.error || 'Unsubscribe failed');
+    }
+  }
+
+  async function handleChip(chip, id, btn) {
+    const presets = { thanks: 'Thanks!', 'got-it': 'Got it.', 'will-do': 'Will do.' };
+    const body = presets[chip];
+    if (!body) return;
+    btn.disabled = true;
+    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/canned-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    const j = await r.json();
+    if (j.ok && j.draftId) {
+      window.location.href = '/reply/' + encodeURIComponent(j.draftId);
+    } else {
+      btn.disabled = false;
+      alert(j.error || 'Canned reply failed');
+    }
+  }
+
+  async function handleQuickDraft(id, btn) {
+    btn.disabled = true;
+    btn.textContent = '⚡ Drafting…';
+    const res = await fetch('/api/email/' + encodeURIComponent(id) + '/draft-with-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const j = await res.json();
+    if (!j.ok) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Quick draft';
+      alert(j.error || 'Draft failed');
+      return;
+    }
+    pollDraftTask(j.taskId, btn);
+  }
+
+  function handleDraftPrompt(id, btn) {
+    if (document.getElementById('draft-prompt-input')) return;
+    const ta = document.createElement('textarea');
+    ta.id = 'draft-prompt-input';
+    ta.placeholder = 'What should the reply say? (e.g. "decline politely, suggest next Tues")';
+    ta.style.cssText = 'display:block;width:100%;min-height:72px;margin-top:8px;padding:8px;background:#0d1117;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;font:inherit;';
+    const sub = document.createElement('button');
+    sub.textContent = 'Draft';
+    sub.style.cssText = 'margin-top:6px;background:#1f6feb;color:#fff;padding:8px 14px;border-radius:6px;border:none;';
+    sub.onclick = async () => {
+      const intent = ta.value.trim();
+      if (!intent) return;
+      btn.disabled = true;
+      sub.disabled = true;
+      sub.textContent = 'Drafting…';
+      const res = await fetch('/api/email/' + encodeURIComponent(id) + '/draft-with-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent }),
+      });
+      const j = await res.json();
+      if (!j.ok) {
+        alert(j.error || 'Draft failed');
+        btn.disabled = false;
+        sub.disabled = false;
+        sub.textContent = 'Draft';
+        return;
+      }
+      ta.remove();
+      sub.remove();
+      pollDraftTask(j.taskId, btn);
+    };
+    btn.parentElement.appendChild(ta);
+    btn.parentElement.appendChild(sub);
+  }
+
+  function pollDraftTask(taskId, btn) {
+    const deadline = Date.now() + 50_000;
+    const timer = setInterval(async () => {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        btn.disabled = false;
+        alert('Draft timed out');
+        return;
+      }
+      const res = await fetch('/api/draft-status/' + encodeURIComponent(taskId));
+      const j = await res.json();
+      if (j.status === 'ready' && j.draftId) {
+        clearInterval(timer);
+        window.location.href = '/reply/' + encodeURIComponent(j.draftId);
+      } else if (j.status === 'failed') {
+        clearInterval(timer);
+        btn.disabled = false;
+        alert('Draft failed: ' + (j.error || ''));
+      }
+    }, 1500);
+  }
+
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const btn = target.closest('[data-action],[data-chip]');
+    if (!btn) return;
+    const emailId = btn.dataset.emailId;
+    if (!emailId) return;
+    const action = btn.dataset.action;
+    const chip = btn.dataset.chip;
+    if (chip) return handleChip(chip, emailId, btn);
+    switch (action) {
+      case 'archive':      return handleArchive(emailId, btn);
+      case 'snooze':       return handleSnooze(emailId, btn);
+      case 'mute':         return handleMute(emailId, btn);
+      case 'unsubscribe':  return handleUnsubscribe(emailId, btn);
+      case 'quick-draft':  return handleQuickDraft(emailId, btn);
+      case 'draft-prompt': return handleDraftPrompt(emailId, btn);
+      case 'more':         return toggleMoreRow();
+      case 'open-gmail':
+        window.open(OPEN_GMAIL_URL, '_blank', 'noopener');
+        return;
+    }
+  });
+})();
 </script>`;
 
   const replyControls =

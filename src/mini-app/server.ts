@@ -515,6 +515,41 @@ ${
       };
     }
 
+    // Classification / sender fields for the context-aware action row.
+    let classification: string | null = null;
+    let senderKind: string | null = null;
+    let subtype: string | null = null;
+    try {
+      const row2 = opts.db
+        .prepare(
+          `SELECT classification, sender_kind, subtype FROM tracked_items
+           WHERE id = ? OR thread_id = ? OR source_id = ?
+           ORDER BY detected_at DESC LIMIT 1`,
+        )
+        .get(emailId, emailId, emailId) as
+        | {
+            classification: string | null;
+            sender_kind: string | null;
+            subtype: string | null;
+          }
+        | undefined;
+      if (row2) {
+        classification = row2.classification;
+        senderKind = row2.sender_kind;
+        subtype = row2.subtype;
+      }
+    } catch (err) {
+      logger.debug(
+        { err, emailId, component: 'mini-app' },
+        'classification/sender lookup failed — defaulting to null',
+      );
+    }
+    const metaHeaders = (meta as { headers?: Record<string, string> })
+      ?.headers;
+    const hasUnsubscribeHeader = !!(
+      metaHeaders?.['List-Unsubscribe'] || metaHeaders?.['list-unsubscribe']
+    );
+
     const html = renderEmailFull({
       subject: meta.subject || `Email ${emailId}`,
       from: meta.from || '',
@@ -526,6 +561,12 @@ ${
       emailId,
       account,
       gmailId: gmailId || undefined,
+      classification:
+        classification as import('./templates/action-row.js').Classification,
+      senderKind:
+        senderKind as import('./templates/action-row.js').SenderKind,
+      subtype: subtype as import('./templates/action-row.js').Subtype,
+      hasUnsubscribeHeader,
     });
     res.type('html').send(html);
   });
