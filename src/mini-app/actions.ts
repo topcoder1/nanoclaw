@@ -3,10 +3,15 @@ import type Database from 'better-sqlite3';
 import type { GmailOps } from '../gmail-ops.js';
 import { logger } from '../logger.js';
 import { muteThread, unmuteThread } from '../triage/mute-filter.js';
+import {
+  pickUnsubscribeMethod,
+  executeUnsubscribe,
+} from '../triage/unsubscribe-executor.js';
 
 export interface ActionDeps {
   db: Database.Database;
   gmailOps?: GmailOps;
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 export function createActionsRouter(deps: ActionDeps): express.Router {
@@ -126,6 +131,97 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
     })();
 
     res.json({ ok: true, wake_at: parsed.wake_at });
+  });
+
+  router.post('/api/email/:id/unsubscribe', async (req, res) => {
+    const item = lookupItem(req.params.id);
+    if (!item || !item.thread_id || !item.account) {
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
+      return;
+    }
+    if (!deps.gmailOps) {
+      res.status(503).json({
+        ok: false,
+        error: 'Gmail not configured',
+        code: 'GMAIL_UNAVAILABLE',
+      });
+      return;
+    }
+
+    const row = deps.db
+      .prepare('SELECT source_id FROM tracked_items WHERE id = ?')
+      .get(req.params.id) as { source_id: string | null } | undefined;
+    const rawGmailId = row?.source_id ?? null;
+    const gmailId = rawGmailId?.startsWith('gmail:')
+      ? rawGmailId.slice('gmail:'.length)
+      : (rawGmailId ?? item.thread_id);
+
+    let headers: Record<string, string> = {};
+    try {
+      const meta = await deps.gmailOps.getMessageMeta(item.account, gmailId);
+      headers = meta?.headers ?? {};
+    } catch (err) {
+      logger.error(
+        { err, id: req.params.id, component: 'mini-app-actions' },
+        'Unsubscribe: failed to fetch headers',
+      );
+    }
+
+    const method = pickUnsubscribeMethod(headers);
+    if (method.kind === 'none') {
+      res.status(422).json({
+        ok: false,
+        error: 'No List-Unsubscribe header present',
+        code: 'NO_UNSUBSCRIBE_HEADER',
+      });
+      return;
+    }
+
+    const result = await executeUnsubscribe({
+      method,
+      account: item.account,
+      fetch: deps.fetchImpl ?? fetch,
+      gmailOps: deps.gmailOps,
+    });
+
+    deps.db
+      .prepare(
+        `INSERT INTO unsubscribe_log (item_id, method, url, status, error, attempted_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        req.params.id,
+        result.method,
+        result.url ?? null,
+        result.status,
+        result.error ?? null,
+        Date.now(),
+      );
+
+    try {
+      await deps.gmailOps.archiveThread(item.account, item.thread_id);
+    } catch (err) {
+      logger.error(
+        { err, id: req.params.id, component: 'mini-app-actions' },
+        'Unsubscribe: archive failed',
+      );
+    }
+
+    const succeeded = result.status >= 200 && result.status < 400;
+    if (!succeeded && result.status !== 0) {
+      res.status(502).json({
+        ok: false,
+        error: `Remote returned ${result.status}`,
+        code: 'UNSUBSCRIBE_REMOTE_FAILED',
+        method: result.method,
+      });
+      return;
+    }
+    res.json({ ok: true, method: result.method, status: result.status });
   });
 
   router.delete('/api/email/:id/snooze', (req, res) => {

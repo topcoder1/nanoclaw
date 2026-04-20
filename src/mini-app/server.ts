@@ -24,13 +24,20 @@ export interface MiniAppServerOpts {
   draftWatcher?: DraftEnrichmentWatcher;
   eventBus?: import('../event-bus.js').EventBus;
   pendingSendRegistry?: PendingSendRegistry;
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   const registry = opts.pendingSendRegistry ?? new PendingSendRegistry();
   const app = express();
   app.use(express.json());
-  app.use(createActionsRouter({ db: opts.db, gmailOps: opts.gmailOps }));
+  app.use(
+    createActionsRouter({
+      db: opts.db,
+      gmailOps: opts.gmailOps,
+      fetchImpl: opts.fetchImpl,
+    }),
+  );
 
   // Root page — opened when user taps the "📱 App" menu button in Telegram.
   // Lists the attention and archive queues with live counts. The archive

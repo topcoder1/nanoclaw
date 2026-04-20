@@ -211,3 +211,80 @@ describe('mini-app actions — snooze', () => {
     expect(count.n).toBe(0);
   });
 });
+
+describe('mini-app actions — unsubscribe', () => {
+  let db: Database.Database;
+  let gmailOps: any;
+
+  beforeEach(() => {
+    db = freshDb();
+    gmailOps = {
+      archiveThread: vi.fn().mockResolvedValue(undefined),
+      sendEmail: vi.fn().mockResolvedValue(undefined),
+      getMessageMeta: vi.fn().mockResolvedValue({
+        subject: 'test',
+        from: 'a',
+        to: 'b',
+        date: '',
+        body: '',
+        headers: {
+          'List-Unsubscribe': '<https://news.example.com/unsub>',
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
+      }),
+      getMessageBody: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+      getDraftReplyContext: vi.fn(),
+      sendDraft: vi.fn(),
+    };
+  });
+
+  it('POST /api/email/:id/unsubscribe one-click path', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    db.prepare('UPDATE tracked_items SET source_id=? WHERE id=?').run(
+      'gmail:thread-1',
+      'i1',
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200, ok: true });
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      fetchImpl: fetchMock as any,
+    });
+
+    const res = await request(app).post('/api/email/i1/unsubscribe');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.method).toBe('one-click');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://news.example.com/unsub',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(gmailOps.archiveThread).toHaveBeenCalledWith(
+      'alice@example.com',
+      'thread-1',
+    );
+    const log = db
+      .prepare('SELECT method, status FROM unsubscribe_log WHERE item_id=?')
+      .get('i1') as { method: string; status: number };
+    expect(log).toEqual({ method: 'one-click', status: 200 });
+  });
+
+  it('POST /api/email/:id/unsubscribe returns NO_UNSUBSCRIBE_HEADER when absent', async () => {
+    gmailOps.getMessageMeta = vi.fn().mockResolvedValue({
+      subject: '',
+      from: '',
+      to: '',
+      date: '',
+      body: '',
+      headers: {},
+    });
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const res = await request(app).post('/api/email/i1/unsubscribe');
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('NO_UNSUBSCRIBE_HEADER');
+  });
+});
