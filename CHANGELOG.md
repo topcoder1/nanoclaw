@@ -4,6 +4,12 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [1.2.57] - 2026-04-19
+
+### Changed
+
+- Tapping an action on a QA proposal that no longer has a JSON record now reads `not found (resolved, expired, or manually cleaned up)` instead of `(already resolved?)` — no longer misleading reviewers into thinking *they* resolved something the auto-expire cron or manual cleanup actually handled.
+
 ## [1.2.56] - 2026-04-19
 
 ### Fixed

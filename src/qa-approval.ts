@@ -178,7 +178,7 @@ export async function handleQaCallback(
       channel,
       query.chatJid,
       query.messageId,
-      `⚠️ QA proposal ${proposalId} not found (already resolved?)`,
+      `⚠️ QA proposal ${proposalId} not found (resolved, expired, or manually cleaned up)`,
     );
     return;
   }
