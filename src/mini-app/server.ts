@@ -71,7 +71,11 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       try {
         const m = JSON.parse(metadata) as { account?: string };
         return m.account ?? '';
-      } catch {
+      } catch (err) {
+        logger.debug(
+          { err, component: 'mini-app' },
+          'tracked_items.metadata JSON.parse failed (home listing)',
+        );
         return '';
       }
     };
@@ -239,8 +243,11 @@ ${
         try {
           const meta = JSON.parse(row.metadata) as { account?: string };
           account = meta.account ?? null;
-        } catch {
-          // treat as missing account
+        } catch (err) {
+          logger.debug(
+            { err, id: row.id, component: 'mini-app' },
+            'tracked_items.metadata JSON.parse failed (bulk archive)',
+          );
         }
       }
 
@@ -437,8 +444,11 @@ ${
           try {
             const m = JSON.parse(row.metadata) as { account?: string };
             if (m.account) account = m.account;
-          } catch {
-            /* ignore */
+          } catch (err) {
+            logger.debug(
+              { err, emailId, component: 'mini-app' },
+              'tracked_items.metadata JSON.parse failed (email view)',
+            );
           }
         }
         // source_id is canonical; thread_id is a fallback. Strip the
@@ -446,9 +456,13 @@ ${
         const raw = row.source_id || row.thread_id || '';
         gmailId = raw.startsWith('gmail:') ? raw.slice('gmail:'.length) : raw;
       }
-    } catch {
+    } catch (err) {
       // tracked_items table may not exist in minimal test DBs; legacy
       // callers can still pass a raw Gmail message id in the URL.
+      logger.debug(
+        { err, emailId, component: 'mini-app' },
+        'tracked_items lookup failed (email view) — falling back to URL id',
+      );
     }
 
     // Cache lookup uses the URL id since that's stable.
@@ -543,8 +557,11 @@ ${
           try {
             const m = JSON.parse(row.metadata) as { account?: string };
             account = m.account ?? null;
-          } catch {
-            /* treat as missing account */
+          } catch (err) {
+            logger.debug(
+              { err, emailId, component: 'mini-app' },
+              'tracked_items.metadata JSON.parse failed (archive)',
+            );
           }
         }
         const raw = row.source_id || row.thread_id || '';
@@ -552,8 +569,11 @@ ${
           ? raw.slice('gmail:'.length)
           : raw || null;
       }
-    } catch {
-      /* tracked_items may not exist in minimal test DBs */
+    } catch (err) {
+      logger.debug(
+        { err, emailId, component: 'mini-app' },
+        'tracked_items lookup failed (archive)',
+      );
     }
     if (!account || !resolvedThreadId) {
       res.status(404).json({
