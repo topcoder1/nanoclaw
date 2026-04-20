@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { renderTaskDetail } from './templates/task-detail.js';
 import { renderEmailFull } from './templates/email-full.js';
 import { renderDraftDiff } from './templates/draft-diff.js';
+import { escapeHtml } from './templates/escape.js';
 import {
   getCachedEmailBody,
   cacheEmailBody,
@@ -75,18 +76,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       }
     };
 
-    const esc = (s: string) =>
-      s.replace(
-        /[&<>"']/g,
-        (c) =>
-          ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;',
-          })[c] ?? c,
-      );
+    const esc = escapeHtml;
     const formatAge = (detectedAt: number) => {
       const mins = Math.round((Date.now() - detectedAt) / 60_000);
       if (mins < 1) return 'just now';

@@ -1,3 +1,5 @@
+import { escapeHtml } from './escape.js';
+
 export interface TaskStep {
   label: string;
   status: 'done' | 'active' | 'pending';
@@ -113,10 +115,3 @@ export function renderTaskDetail(data: TaskDetailData): string {
 </html>`;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}

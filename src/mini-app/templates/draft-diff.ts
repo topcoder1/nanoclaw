@@ -1,3 +1,5 @@
+import { escapeHtml } from './escape.js';
+
 export interface DraftDiffData {
   draftId: string;
   account: string;
@@ -7,9 +9,6 @@ export interface DraftDiffData {
 }
 
 export function renderDraftDiff(data: DraftDiffData): string {
-  const escHtml = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,15 +31,15 @@ export function renderDraftDiff(data: DraftDiffData): string {
 </head>
 <body>
   <h2>Draft Diff</h2>
-  <div class="meta">${escHtml(data.account)} · enriched ${escHtml(data.enrichedAt)}</div>
+  <div class="meta">${escapeHtml(data.account)} · enriched ${escapeHtml(data.enrichedAt)}</div>
   <div class="diff-container">
     <div class="diff-panel original">
       <h3>Original</h3>
-      <pre>${escHtml(data.originalBody)}</pre>
+      <pre>${escapeHtml(data.originalBody)}</pre>
     </div>
     <div class="diff-panel enriched">
       <h3>Enriched</h3>
-      <pre>${data.enrichedBody ? escHtml(data.enrichedBody) : '<em>Could not load current draft</em>'}</pre>
+      <pre>${data.enrichedBody ? escapeHtml(data.enrichedBody) : '<em>Could not load current draft</em>'}</pre>
     </div>
   </div>
 </body>
