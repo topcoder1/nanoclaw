@@ -180,42 +180,73 @@ export function renderEmailFull(data: EmailFullData): string {
     }
   }
 
-  async function handleSnooze(id, btn) {
-    const duration = prompt(
-      'Snooze for how long? (1h / tomorrow-8am / next-monday-8am / next-week)',
-      '1h',
-    );
-    if (!duration) return;
-    btn.disabled = true;
-    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/snooze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ duration }),
+  function handleSnooze(id, btn) {
+    if (btn.parentElement?.querySelector('.snooze-dropdown')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'snooze-dropdown';
+    wrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;';
+    const labels = {
+      '1h': '1 hour',
+      'tomorrow-8am': 'Tomorrow 8am',
+      'next-monday-8am': 'Next Mon 8am',
+      'next-week': 'Next week',
+      custom: 'Custom…',
+    };
+    ['1h', 'tomorrow-8am', 'next-monday-8am', 'next-week', 'custom'].forEach((d) => {
+      const b = document.createElement('button');
+      b.textContent = labels[d];
+      b.style.cssText = 'background:#21262d;color:#c9d1d9;padding:6px 10px;border-radius:6px;border:none;font-size:12px;';
+      b.onclick = async () => {
+        let wakeAt;
+        if (d === 'custom') {
+          const v = prompt('Snooze until (ISO datetime, e.g. 2026-04-21T09:00)?');
+          if (!v) return;
+          wakeAt = new Date(v).toISOString();
+        }
+        const res = await fetch('/api/email/' + encodeURIComponent(id) + '/snooze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ duration: d, wake_at: wakeAt }),
+        });
+        const j = await res.json();
+        if (!j.ok) {
+          alert(j.error || 'Snooze failed');
+          return;
+        }
+        wrap.remove();
+        const when = new Date(j.wake_at).toLocaleString('en-US', {
+          weekday: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+        showBanner('💤 Snoozed until ' + when, 'Unsnooze', () =>
+          fetch('/api/email/' + encodeURIComponent(id) + '/snooze', { method: 'DELETE' }),
+        );
+      };
+      wrap.appendChild(b);
     });
-    const j = await r.json();
-    if (j.ok) {
-      showBanner('💤 Snoozed', 'Unsnooze', () =>
-        fetch('/api/email/' + encodeURIComponent(id) + '/snooze', { method: 'DELETE' }),
-      );
-    } else {
-      btn.disabled = false;
-      alert(j.error || 'Snooze failed');
-    }
+    btn.parentElement.appendChild(wrap);
   }
 
   async function handleUnsubscribe(id, btn) {
     btn.disabled = true;
     btn.textContent = 'Unsubscribing…';
-    const r = await fetch('/api/email/' + encodeURIComponent(id) + '/unsubscribe', {
-      method: 'POST',
-    });
-    const j = await r.json();
+    const res = await fetch('/api/email/' + encodeURIComponent(id) + '/unsubscribe', { method: 'POST' });
+    const j = await res.json();
     if (j.ok) {
-      showBanner('📭 Unsubscribed (' + j.method + ')', null, null);
-    } else {
+      showBanner('✅ Unsubscribed and archived (' + j.method + ')', null, null);
+    } else if (j.code === 'NO_UNSUBSCRIBE_HEADER') {
+      showBanner('No unsubscribe link in headers', 'Open in Gmail', () => {
+        window.open(OPEN_GMAIL_URL, '_blank', 'noopener');
+      });
       btn.disabled = false;
       btn.textContent = '📭 Unsubscribe';
-      alert(j.error || 'Unsubscribe failed');
+    } else {
+      showBanner('⚠️ Unsubscribe may have failed — ' + (j.error || 'unknown'), 'Open in Gmail', () => {
+        window.open(OPEN_GMAIL_URL, '_blank', 'noopener');
+      });
+      btn.disabled = false;
+      btn.textContent = '📭 Unsubscribe';
     }
   }
 
