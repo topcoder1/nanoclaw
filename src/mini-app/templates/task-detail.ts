@@ -69,7 +69,7 @@ export function renderTaskDetail(data: TaskDetailData): string {
 </head>
 <body data-updated-at="${escapeHtml(data.startedAt)}">
   <div class="header">
-    <div class="status">${data.status.toUpperCase()}</div>
+    <div class="status">${escapeHtml(String(data.status).toUpperCase())}</div>
     <div class="title">${escapeHtml(data.title)}</div>
   </div>
   <div style="margin-bottom:16px;">${stepsHtml}</div>
@@ -79,8 +79,8 @@ export function renderTaskDetail(data: TaskDetailData): string {
     <button class="btn" style="color:#f85149;">Abort</button>
   </div>
   <script>
-    const taskId = '${escapeHtml(data.taskId)}';
-    const evtSource = new EventSource('/api/task/' + taskId + '/stream');
+    const taskId = ${JSON.stringify(data.taskId)};
+    const evtSource = new EventSource('/api/task/' + encodeURIComponent(taskId) + '/stream');
 
     evtSource.onmessage = function(event) {
       const state = JSON.parse(event.data);
