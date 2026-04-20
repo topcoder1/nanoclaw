@@ -460,13 +460,8 @@ ${
     const idForGmail = gmailId || emailId;
     if (!meta && opts.gmailOps && account) {
       try {
-        if ('getMessageMeta' in opts.gmailOps) {
-          meta = await (opts.gmailOps as any).getMessageMeta(
-            account,
-            idForGmail,
-          );
-          if (meta) cacheEmailMeta(emailId, meta);
-        }
+        meta = await opts.gmailOps.getMessageMeta(account, idForGmail);
+        if (meta) cacheEmailMeta(emailId, meta);
       } catch (err) {
         logger.warn(
           { emailId, idForGmail, err },
