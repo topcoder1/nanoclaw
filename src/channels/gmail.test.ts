@@ -193,3 +193,66 @@ describe('GmailChannel.sendDraft', () => {
     await expect(ch.sendDraft('draft-1')).rejects.toThrow('quota exceeded');
   });
 });
+
+describe('GmailChannel.sendEmail', () => {
+  it('calls gmail.users.messages.send with base64url-encoded MIME', async () => {
+    const send = vi.fn().mockResolvedValue({ data: { id: 'sent-1' } });
+    const ch = new GmailChannel(
+      {
+        onMessage: async () => {},
+        onChatMetadata: async () => {},
+        registeredGroups: () => ({}),
+      },
+      'personal',
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ch as any).gmail = { users: { messages: { send } } } as any;
+
+    await ch.sendEmail({
+      to: 'unsub@example.com',
+      subject: 'unsubscribe',
+      body: '',
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const payload = send.mock.calls[0][0];
+    expect(payload.userId).toBe('me');
+    expect(typeof payload.requestBody.raw).toBe('string');
+    const decoded = Buffer.from(
+      payload.requestBody.raw as string,
+      'base64url',
+    ).toString('utf-8');
+    expect(decoded).toMatch(/To: unsub@example.com/);
+    expect(decoded).toMatch(/Subject: unsubscribe/);
+  });
+
+  it('includes In-Reply-To and References when provided', async () => {
+    const send = vi.fn().mockResolvedValue({ data: { id: 'sent-2' } });
+    const ch = new GmailChannel(
+      {
+        onMessage: async () => {},
+        onChatMetadata: async () => {},
+        registeredGroups: () => ({}),
+      },
+      'personal',
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ch as any).gmail = { users: { messages: { send } } } as any;
+
+    await ch.sendEmail({
+      to: 'x@y.com',
+      subject: 'Re: hi',
+      body: 'ok',
+      inReplyTo: '<orig@mail>',
+      references: '<orig@mail>',
+    });
+
+    const decoded = Buffer.from(
+      send.mock.calls[0][0].requestBody.raw as string,
+      'base64url',
+    ).toString('utf-8');
+    expect(decoded).toMatch(/In-Reply-To: <orig@mail>/);
+    expect(decoded).toMatch(/References: <orig@mail>/);
+    expect(decoded.endsWith('ok')).toBe(true);
+  });
+});
