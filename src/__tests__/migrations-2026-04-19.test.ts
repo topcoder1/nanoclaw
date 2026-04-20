@@ -7,7 +7,9 @@ describe('2026-04-19 ux expansion migration', () => {
   it('creates muted_threads table with expected columns', () => {
     const db = new Database(':memory:');
     runMigrations(db);
-    const cols = db.prepare("PRAGMA table_info('muted_threads')").all() as Array<{
+    const cols = db
+      .prepare("PRAGMA table_info('muted_threads')")
+      .all() as Array<{
       name: string;
       pk: number;
     }>;
