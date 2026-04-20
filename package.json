@@ -1,6 +1,6 @@
 {
   "name": "nanoclaw",
-  "version": "1.2.54",
+  "version": "1.2.55",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
@@ -25,7 +25,8 @@
     "qa:scenarios": "tsx scripts/qa-scenarios.ts",
     "qa:monitor-scenarios": "tsx scripts/qa-monitor-scenarios.ts",
     "qa:all": "npm run qa:check && npm run qa:scenarios",
-    "qa:propose-fix": "tsx scripts/qa/propose-fix.ts"
+    "qa:propose-fix": "tsx scripts/qa/propose-fix.ts",
+    "qa:expire-proposals": "tsx scripts/qa/expire-proposals.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.69",
