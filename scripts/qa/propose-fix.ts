@@ -32,6 +32,7 @@ import path from 'node:path';
 import { readEnvValue } from '../../src/env.js';
 import {
   classifyAgentOutcome,
+  QA_PROPOSAL_TTL_MS,
   type QaAgentOutcome,
   type QaFailureReport,
   type QaProposal,
@@ -457,9 +458,11 @@ async function main(): Promise<void> {
       pushed = pushBranch(worktreePath, branch);
     }
 
+    const now = Date.now();
     const proposal: Proposal = {
       id,
-      createdAt: Date.now(),
+      createdAt: now,
+      expiresAt: now + QA_PROPOSAL_TTL_MS,
       failureReport,
       worktreePath,
       branch,

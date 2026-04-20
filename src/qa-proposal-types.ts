@@ -35,6 +35,7 @@ export interface QaFailureReport {
 export interface QaProposal {
   id: string;
   createdAt: number;
+  expiresAt: number;
   failureReport: QaFailureReport;
   worktreePath: string;
   branch: string;
@@ -49,8 +50,17 @@ export interface QaProposal {
   blocked?: boolean;
   blockedReasons?: string[];
   resolvedAt?: number;
-  resolution?: 'merged' | 'closed';
+  resolution?: 'merged' | 'closed' | 'expired';
 }
+
+/**
+ * Default TTL for a QA proposal that is never acted on. After this
+ * window the expire cron removes the worktree + branch and marks the
+ * proposal `expired`. 48h is a balance between "long enough to cover
+ * the reviewer being away for a weekend" and "short enough that stuck
+ * proposals don't pile up in Telegram indefinitely."
+ */
+export const QA_PROPOSAL_TTL_MS = 48 * 60 * 60 * 1000;
 
 /**
  * Turn the raw SpawnSyncReturns into a structured outcome. The key

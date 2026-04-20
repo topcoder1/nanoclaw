@@ -4,6 +4,16 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [1.2.55] - 2026-04-19
+
+### Added
+
+- QA autopilot proposals now auto-expire after 48h. Install the hourly cron with `launchctl load ~/Library/LaunchAgents/com.nanoclaw.qa-expire-proposals.plist` (copy from `scripts/qa/`). Stuck proposals get their worktree + branch cleaned up and a Telegram digest of what expired.
+
+### Fixed
+
+- `src/llm/mcp-bridge.test.ts` was mocking `@ai-sdk/mcp/stdio` while the source imports `@ai-sdk/mcp/mcp-stdio`; the mismatch made all 4 tests fail on host builds where the subpath can't resolve. Mock now matches source.
+
 ## [1.2.54] - 2026-04-19
 
 ### Fixed
