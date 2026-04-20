@@ -425,12 +425,15 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
       return;
     }
     const prompt = [
-      'You are drafting a Gmail reply.',
+      'You are drafting a Gmail reply. This is a background task — do NOT call send_message or relay_message; the user is watching the mini-app, not chat.',
       `Thread: ${item.thread_id} (account ${item.account})`,
       intent
         ? `User intent: ${intent}`
         : 'User intent: use best judgment based on thread context.',
-      'Draft a concise, natural reply using gmail.users.drafts.create. Match any prior tone from earlier messages in the thread. Return the draft_id only.',
+      'Steps:',
+      '1. If needed, read the thread via the Gmail MCP (gmail.users.threads.get or equivalent) to match tone and context.',
+      '2. Call gmail.users.drafts.create exactly once on this thread with a concise, natural reply.',
+      '3. Stop. Output only the draft_id as your final text. Do not send any chat messages.',
     ].join('\n');
 
     const { taskId } = await deps.spawnAgentTask({
