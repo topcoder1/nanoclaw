@@ -25,6 +25,7 @@ export interface MiniAppServerOpts {
   eventBus?: import('../event-bus.js').EventBus;
   pendingSendRegistry?: PendingSendRegistry;
   fetchImpl?: typeof globalThis.fetch;
+  spawnAgentTask?: import('./actions.js').SpawnAgentTask;
 }
 
 export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
@@ -37,6 +38,8 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       gmailOps: opts.gmailOps,
       fetchImpl: opts.fetchImpl,
       pendingSendRegistry: registry,
+      eventBus: opts.eventBus,
+      spawnAgentTask: opts.spawnAgentTask,
     }),
   );
 

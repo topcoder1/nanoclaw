@@ -1723,6 +1723,91 @@ async function main(): Promise<void> {
     });
   }
 
+  // --- Draft-with-AI bridge ---
+  // Spawns a lightweight agent task that asks the Claude Agent SDK container
+  // to create a Gmail draft reply in the given thread. Correlation back to
+  // the mini-app uses draft-watcher's email.draft.created event: the first
+  // new draft on the same account+thread after spawn is attributed to this
+  // taskId. Fires email.draft.ready (or email.draft.failed on timeout).
+  const spawnDraftWithAi = async (input: {
+    prompt: string;
+    account: string;
+    itemId: string;
+  }): Promise<{ taskId: string }> => {
+    const taskId =
+      'draft-' +
+      Date.now().toString(36) +
+      '-' +
+      Math.random().toString(36).slice(2, 8);
+    const row = getDb()
+      .prepare('SELECT thread_id FROM tracked_items WHERE id = ?')
+      .get(input.itemId) as { thread_id: string | null } | undefined;
+    const threadId = row?.thread_id ?? null;
+    if (!threadId) {
+      eventBus.emit('email.draft.failed', {
+        type: 'email.draft.failed',
+        source: 'draft-spawn',
+        timestamp: Date.now(),
+        payload: { taskId, error: 'no thread_id for item' },
+      });
+      return { taskId };
+    }
+
+    const startedAt = Date.now();
+    const timeout = 45_000;
+    let resolved = false;
+    const unsubscribe = eventBus.on('email.draft.created', (e) => {
+      if (resolved) return;
+      if (Date.now() - startedAt > timeout) return;
+      if (
+        e.payload.account === input.account &&
+        e.payload.threadId === threadId
+      ) {
+        resolved = true;
+        unsubscribe();
+        eventBus.emit('email.draft.ready', {
+          type: 'email.draft.ready',
+          source: 'draft-spawn',
+          timestamp: Date.now(),
+          payload: { taskId, draftId: e.payload.draftId },
+        });
+      }
+    });
+    setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      unsubscribe();
+      eventBus.emit('email.draft.failed', {
+        type: 'email.draft.failed',
+        source: 'draft-spawn',
+        timestamp: Date.now(),
+        payload: { taskId, error: 'timeout waiting for draft' },
+      });
+    }, timeout).unref();
+
+    // Production wiring for the container-side draft-creation agent is a
+    // follow-up: the plan specifies the mini-app contract (this function +
+    // email.draft.ready correlation); the container-side task that actually
+    // calls gmail.users.drafts.create is expected to emit
+    // email.draft.created via the existing DraftEnrichmentWatcher pipeline
+    // (which fires on every new Gmail draft). When that happens for the
+    // same account+thread as this task, the listener above wakes and
+    // emits email.draft.ready. Until that container hook ships, this
+    // function logs the request and relies on 45s timeout to report
+    // failure.
+    logger.info(
+      {
+        taskId,
+        account: input.account,
+        threadId,
+        itemId: input.itemId,
+        component: 'draft-with-ai',
+      },
+      'Draft-with-AI task requested (container hook pending)',
+    );
+    return { taskId };
+  };
+
   // Start Mini App server
   const miniApp = startMiniAppServer({
     port: Number(process.env.MINI_APP_PORT) || 3847,
@@ -1730,6 +1815,7 @@ async function main(): Promise<void> {
     gmailOps: gmailOpsRouter,
     draftWatcher,
     eventBus,
+    spawnAgentTask: spawnDraftWithAi,
   });
 
   // Start Gmail→local reconciler: marks queued items resolved when the
@@ -1745,9 +1831,8 @@ async function main(): Promise<void> {
     startReconcilerHealthWatcher();
     logger.info('Reconciler health watcher started');
 
-    const { startSnoozeScheduler } = await import(
-      './triage/snooze-scheduler.js'
-    );
+    const { startSnoozeScheduler } =
+      await import('./triage/snooze-scheduler.js');
     stopSnooze = startSnoozeScheduler({ db: getDb(), eventBus });
     logger.info('Snooze scheduler started');
   }

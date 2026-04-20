@@ -341,3 +341,86 @@ describe('mini-app actions — canned reply', () => {
     expect(res.body.code).toBe('INVALID_KIND');
   });
 });
+
+describe('mini-app actions — draft-with-ai', () => {
+  let db: Database.Database;
+  let gmailOps: any;
+  let spawnAgentMock: any;
+
+  beforeEach(() => {
+    db = freshDb();
+    gmailOps = {
+      archiveThread: vi.fn(),
+      sendEmail: vi.fn(),
+      getMessageBody: vi.fn(),
+      getMessageMeta: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+      getDraftReplyContext: vi.fn(),
+      createDraftReply: vi.fn(),
+      sendDraft: vi.fn(),
+    };
+    spawnAgentMock = vi.fn().mockResolvedValue({ taskId: 'task-abc' });
+  });
+
+  it('POST /api/email/:id/draft-with-ai returns taskId', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    const res = await request(app)
+      .post('/api/email/i1/draft-with-ai')
+      .send({ intent: 'thanks but decline' });
+    expect(res.status).toBe(200);
+    expect(res.body.taskId).toBe('task-abc');
+    expect(spawnAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('thanks but decline'),
+      }),
+    );
+  });
+
+  it('POST /api/email/:id/draft-with-ai rejects intent > 500 chars', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    const res = await request(app)
+      .post('/api/email/i1/draft-with-ai')
+      .send({ intent: 'x'.repeat(501) });
+    expect(res.status).toBe(413);
+    expect(res.body.code).toBe('INVALID_INTENT');
+  });
+
+  it('POST /api/email/:id/draft-with-ai returns 409 when a task is already running', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    await request(app).post('/api/email/i1/draft-with-ai').send({});
+    const res = await request(app).post('/api/email/i1/draft-with-ai').send({});
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('TASK_ALREADY_RUNNING');
+  });
+
+  it('GET /api/draft-status/:taskId returns status', async () => {
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    const res = await request(app).get('/api/draft-status/unknown-task');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('unknown');
+  });
+});

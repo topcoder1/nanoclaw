@@ -8,13 +8,29 @@ import {
   executeUnsubscribe,
 } from '../triage/unsubscribe-executor.js';
 import type { PendingSendRegistry } from './pending-send.js';
+import type { EventBus } from '../event-bus.js';
+
+export interface SpawnAgentTaskInput {
+  prompt: string;
+  account: string;
+  itemId: string;
+}
+
+export type SpawnAgentTask = (
+  input: SpawnAgentTaskInput,
+) => Promise<{ taskId: string }>;
 
 export interface ActionDeps {
   db: Database.Database;
   gmailOps?: GmailOps;
   fetchImpl?: typeof globalThis.fetch;
   pendingSendRegistry?: PendingSendRegistry;
+  eventBus?: EventBus;
+  spawnAgentTask?: SpawnAgentTask;
 }
+
+const TASK_TIMEOUT_MS = 45_000;
+const INTENT_CAP = 500;
 
 const signatureCache = new Map<string, string>();
 
@@ -37,6 +53,31 @@ const CANNED: Record<string, (name: string) => string> = {
 
 export function createActionsRouter(deps: ActionDeps): express.Router {
   const router = express.Router();
+
+  const activeTasks = new Map<string, { taskId: string; startedAt: number }>();
+  const taskStatus = new Map<
+    string,
+    {
+      status: 'running' | 'ready' | 'failed';
+      draftId?: string;
+      error?: string;
+    }
+  >();
+
+  if (deps.eventBus) {
+    deps.eventBus.on('email.draft.ready', (e) => {
+      taskStatus.set(e.payload.taskId, {
+        status: 'ready',
+        draftId: e.payload.draftId,
+      });
+    });
+    deps.eventBus.on('email.draft.failed', (e) => {
+      taskStatus.set(e.payload.taskId, {
+        status: 'failed',
+        error: e.payload.error,
+      });
+    });
+  }
 
   function lookupItem(
     id: string,
@@ -343,6 +384,78 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
       },
     );
     res.json({ ok: true, draftId, sendAt });
+  });
+
+  router.post('/api/email/:id/draft-with-ai', async (req, res) => {
+    const item = lookupItem(req.params.id);
+    if (!item || !item.thread_id || !item.account) {
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as { intent?: string };
+    const intent = typeof body.intent === 'string' ? body.intent : '';
+    if (intent.length > INTENT_CAP) {
+      res.status(413).json({
+        ok: false,
+        error: 'intent too long',
+        code: 'INVALID_INTENT',
+      });
+      return;
+    }
+    const existing = activeTasks.get(item.id);
+    if (existing && Date.now() - existing.startedAt < TASK_TIMEOUT_MS) {
+      res.status(409).json({
+        ok: false,
+        error: 'task already running',
+        code: 'TASK_ALREADY_RUNNING',
+        taskId: existing.taskId,
+      });
+      return;
+    }
+    if (!deps.spawnAgentTask) {
+      res.status(503).json({
+        ok: false,
+        error: 'agent runner missing',
+        code: 'INTERNAL',
+      });
+      return;
+    }
+    const prompt = [
+      'You are drafting a Gmail reply.',
+      `Thread: ${item.thread_id} (account ${item.account})`,
+      intent
+        ? `User intent: ${intent}`
+        : 'User intent: use best judgment based on thread context.',
+      'Draft a concise, natural reply using gmail.users.drafts.create. Match any prior tone from earlier messages in the thread. Return the draft_id only.',
+    ].join('\n');
+
+    const { taskId } = await deps.spawnAgentTask({
+      prompt,
+      account: item.account,
+      itemId: item.id,
+    });
+    activeTasks.set(item.id, { taskId, startedAt: Date.now() });
+    taskStatus.set(taskId, { status: 'running' });
+    res.json({ ok: true, taskId });
+  });
+
+  router.get('/api/draft-status/:taskId', (req, res) => {
+    const { taskId } = req.params;
+    const state = taskStatus.get(taskId);
+    if (!state) {
+      res.json({ ok: true, status: 'unknown' });
+      return;
+    }
+    res.json({
+      ok: true,
+      status: state.status,
+      draftId: state.draftId,
+      error: state.error,
+    });
   });
 
   return router;
