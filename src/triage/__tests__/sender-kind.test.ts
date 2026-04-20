@@ -30,21 +30,33 @@ describe('classifySender', () => {
   });
 
   it('returns bot when From local-part is a no-reply variant', () => {
-    expect(classifySender({ from: 'no-reply@stripe.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'noreply@apple.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'do-not-reply@bank.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'notifications@github.com', headers: {} })).toBe('bot');
+    expect(classifySender({ from: 'no-reply@stripe.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'noreply@apple.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'do-not-reply@bank.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(
+      classifySender({ from: 'notifications@github.com', headers: {} }),
+    ).toBe('bot');
   });
 
   it('returns bot when sender domain matches known ESP', () => {
-    expect(classifySender({ from: 'x@mail.mailchimp.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'bounce@amazonses.com', headers: {} })).toBe('bot');
+    expect(classifySender({ from: 'x@mail.mailchimp.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'bounce@amazonses.com', headers: {} })).toBe(
+      'bot',
+    );
   });
 
   it('returns human for an ordinary personal address with no bot signals', () => {
-    expect(
-      classifySender({ from: 'jane@personal.com', headers: {} }),
-    ).toBe('human');
+    expect(classifySender({ from: 'jane@personal.com', headers: {} })).toBe(
+      'human',
+    );
   });
 
   it('returns human when inconclusive (fail-open)', () => {
