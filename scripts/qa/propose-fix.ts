@@ -30,32 +30,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readEnvValue } from '../../src/env.js';
+import {
+  classifyAgentOutcome,
+  type QaAgentOutcome,
+  type QaFailureReport,
+  type QaProposal,
+} from '../../src/qa-proposal-types.js';
 
-interface FailureReport {
-  source: 'invariants' | 'scenarios';
-  failures: Array<{
-    name: string;
-    message: string;
-    category?: string;
-    details?: unknown;
-  }>;
-}
-
-interface Proposal {
-  id: string;
-  createdAt: number;
-  failureReport: FailureReport;
-  worktreePath: string;
-  branch: string;
-  risk: 'LOW' | 'MED' | 'HIGH';
-  diffStat: { files: number; insertions: number; deletions: number };
-  agentTranscriptPath: string;
-  testStatus: 'pass' | 'fail' | 'skipped';
-  proposedAt: number;
-  pushed: boolean;
-  blocked?: boolean;
-  blockedReasons?: string[];
-}
+type FailureReport = QaFailureReport;
+type Proposal = QaProposal;
 
 interface GuardrailCheck {
   blocked: boolean;
@@ -193,14 +176,18 @@ Start by exploring the relevant files, then write a minimal fix. Stay under
 `;
 }
 
+const AGENT_TIMEOUT_MS = 10 * 60 * 1000;
+
 function runAgent(
   worktreePath: string,
   prompt: string,
   transcriptPath: string,
-): void {
+): QaAgentOutcome {
   // Shell out to Claude Code CLI in print mode. --output-format json so
   // the transcript is structured; we persist it for the [🔍 Details]
-  // button.
+  // button. Return a structured outcome so the reviewer sees a useful
+  // summary even when the subprocess can't be spawned at all (e.g.
+  // `claude` not on PATH inside the service environment).
   fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
   const promptFile = path.join(worktreePath, '.qa-fix-prompt.txt');
   fs.writeFileSync(promptFile, prompt);
@@ -221,15 +208,18 @@ function runAgent(
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 10 * 60 * 1000,
+      timeout: AGENT_TIMEOUT_MS,
     },
   );
-  fs.writeFileSync(transcriptPath, proc.stdout + '\n\n--- STDERR ---\n' + proc.stderr);
+  const stdout = proc.stdout ?? '';
+  const stderr = proc.stderr ?? '';
+  fs.writeFileSync(transcriptPath, stdout + '\n\n--- STDERR ---\n' + stderr);
   try {
     fs.unlinkSync(promptFile);
   } catch {
     /* ignore */
   }
+  return classifyAgentOutcome(proc, AGENT_TIMEOUT_MS);
 }
 
 function diffStat(
@@ -427,18 +417,27 @@ async function main(): Promise<void> {
 
     const prompt = buildAgentPrompt(failureReport, branch);
     process.stdout.write(`qa-propose-fix: dispatching agent in ${worktreePath}\n`);
-    runAgent(worktreePath, prompt, transcriptPath);
+    const agentOutcome = runAgent(worktreePath, prompt, transcriptPath);
+    if (agentOutcome.kind !== 'ok') {
+      process.stdout.write(
+        `qa-propose-fix: agent did not finish cleanly: ${agentOutcome.kind}\n`,
+      );
+    }
 
     const files = changedFiles(worktreePath);
     const stat = diffStat(worktreePath);
     if (files.length === 0) {
-      process.stdout.write('qa-propose-fix: agent produced empty diff\n');
+      const reason =
+        agentOutcome.kind === 'ok'
+          ? "couldn't produce a fix"
+          : `agent did not run cleanly (${agentOutcome.kind})`;
+      process.stdout.write(`qa-propose-fix: ${reason}\n`);
       removeWorktree(worktreePath, branch);
       const chatId = readEnvValue('EMAIL_INTEL_TG_CHAT_ID');
       if (chatId && !dryRun) {
         await sendTelegram(
           chatId,
-          `🤷 *QA autopilot: couldn't produce a fix*\nFailure: \`${failureReport.failures[0]?.name}\`\nAgent transcript: \`${transcriptPath}\``,
+          `🤷 *QA autopilot: ${reason}*\nFailure: \`${failureReport.failures[0]?.name}\`\nAgent transcript: \`${transcriptPath}\``,
         );
       }
       process.exit(0);
@@ -466,7 +465,9 @@ async function main(): Promise<void> {
       branch,
       risk,
       diffStat: stat,
+      changedFiles: files,
       agentTranscriptPath: transcriptPath,
+      agent: agentOutcome,
       testStatus,
       proposedAt: Date.now(),
       pushed,
