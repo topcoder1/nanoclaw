@@ -15,7 +15,12 @@ export type QaAgentOutcome =
   | { kind: 'ok'; stdoutBytes: number; stderrBytes: number }
   | { kind: 'timeout'; afterMs: number }
   | { kind: 'spawn_error'; code: string; message: string }
-  | { kind: 'nonzero'; exitCode: number; signal: string | null; stderrTail: string };
+  | {
+      kind: 'nonzero';
+      exitCode: number;
+      signal: string | null;
+      stderrTail: string;
+    };
 
 export interface QaFailureReport {
   source: 'invariants' | 'scenarios';
@@ -97,7 +102,9 @@ export function renderAgentOutcome(o: QaAgentOutcome): string {
       return `spawn_error: ${o.code} — ${o.message}`;
     case 'nonzero': {
       const sig = o.signal ? ` signal=${o.signal}` : '';
-      const tail = o.stderrTail ? `\n  stderr tail: ${o.stderrTail.trim()}` : '';
+      const tail = o.stderrTail
+        ? `\n  stderr tail: ${o.stderrTail.trim()}`
+        : '';
       return `exit ${o.exitCode}${sig}${tail}`;
     }
   }

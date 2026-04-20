@@ -19,10 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CallbackQuery, Channel } from './types.js';
 import { logger } from './logger.js';
-import {
-  renderAgentOutcome,
-  type QaProposal,
-} from './qa-proposal-types.js';
+import { renderAgentOutcome, type QaProposal } from './qa-proposal-types.js';
 
 const REPO = path.resolve('.');
 const PROPOSALS_DIR = path.join(REPO, 'data/qa-proposals');
@@ -144,8 +141,7 @@ function renderDetails(p: StoredProposal): string {
     const tail = raw.trim();
     if (tail.length > 0) {
       const TAIL_LEN = 1500;
-      const slice =
-        tail.length > TAIL_LEN ? `…${tail.slice(-TAIL_LEN)}` : tail;
+      const slice = tail.length > TAIL_LEN ? `…${tail.slice(-TAIL_LEN)}` : tail;
       lines.push('');
       lines.push('*Transcript tail:*');
       lines.push('```');
@@ -187,12 +183,7 @@ export async function handleQaCallback(
   }
 
   if (sub === 'details') {
-    await replyText(
-      channel,
-      query.chatJid,
-      undefined,
-      renderDetails(p),
-    );
+    await replyText(channel, query.chatJid, undefined, renderDetails(p));
     return;
   }
 
