@@ -15,6 +15,7 @@ import path from 'node:path';
 import {
   STATE_MACHINE_INVARIANTS,
   RESOLUTION_METHOD_PREFIXES,
+  mutedThreadsNeverVisible,
 } from './invariant-predicates.js';
 
 export type Category = 'db' | 'log' | 'http' | 'env';
@@ -125,6 +126,25 @@ export async function runAll(): Promise<Result[]> {
           ? 'every resolution_method uses an allowlisted category prefix'
           : `unknown category prefix(es): ${unknown.join(', ')}`,
       details: { unknown },
+    });
+  }
+
+  // ── DB: muted-threads-never-visible (cross-table invariant) ──────────
+  // If a thread is in muted_threads, every tracked_items row on that
+  // thread must already be resolved. Kept out of STATE_MACHINE_INVARIANTS
+  // because it's a JOIN across tables and returns row-level detail
+  // rather than a count — a violation here names the exact id/thread_id
+  // that leaked, which is what operators need to chase the bug.
+  {
+    const result = mutedThreadsNeverVisible(db);
+    results.push({
+      name: 'muted-threads-never-visible',
+      category: 'db',
+      ok: result.ok,
+      message: result.ok
+        ? 'no unresolved tracked_items in muted threads'
+        : `${result.violations.length} unresolved tracked_item(s) in muted thread(s)`,
+      details: { violations: result.violations.slice(0, 10) },
     });
   }
 
