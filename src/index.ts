@@ -1249,6 +1249,7 @@ async function main(): Promise<void> {
   };
 
   // Graceful shutdown handlers
+  let stopSnooze: (() => void) | null = null;
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     try {
@@ -1266,6 +1267,7 @@ async function main(): Promise<void> {
       clearInterval(proactiveSuggestionTimer);
       proactiveSuggestionTimer = null;
     }
+    stopSnooze?.();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1742,7 +1744,26 @@ async function main(): Promise<void> {
       await import('./triage/reconciler-health.js');
     startReconcilerHealthWatcher();
     logger.info('Reconciler health watcher started');
+
+    const { startSnoozeScheduler } = await import(
+      './triage/snooze-scheduler.js'
+    );
+    stopSnooze = startSnoozeScheduler({ db: getDb(), eventBus });
+    logger.info('Snooze scheduler started');
   }
+
+  // --- Notify on snooze wake ---
+  eventBus.on('email.snooze.waked', (event) => {
+    if (!mainGroupEntry) return;
+    const [mainJid] = mainGroupEntry;
+    const channel = findChannel(channels, mainJid);
+    const text = `⏰ Reminder: ${event.payload.subject}`;
+    channel
+      ?.sendMessage(mainJid, text)
+      .catch((err) =>
+        logger.error({ err }, 'Failed to post snooze wake notification'),
+      );
+  });
 
   // --- Notify on draft enrichment ---
   eventBus.on('email.draft.enriched', (event) => {

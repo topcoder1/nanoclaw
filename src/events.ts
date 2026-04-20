@@ -583,6 +583,15 @@ export interface EmailDraftSendFailedEvent extends NanoClawEvent {
   };
 }
 
+export interface EmailSnoozeWakedEvent extends NanoClawEvent {
+  type: 'email.snooze.waked';
+  source: 'snooze-scheduler';
+  payload: {
+    itemId: string;
+    subject: string;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -637,6 +646,7 @@ export interface EventMap {
   'email.draft.enriched': EmailDraftEnrichedEvent;
   'email.action.completed': EmailActionCompletedEvent;
   'email.draft.send_failed': EmailDraftSendFailedEvent;
+  'email.snooze.waked': EmailSnoozeWakedEvent;
 }
 
 export type EventType = keyof EventMap;
