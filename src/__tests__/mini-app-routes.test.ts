@@ -319,7 +319,8 @@ describe('Mini App extended routes', () => {
     const { app, mockDraftWatcher } = setup();
     const res = await request(app).post('/api/draft/d1/revert');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true });
+    // `success` kept for backward compat; `ok` matches the reply-send spec.
+    expect(res.body).toEqual({ ok: true, success: true });
     expect(mockDraftWatcher.revert).toHaveBeenCalledWith('d1');
   });
 
