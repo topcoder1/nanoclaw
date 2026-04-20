@@ -504,41 +504,55 @@ ${
   });
 
   // --- Archive email API ---
+  // Resolve `account` and Gmail thread id from tracked_items by emailId.
+  // We do NOT trust the request body for either field — a caller who knows
+  // an emailId should not be able to archive a thread in an arbitrary
+  // account by supplying its alias in the POST payload.
   app.post('/api/email/:emailId/archive', async (req, res) => {
     const { emailId } = req.params;
-    const { account, threadId } = req.body;
-    if (!opts.gmailOps || !account) {
-      res.status(400).json({ error: 'Missing account or gmailOps' });
+    if (!opts.gmailOps) {
+      res.status(503).json({ error: 'Gmail not configured' });
       return;
     }
-    // emailId in the URL is nanoclaw's internal tracked_items.id (e.g.
-    // "sse-..."), not a Gmail thread id. If the client didn't pass an explicit
-    // threadId, look the row up and extract the Gmail id from source_id —
-    // same resolution logic as GET /email/:emailId.
-    let resolvedThreadId = threadId as string | undefined;
-    if (!resolvedThreadId) {
-      try {
-        const row = opts.db
-          .prepare(
-            `SELECT source_id, thread_id FROM tracked_items
-             WHERE id = ? OR thread_id = ? OR source_id = ?
-             ORDER BY detected_at DESC LIMIT 1`,
-          )
-          .get(emailId, emailId, emailId) as
-          | { source_id: string | null; thread_id: string | null }
-          | undefined;
-        if (row) {
-          const raw = row.source_id || row.thread_id || '';
-          resolvedThreadId = raw.startsWith('gmail:')
-            ? raw.slice('gmail:'.length)
-            : raw || emailId;
+    let account: string | null = null;
+    let resolvedThreadId: string | null = null;
+    try {
+      const row = opts.db
+        .prepare(
+          `SELECT metadata, source_id, thread_id FROM tracked_items
+           WHERE id = ? OR thread_id = ? OR source_id = ?
+           ORDER BY detected_at DESC LIMIT 1`,
+        )
+        .get(emailId, emailId, emailId) as
+        | {
+            metadata: string | null;
+            source_id: string | null;
+            thread_id: string | null;
+          }
+        | undefined;
+      if (row) {
+        if (row.metadata) {
+          try {
+            const m = JSON.parse(row.metadata) as { account?: string };
+            account = m.account ?? null;
+          } catch {
+            /* treat as missing account */
+          }
         }
-      } catch {
-        /* tracked_items may not exist in minimal test DBs */
+        const raw = row.source_id || row.thread_id || '';
+        resolvedThreadId = raw.startsWith('gmail:')
+          ? raw.slice('gmail:'.length)
+          : raw || null;
       }
+    } catch {
+      /* tracked_items may not exist in minimal test DBs */
+    }
+    if (!account || !resolvedThreadId) {
+      res.status(404).json({ error: 'Tracked item not found' });
+      return;
     }
     try {
-      await opts.gmailOps.archiveThread(account, resolvedThreadId || emailId);
+      await opts.gmailOps.archiveThread(account, resolvedThreadId);
       res.json({ success: true });
     } catch (err) {
       logger.error({ emailId, err }, 'Mini app archive failed');
