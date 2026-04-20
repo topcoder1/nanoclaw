@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw.qa-expire-proposals</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/npm</string>
+        <string>--prefix</string>
+        <string>/Users/topcoder1/dev/nanoclaw</string>
+        <string>run</string>
+        <string>qa:expire-proposals</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/topcoder1/dev/nanoclaw</string>
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/topcoder1</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/topcoder1/dev/nanoclaw/logs/qa-expire-proposals.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/topcoder1/dev/nanoclaw/logs/qa-expire-proposals.error.log</string>
+</dict>
+</plist>

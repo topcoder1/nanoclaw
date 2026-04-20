@@ -156,6 +156,7 @@ function renderDetails(p: StoredProposal): string {
 function resolutionLabel(p: StoredProposal): string | null {
   if (p.resolution === 'merged') return 'merged ✅';
   if (p.resolution === 'closed') return 'closed ✕';
+  if (p.resolution === 'expired') return 'expired ⏰';
   if (p.blocked) return 'awaiting manual review (guardrail blocked)';
   if (p.pushed) return 'awaiting review';
   return p.pushed === false ? 'local only (not pushed)' : null;
