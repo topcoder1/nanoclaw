@@ -288,3 +288,56 @@ describe('mini-app actions — unsubscribe', () => {
     expect(res.body.code).toBe('NO_UNSUBSCRIBE_HEADER');
   });
 });
+
+describe('mini-app actions — canned reply', () => {
+  let db: Database.Database;
+  let gmailOps: any;
+
+  beforeEach(() => {
+    db = freshDb();
+    gmailOps = {
+      archiveThread: vi.fn(),
+      sendEmail: vi.fn(),
+      getMessageBody: vi.fn(),
+      getMessageMeta: vi.fn(),
+      listRecentDrafts: vi.fn(),
+      updateDraft: vi.fn(),
+      getDraftReplyContext: vi.fn(),
+      createDraftReply: vi.fn().mockResolvedValue({ draftId: 'd-1' }),
+      sendDraft: vi.fn().mockResolvedValue(undefined),
+    };
+  });
+
+  it('POST /api/email/:id/canned-reply creates draft + schedules send', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    db.prepare('UPDATE tracked_items SET source_id=? WHERE id=?').run(
+      'gmail:thread-1',
+      'i1',
+    );
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const res = await request(app)
+      .post('/api/email/i1/canned-reply')
+      .send({ kind: 'thanks' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.draftId).toBe('d-1');
+    expect(res.body.sendAt).toBeGreaterThan(Date.now());
+    expect(gmailOps.createDraftReply).toHaveBeenCalledWith(
+      'alice@example.com',
+      expect.objectContaining({
+        threadId: 'thread-1',
+        body: expect.stringContaining('Thanks!'),
+      }),
+    );
+  });
+
+  it('POST /api/email/:id/canned-reply rejects unknown kind', async () => {
+    seedItem(db, 'i1', 'thread-1', 'alice@example.com');
+    const app = createMiniAppServer({ port: 0, db, gmailOps });
+    const res = await request(app)
+      .post('/api/email/i1/canned-reply')
+      .send({ kind: 'shrug' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_KIND');
+  });
+});

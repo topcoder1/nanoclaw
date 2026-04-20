@@ -18,6 +18,11 @@ export interface SendEmailInput {
   references?: string;
 }
 
+export interface CreateDraftReplyInput {
+  threadId: string;
+  body: string;
+}
+
 export interface DraftReplyContext {
   body: string;
   incoming: {
@@ -50,6 +55,10 @@ export interface GmailOps {
   ): Promise<DraftReplyContext | null>;
   sendDraft(account: string, draftId: string): Promise<void>;
   sendEmail(account: string, input: SendEmailInput): Promise<void>;
+  createDraftReply(
+    account: string,
+    input: CreateDraftReplyInput,
+  ): Promise<{ draftId: string }>;
 }
 
 export interface GmailOpsProvider {
@@ -64,6 +73,9 @@ export interface GmailOpsProvider {
   getDraftReplyContext(draftId: string): Promise<DraftReplyContext | null>;
   sendDraft(draftId: string): Promise<void>;
   sendEmail(input: SendEmailInput): Promise<void>;
+  createDraftReply(
+    input: CreateDraftReplyInput,
+  ): Promise<{ draftId: string }>;
 }
 
 export function deriveLocalPart(account: string): string | null {
@@ -195,5 +207,12 @@ export class GmailOpsRouter implements GmailOps {
 
   async sendEmail(account: string, input: SendEmailInput): Promise<void> {
     return this.getChannel(account).sendEmail(input);
+  }
+
+  async createDraftReply(
+    account: string,
+    input: CreateDraftReplyInput,
+  ): Promise<{ draftId: string }> {
+    return this.getChannel(account).createDraftReply(input);
   }
 }

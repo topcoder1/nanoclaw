@@ -7,7 +7,11 @@ import { OAuth2Client } from 'google-auth-library';
 
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { logger } from '../logger.js';
-import type { EmailMeta, SendEmailInput } from '../gmail-ops.js';
+import type {
+  EmailMeta,
+  SendEmailInput,
+  CreateDraftReplyInput,
+} from '../gmail-ops.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import type { DraftReplyContext } from '../gmail-ops.js';
 import {
@@ -633,6 +637,46 @@ export class GmailChannel implements Channel {
       logger.warn({ messageId, err }, 'Failed to fetch message meta');
       return null;
     }
+  }
+
+  async createDraftReply(
+    input: CreateDraftReplyInput,
+  ): Promise<{ draftId: string }> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const thread = await this.gmail.users.threads.get({
+      userId: 'me',
+      id: input.threadId,
+      format: 'metadata',
+      metadataHeaders: ['Subject', 'From', 'To', 'Message-ID', 'References'],
+    });
+    const last = (thread.data.messages || []).slice(-1)[0];
+    const hdrs = last?.payload?.headers || [];
+    const h = (name: string) =>
+      hdrs.find((x) => x.name?.toLowerCase() === name.toLowerCase())?.value ||
+      '';
+    const subject = h('Subject');
+    const from = h('From');
+    const msgId = h('Message-ID');
+    const refs = h('References');
+
+    const headerLines: string[] = [
+      `To: ${from}`,
+      `Subject: Re: ${subject.replace(/^re:\s*/i, '')}`,
+      msgId ? `In-Reply-To: ${msgId}` : '',
+      `References: ${refs ? refs + ' ' : ''}${msgId}`,
+      'Content-Type: text/plain; charset=UTF-8',
+      'MIME-Version: 1.0',
+    ].filter(Boolean);
+    const raw = Buffer.from(
+      headerLines.join('\r\n') + '\r\n\r\n' + input.body,
+      'utf-8',
+    ).toString('base64url');
+
+    const resp = await this.gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: { message: { threadId: input.threadId, raw } },
+    });
+    return { draftId: resp.data.id ?? '' };
   }
 
   async sendEmail(input: SendEmailInput): Promise<void> {

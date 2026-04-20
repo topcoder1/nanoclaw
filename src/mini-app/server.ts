@@ -36,6 +36,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       db: opts.db,
       gmailOps: opts.gmailOps,
       fetchImpl: opts.fetchImpl,
+      pendingSendRegistry: registry,
     }),
   );
 
@@ -544,8 +545,7 @@ ${
         'classification/sender lookup failed — defaulting to null',
       );
     }
-    const metaHeaders = (meta as { headers?: Record<string, string> })
-      ?.headers;
+    const metaHeaders = (meta as { headers?: Record<string, string> })?.headers;
     const hasUnsubscribeHeader = !!(
       metaHeaders?.['List-Unsubscribe'] || metaHeaders?.['list-unsubscribe']
     );
@@ -563,8 +563,7 @@ ${
       gmailId: gmailId || undefined,
       classification:
         classification as import('./templates/action-row.js').Classification,
-      senderKind:
-        senderKind as import('./templates/action-row.js').SenderKind,
+      senderKind: senderKind as import('./templates/action-row.js').SenderKind,
       subtype: subtype as import('./templates/action-row.js').Subtype,
       hasUnsubscribeHeader,
     });

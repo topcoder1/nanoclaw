@@ -7,12 +7,33 @@ import {
   pickUnsubscribeMethod,
   executeUnsubscribe,
 } from '../triage/unsubscribe-executor.js';
+import type { PendingSendRegistry } from './pending-send.js';
 
 export interface ActionDeps {
   db: Database.Database;
   gmailOps?: GmailOps;
   fetchImpl?: typeof globalThis.fetch;
+  pendingSendRegistry?: PendingSendRegistry;
 }
+
+const signatureCache = new Map<string, string>();
+
+function firstNameFor(account: string): string {
+  const cached = signatureCache.get(account);
+  if (cached) return cached;
+  const local = account.split('@')[0] || 'me';
+  const first = (local.split(/[._-]/)[0] || 'me').replace(/^./, (c) =>
+    c.toUpperCase(),
+  );
+  signatureCache.set(account, first);
+  return first;
+}
+
+const CANNED: Record<string, (name: string) => string> = {
+  thanks: (n) => `Thanks!\n\n${n}`,
+  'got-it': (n) => `Got it — thanks.\n\n${n}`,
+  'will-do': (n) => `Will do. Thanks,\n\n${n}`,
+};
 
 export function createActionsRouter(deps: ActionDeps): express.Router {
   const router = express.Router();
@@ -254,6 +275,74 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
         .run(item.id);
     })();
     res.json({ ok: true });
+  });
+
+  router.post('/api/email/:id/canned-reply', async (req, res) => {
+    const item = lookupItem(req.params.id);
+    if (!item || !item.thread_id || !item.account) {
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
+      return;
+    }
+    const kind = ((req.body as { kind?: string } | undefined)?.kind ?? '') as
+      | string
+      | '';
+    const builder = CANNED[kind];
+    if (!builder) {
+      res.status(400).json({
+        ok: false,
+        error: `unknown kind: ${kind || '(empty)'}`,
+        code: 'INVALID_KIND',
+      });
+      return;
+    }
+    if (!deps.gmailOps || !deps.pendingSendRegistry) {
+      res.status(503).json({
+        ok: false,
+        error: 'dependencies missing',
+        code: 'INTERNAL',
+      });
+      return;
+    }
+    const body = builder(firstNameFor(item.account));
+    let draftId: string;
+    try {
+      const result = await deps.gmailOps.createDraftReply(item.account, {
+        threadId: item.thread_id,
+        body,
+      });
+      draftId = result.draftId;
+    } catch (err) {
+      logger.error(
+        { err, id: req.params.id, component: 'mini-app-actions' },
+        'canned-reply: createDraftReply failed',
+      );
+      res.status(502).json({
+        ok: false,
+        error: 'createDraftReply failed',
+        code: 'DRAFT_CREATE_FAILED',
+      });
+      return;
+    }
+    const { sendAt } = deps.pendingSendRegistry.schedule(
+      draftId,
+      item.account,
+      10_000,
+      async (id, acct) => {
+        try {
+          await deps.gmailOps!.sendDraft(acct, id);
+        } catch (err) {
+          logger.error(
+            { err, draftId: id, component: 'mini-app-actions' },
+            'canned-reply send failed',
+          );
+        }
+      },
+    );
+    res.json({ ok: true, draftId, sendAt });
   });
 
   return router;

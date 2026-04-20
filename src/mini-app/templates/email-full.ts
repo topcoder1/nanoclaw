@@ -219,23 +219,55 @@ export function renderEmailFull(data: EmailFullData): string {
     }
   }
 
-  async function handleChip(chip, id, btn) {
-    const presets = { thanks: 'Thanks!', 'got-it': 'Got it.', 'will-do': 'Will do.' };
-    const body = presets[chip];
-    if (!body) return;
-    btn.disabled = true;
+  async function handleChip(kind, id) {
+    const chips = document.querySelectorAll('.chip');
+    chips.forEach((c) => {
+      c.disabled = true;
+    });
     const r = await fetch('/api/email/' + encodeURIComponent(id) + '/canned-reply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ kind }),
     });
     const j = await r.json();
-    if (j.ok && j.draftId) {
-      window.location.href = '/reply/' + encodeURIComponent(j.draftId);
-    } else {
-      btn.disabled = false;
+    if (!j.ok) {
+      chips.forEach((c) => {
+        c.disabled = false;
+      });
       alert(j.error || 'Canned reply failed');
+      return;
     }
+    const countdown = Math.max(0, Math.round((j.sendAt - Date.now()) / 1000));
+    showUndoBanner(j.draftId, countdown);
+  }
+
+  function showUndoBanner(draftId, countdown) {
+    const div = document.createElement('div');
+    div.className = 'action-banner';
+    div.style.cssText = 'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
+    const label = document.createElement('span');
+    label.innerHTML = 'Sending in <span id="cd">' + countdown + '</span>s';
+    div.appendChild(label);
+    const undo = document.createElement('button');
+    undo.textContent = 'Undo';
+    undo.style.cssText = 'margin-left:12px;background:#f85149;color:#fff;padding:6px 12px;border-radius:6px;border:none;';
+    undo.onclick = async () => {
+      await fetch('/api/draft/' + encodeURIComponent(draftId) + '/send/cancel', { method: 'POST' });
+      div.remove();
+      document.querySelectorAll('.chip').forEach((c) => { c.disabled = false; });
+    };
+    div.appendChild(undo);
+    document.body.appendChild(div);
+    const timer = setInterval(() => {
+      countdown -= 1;
+      const el = document.getElementById('cd');
+      if (el) el.textContent = String(countdown);
+      if (countdown <= 0) {
+        clearInterval(timer);
+        div.innerHTML = '<span style="color:#6ca368;">Sent.</span>';
+        setTimeout(() => div.remove(), 3000);
+      }
+    }, 1000);
   }
 
   async function handleQuickDraft(id, btn) {
@@ -323,7 +355,7 @@ export function renderEmailFull(data: EmailFullData): string {
     if (!emailId) return;
     const action = btn.dataset.action;
     const chip = btn.dataset.chip;
-    if (chip) return handleChip(chip, emailId, btn);
+    if (chip) return handleChip(chip, emailId);
     switch (action) {
       case 'archive':      return handleArchive(emailId, btn);
       case 'snooze':       return handleSnooze(emailId, btn);
