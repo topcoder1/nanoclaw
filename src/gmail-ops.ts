@@ -73,9 +73,7 @@ export interface GmailOpsProvider {
   getDraftReplyContext(draftId: string): Promise<DraftReplyContext | null>;
   sendDraft(draftId: string): Promise<void>;
   sendEmail(input: SendEmailInput): Promise<void>;
-  createDraftReply(
-    input: CreateDraftReplyInput,
-  ): Promise<{ draftId: string }>;
+  createDraftReply(input: CreateDraftReplyInput): Promise<{ draftId: string }>;
 }
 
 export function deriveLocalPart(account: string): string | null {

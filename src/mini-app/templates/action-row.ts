@@ -84,7 +84,8 @@ export function renderActionRow(input: ActionRowInput): string {
   const primary = primaryActions(input);
   const secondary = ALL_ACTIONS.filter(
     (a) =>
-      !primary.includes(a) && !(a === 'unsubscribe' && !input.hasUnsubscribeHeader),
+      !primary.includes(a) &&
+      !(a === 'unsubscribe' && !input.hasUnsubscribeHeader),
   );
 
   const chipsHtml = chipsFor(input)

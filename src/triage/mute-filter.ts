@@ -49,10 +49,7 @@ export function muteThread(
   return { muted: true, cascaded: res.changes };
 }
 
-export function unmuteThread(
-  db: Database.Database,
-  threadId: string,
-): boolean {
+export function unmuteThread(db: Database.Database, threadId: string): boolean {
   const res = db
     .prepare('DELETE FROM muted_threads WHERE thread_id = ?')
     .run(threadId);

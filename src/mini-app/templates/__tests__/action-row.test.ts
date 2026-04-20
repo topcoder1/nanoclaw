@@ -58,8 +58,7 @@ describe('renderActionRow', () => {
     });
     // unsubscribe may still appear in the hidden More row; check it's not
     // in the primary row.
-    const primarySection = html
-      .split('id="more-row"')[0];
+    const primarySection = html.split('id="more-row"')[0];
     expect(primarySection).not.toContain('data-action="unsubscribe"');
     expect(html).toContain('data-action="open-gmail"');
     expect(html).toContain('data-action="mute"');
