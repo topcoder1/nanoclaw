@@ -789,6 +789,74 @@ function createSchema(database: Database.Database): void {
   } catch {
     // Column already exists — ignore
   }
+
+  // 2026-04-19 mini-app UX expansion: mute/snooze/unsubscribe + sender
+  // heuristics. Spec: docs/superpowers/specs/2026-04-19-miniapp-ux-expansion-design.md
+  // Plan:  docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md (Phase 1)
+  //
+  // - muted_threads: per-account thread-level silencing of tracked items.
+  // - snoozed_items: temporary hide-until-wake with FK cascade back to
+  //   tracked_items so resolving/deleting an item auto-cleans its snooze.
+  // - unsubscribe_log: audit of attempted unsubscribe calls (success + error).
+  // - tracked_items: add sender_kind + subtype heuristic columns (populated
+  //   by the classifier in Task 2). Added via ALTER rather than a table
+  //   rewrite — the prod tracked_items schema carries CHECKs and columns
+  //   a rewrite would easily drop. state='snoozed' is already legal because
+  //   tracked_items.state has no CHECK constraint (verified against prod DB).
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS muted_threads (
+      thread_id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      muted_at INTEGER NOT NULL,
+      reason TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS snoozed_items (
+      item_id TEXT PRIMARY KEY,
+      snoozed_at INTEGER NOT NULL,
+      wake_at INTEGER NOT NULL,
+      original_state TEXT NOT NULL,
+      original_queue TEXT,
+      FOREIGN KEY (item_id) REFERENCES tracked_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_snoozed_wake ON snoozed_items(wake_at);
+
+    CREATE TABLE IF NOT EXISTS unsubscribe_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      url TEXT,
+      status INTEGER,
+      error TEXT,
+      attempted_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_unsub_item ON unsubscribe_log(item_id);
+  `);
+
+  // Add sender_kind + subtype to tracked_items if not present. Sniff
+  // PRAGMA table_info rather than catching ALTER errors so we don't
+  // swallow unrelated failures (matches the explicit pattern preferred for
+  // this file's newer migrations).
+  const trackedCols = database
+    .prepare(`PRAGMA table_info('tracked_items')`)
+    .all() as Array<{ name: string }>;
+  const trackedNames = new Set(trackedCols.map((c) => c.name));
+  if (!trackedNames.has('sender_kind')) {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN sender_kind TEXT`);
+  }
+  if (!trackedNames.has('subtype')) {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN subtype TEXT`);
+  }
+}
+
+/**
+ * Run all migrations against the given database. Idempotent — each step
+ * is guarded so repeated invocations are safe. Exported for migration
+ * tests; production code paths use {@link initDatabase} / {@link _initTestDatabase}
+ * which call this internally.
+ */
+export function runMigrations(database: Database.Database): void {
+  createSchema(database);
 }
 
 export function initDatabase(): void {
