@@ -7,7 +7,7 @@ import { OAuth2Client } from 'google-auth-library';
 
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { logger } from '../logger.js';
-import type { EmailMeta } from '../gmail-ops.js';
+import type { EmailMeta, SendEmailInput } from '../gmail-ops.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import type { DraftReplyContext } from '../gmail-ops.js';
 import {
@@ -606,6 +606,20 @@ export class GmailChannel implements Channel {
         headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
           ?.value || '';
       const body = this.extractTextBody(msg.data.payload);
+      const wantHeaders = [
+        'List-Unsubscribe',
+        'List-Unsubscribe-Post',
+        'List-Id',
+        'Precedence',
+        'Message-ID',
+        'References',
+        'In-Reply-To',
+      ];
+      const headerMap: Record<string, string> = {};
+      for (const name of wantHeaders) {
+        const v = header(name);
+        if (v) headerMap[name] = v;
+      }
       return {
         subject: header('Subject'),
         from: header('From'),
@@ -613,11 +627,33 @@ export class GmailChannel implements Channel {
         date: header('Date'),
         cc: header('Cc') || undefined,
         body: body || '',
+        headers: headerMap,
       };
     } catch (err) {
       logger.warn({ messageId, err }, 'Failed to fetch message meta');
       return null;
     }
+  }
+
+  async sendEmail(input: SendEmailInput): Promise<void> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const headers: string[] = [
+      `To: ${input.to}`,
+      `Subject: ${input.subject}`,
+      'Content-Type: text/plain; charset=UTF-8',
+      'MIME-Version: 1.0',
+    ];
+    if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
+    if (input.references) headers.push(`References: ${input.references}`);
+    const raw = Buffer.from(
+      headers.join('\r\n') + '\r\n\r\n' + (input.body ?? ''),
+      'utf-8',
+    ).toString('base64url');
+
+    await this.gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw },
+    });
   }
 
   async getDraftReplyContext(
