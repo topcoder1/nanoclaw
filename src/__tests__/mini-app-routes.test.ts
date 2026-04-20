@@ -55,7 +55,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId renders real subject, from, to, date when getMessageMeta available', async () => {
-    const { app, db, mockGmailOps } = setup();
+    const { db, mockGmailOps } = setup();
     const metaMock = vi.fn().mockResolvedValue({
       subject: 'Hello from Test',
       from: 'sender@example.com',
@@ -93,7 +93,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId does not render raw script tags in body', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     // HTML-shaped body — routed through the iframe+sandbox path.
     const xssBody = '<div><script>alert("xss")</script></div>';
     const mockGmailOpsXss = {
@@ -115,7 +115,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId renders plain-text body as formatted HTML with clickable links', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     const plainBody =
       'Hello world.\n\nVisit https://example.com for details.\n\nCheers';
     const mockOps = {
@@ -143,7 +143,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId escapes plain-text HTML-like fragments safely', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     const body = 'not html <script>alert(1)</script> end';
     const mockOps = {
       getMessageBody: vi.fn().mockResolvedValue(body),
