@@ -205,6 +205,16 @@ ${
       res.status(400).json({ error: 'itemIds required (non-empty string[])' });
       return;
     }
+    // Cap per-request batch size. Each id triggers a Gmail API call; without
+    // a cap a single request can wedge the event loop and burn through the
+    // account's per-minute rate budget.
+    const MAX_BULK = 100;
+    if (ids.length > MAX_BULK) {
+      res.status(413).json({
+        error: `Too many itemIds: ${ids.length} > ${MAX_BULK}`,
+      });
+      return;
+    }
 
     const placeholders = ids.map(() => '?').join(',');
     const rows = opts.db
@@ -329,7 +339,6 @@ ${
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
     });
 
     // Send current state immediately
