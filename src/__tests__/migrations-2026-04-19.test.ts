@@ -93,4 +93,26 @@ describe('2026-04-19 ux expansion migration', () => {
       .get() as { n: number };
     expect(remaining.n).toBe(0);
   });
+
+  // Regression test for reviewer issue I2: production initDatabase did not
+  // enable PRAGMA foreign_keys, so the cascade advertised by the migration
+  // silently didn't fire. runMigrations / createSchema must enable the pragma
+  // itself so initDatabase + _initTestDatabase + runMigrations all get it.
+  it('snoozed_items FK cascades without manually enabling the pragma', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+    // NO explicit `PRAGMA foreign_keys = ON` here — this is the whole point.
+    db.prepare(
+      `INSERT INTO tracked_items (id, source, source_id, group_name, state, title, detected_at)
+       VALUES ('t2', 'email', 'gmail:y', 'g', 'snoozed', 'title', ?)`,
+    ).run(Date.now());
+    db.prepare(
+      `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state) VALUES (?, ?, ?, ?)`,
+    ).run('t2', Date.now(), Date.now() + 3600_000, 'pushed');
+    db.prepare('DELETE FROM tracked_items WHERE id = ?').run('t2');
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS n FROM snoozed_items')
+      .get() as { n: number };
+    expect(remaining.n).toBe(0);
+  });
 });

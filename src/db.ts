@@ -17,6 +17,16 @@ import {
 let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
+  // SQLite requires `PRAGMA foreign_keys = ON` per-connection to enforce FK
+  // constraints — the default is OFF in stock SQLite and in most bindings.
+  // better-sqlite3 happens to default to ON, but relying on that is fragile
+  // (it's per-binding, not per-DB), and any FK advertised by our schema
+  // (e.g. snoozed_items.item_id → tracked_items.id ON DELETE CASCADE) would
+  // silently not fire if the default ever changed or a different binding
+  // opened the DB. Enabling it here makes every path that calls createSchema
+  // (initDatabase, _initTestDatabase, runMigrations) self-sufficient.
+  database.pragma('foreign_keys = ON');
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
