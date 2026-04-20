@@ -1785,25 +1785,60 @@ async function main(): Promise<void> {
       });
     }, timeout).unref();
 
-    // Production wiring for the container-side draft-creation agent is a
-    // follow-up: the plan specifies the mini-app contract (this function +
-    // email.draft.ready correlation); the container-side task that actually
-    // calls gmail.users.drafts.create is expected to emit
-    // email.draft.created via the existing DraftEnrichmentWatcher pipeline
-    // (which fires on every new Gmail draft). When that happens for the
-    // same account+thread as this task, the listener above wakes and
-    // emits email.draft.ready. Until that container hook ships, this
-    // function logs the request and relies on 45s timeout to report
-    // failure.
+    // Spawn a container agent that calls gmail.users.drafts.create. The
+    // DraftEnrichmentWatcher pipeline will emit email.draft.created for the
+    // new draft; the correlation listener above matches on (account, threadId)
+    // and emits email.draft.ready. Run on the main group so the agent has a
+    // working chat identity, even though the prompt instructs it to stay
+    // silent (no send_message / relay_message calls).
+    const mainEntry = Object.entries(registeredGroups).find(
+      ([, g]) => g.isMain,
+    );
+    if (!mainEntry) {
+      resolved = true;
+      unsubscribe();
+      logger.warn(
+        { taskId, component: 'draft-with-ai' },
+        'No main group registered — cannot spawn draft agent',
+      );
+      eventBus.emit('email.draft.failed', {
+        type: 'email.draft.failed',
+        source: 'draft-spawn',
+        timestamp: Date.now(),
+        payload: { taskId, error: 'no main group registered' },
+      });
+      return { taskId };
+    }
+    const [mainJid, mainGroup] = mainEntry;
+
+    queue.enqueueTask(mainJid, taskId, async () => {
+      try {
+        await runAgent(mainGroup, input.prompt, mainJid);
+      } catch (err) {
+        logger.error(
+          {
+            taskId,
+            err: err instanceof Error ? err.message : String(err),
+            component: 'draft-with-ai',
+          },
+          'draft-with-ai agent run failed',
+        );
+      }
+      // Single-shot task: close the container shortly after so it exits
+      // cleanly instead of hanging for the idle window.
+      setTimeout(() => queue.closeStdin(mainJid), 5_000).unref();
+    });
+
     logger.info(
       {
         taskId,
         account: input.account,
         threadId,
         itemId: input.itemId,
+        mainJid,
         component: 'draft-with-ai',
       },
-      'Draft-with-AI task requested (container hook pending)',
+      'Draft-with-AI agent task spawned',
     );
     return { taskId };
   };
