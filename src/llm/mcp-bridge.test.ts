@@ -5,7 +5,7 @@ import fs from 'fs';
 vi.mock('@ai-sdk/mcp', () => ({
   createMCPClient: vi.fn(),
 }));
-vi.mock('@ai-sdk/mcp/stdio', () => ({
+vi.mock('@ai-sdk/mcp/mcp-stdio', () => ({
   Experimental_StdioMCPTransport: vi.fn(),
 }));
 
