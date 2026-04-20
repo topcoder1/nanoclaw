@@ -195,7 +195,11 @@ ${
         )
       : [];
     if (ids.length === 0) {
-      res.status(400).json({ error: 'itemIds required (non-empty string[])' });
+      res.status(400).json({
+        ok: false,
+        error: 'itemIds required (non-empty string[])',
+        code: 'INVALID_BODY',
+      });
       return;
     }
     // Cap per-request batch size. Each id triggers a Gmail API call; without
@@ -204,7 +208,9 @@ ${
     const MAX_BULK = 100;
     if (ids.length > MAX_BULK) {
       res.status(413).json({
+        ok: false,
         error: `Too many itemIds: ${ids.length} > ${MAX_BULK}`,
+        code: 'BATCH_TOO_LARGE',
       });
       return;
     }
@@ -287,6 +293,7 @@ ${
       'Mini-app bulk archive',
     );
     res.json({
+      ok: true,
       archived,
       requested: ids.length,
       failed: failures.length,
@@ -508,7 +515,11 @@ ${
   app.post('/api/email/:emailId/archive', async (req, res) => {
     const { emailId } = req.params;
     if (!opts.gmailOps) {
-      res.status(503).json({ error: 'Gmail not configured' });
+      res.status(503).json({
+        ok: false,
+        error: 'Gmail not configured',
+        code: 'GMAIL_UNAVAILABLE',
+      });
       return;
     }
     let account: string | null = null;
@@ -545,15 +556,25 @@ ${
       /* tracked_items may not exist in minimal test DBs */
     }
     if (!account || !resolvedThreadId) {
-      res.status(404).json({ error: 'Tracked item not found' });
+      res.status(404).json({
+        ok: false,
+        error: 'Tracked item not found',
+        code: 'ITEM_NOT_FOUND',
+      });
       return;
     }
     try {
       await opts.gmailOps.archiveThread(account, resolvedThreadId);
-      res.json({ success: true });
+      // `success: true` kept for backward compat with existing clients;
+      // new `ok: true` matches the reply-send spec.
+      res.json({ ok: true, success: true });
     } catch (err) {
       logger.error({ emailId, err }, 'Mini app archive failed');
-      res.status(500).json({ error: 'Archive failed' });
+      res.status(500).json({
+        ok: false,
+        error: 'Archive failed',
+        code: 'GMAIL_API_ERROR',
+      });
     }
   });
 
@@ -585,19 +606,25 @@ ${
   app.post('/api/draft/:draftId/revert', async (req, res) => {
     const { draftId } = req.params;
     if (!opts.draftWatcher) {
-      res
-        .status(503)
-        .json({ success: false, error: 'Draft watcher not configured' });
+      res.status(503).json({
+        ok: false,
+        success: false,
+        error: 'Draft watcher not configured',
+        code: 'WATCHER_UNAVAILABLE',
+      });
       return;
     }
     try {
       const success = await opts.draftWatcher.revert(draftId);
-      res.json({ success });
+      // `success` kept for backward compat; `ok` mirrors the reply-send spec.
+      res.json({ ok: success, success });
     } catch (err) {
       logger.error({ draftId, err }, 'Draft revert failed');
       res.status(500).json({
+        ok: false,
         success: false,
         error: err instanceof Error ? err.message : 'Unknown error',
+        code: 'INTERNAL',
       });
     }
   });
