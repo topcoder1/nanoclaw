@@ -55,7 +55,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId renders real subject, from, to, date when getMessageMeta available', async () => {
-    const { app, db, mockGmailOps } = setup();
+    const { db, mockGmailOps } = setup();
     const metaMock = vi.fn().mockResolvedValue({
       subject: 'Hello from Test',
       from: 'sender@example.com',
@@ -93,7 +93,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId does not render raw script tags in body', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     // HTML-shaped body — routed through the iframe+sandbox path.
     const xssBody = '<div><script>alert("xss")</script></div>';
     const mockGmailOpsXss = {
@@ -115,7 +115,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId renders plain-text body as formatted HTML with clickable links', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     const plainBody =
       'Hello world.\n\nVisit https://example.com for details.\n\nCheers';
     const mockOps = {
@@ -143,7 +143,7 @@ describe('Mini App extended routes', () => {
   });
 
   it('GET /email/:emailId escapes plain-text HTML-like fragments safely', async () => {
-    const { app, db } = setup();
+    const { db } = setup();
     const body = 'not html <script>alert(1)</script> end';
     const mockOps = {
       getMessageBody: vi.fn().mockResolvedValue(body),
@@ -181,23 +181,7 @@ describe('Mini App extended routes', () => {
     expect(res.text).toContain('personal');
   });
 
-  it('POST /api/email/:emailId/archive calls gmailOps.archiveThread', async () => {
-    const { app, mockGmailOps } = setup();
-    (mockGmailOps.archiveThread as ReturnType<typeof vi.fn>).mockResolvedValue(
-      undefined,
-    );
-    const res = await request(app)
-      .post('/api/email/archmsg/archive')
-      .send({ account: 'personal', threadId: 'thread123' });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true });
-    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
-      'personal',
-      'thread123',
-    );
-  });
-
-  it('POST /api/email/:emailId/archive resolves Gmail thread id from tracked_items when not provided', async () => {
+  it('POST /api/email/:emailId/archive resolves account + thread id from tracked_items', async () => {
     const { app, db, mockGmailOps } = setup();
     (mockGmailOps.archiveThread as ReturnType<typeof vi.fn>).mockResolvedValue(
       undefined,
@@ -216,15 +200,56 @@ describe('Mini App extended routes', () => {
       JSON.stringify({ account: 'personal' }),
     );
 
-    const res = await request(app)
-      .post('/api/email/sse-123/archive')
-      .send({ account: 'personal' });
+    const res = await request(app).post('/api/email/sse-123/archive').send({});
 
     expect(res.status).toBe(200);
     expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
       'personal',
       '19da1d9492abcdef',
     );
+  });
+
+  it('POST /api/email/:emailId/archive ignores client-supplied account/threadId', async () => {
+    const { app, db, mockGmailOps } = setup();
+    (mockGmailOps.archiveThread as ReturnType<typeof vi.fn>).mockResolvedValue(
+      undefined,
+    );
+    db.prepare(
+      `INSERT INTO tracked_items (id, source, source_id, group_name, state, title, detected_at, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'sse-secure',
+      'email',
+      'gmail:realthread',
+      'g',
+      'pending',
+      't',
+      Date.now(),
+      JSON.stringify({ account: 'owner@example.com' }),
+    );
+
+    const res = await request(app)
+      .post('/api/email/sse-secure/archive')
+      .send({ account: 'attacker@evil.com', threadId: 'spoofed-thread' });
+
+    expect(res.status).toBe(200);
+    expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
+      'owner@example.com',
+      'realthread',
+    );
+    expect(mockGmailOps.archiveThread).not.toHaveBeenCalledWith(
+      'attacker@evil.com',
+      expect.anything(),
+    );
+  });
+
+  it('POST /api/email/:emailId/archive returns 404 when tracked item missing', async () => {
+    const { app, mockGmailOps } = setup();
+    const res = await request(app)
+      .post('/api/email/does-not-exist/archive')
+      .send({});
+    expect(res.status).toBe(404);
+    expect(mockGmailOps.archiveThread).not.toHaveBeenCalled();
   });
 
   it('GET /email/:emailId renders Open-in-Gmail URL scoped to the account and gmail id', async () => {

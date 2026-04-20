@@ -1,3 +1,5 @@
+import { escapeHtml } from './escape.js';
+
 export interface EmailFullData {
   mode?: 'view' | 'reply'; // default: 'view' (backward compatible)
   draftId?: string; // required when mode === 'reply'
@@ -14,14 +16,6 @@ export interface EmailFullData {
   body: string;
   attachments: Array<{ name: string; size: string }>;
   cc?: string;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 // Gmail's extractTextBody prefers text/plain, so many messages arrive as raw

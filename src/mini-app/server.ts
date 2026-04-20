@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { renderTaskDetail } from './templates/task-detail.js';
 import { renderEmailFull } from './templates/email-full.js';
 import { renderDraftDiff } from './templates/draft-diff.js';
+import { escapeHtml } from './templates/escape.js';
 import {
   getCachedEmailBody,
   cacheEmailBody,
@@ -75,27 +76,19 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       }
     };
 
-    const esc = (s: string) =>
-      s.replace(
-        /[&<>"']/g,
-        (c) =>
-          ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;',
-          })[c] ?? c,
-      );
+    const esc = escapeHtml;
     const formatAge = (detectedAt: number) => {
-      const mins = Math.round((Date.now() - detectedAt) / 60_000);
+      // Floor (not round) so a 59-minute-old item reads "59m" not "1h" —
+      // "time elapsed so far" should never overshoot the actual elapsed
+      // time.
+      const mins = Math.floor((Date.now() - detectedAt) / 60_000);
       if (mins < 1) return 'just now';
       if (mins < 60) return `${mins}m`;
-      const hours = Math.round(mins / 60);
+      const hours = Math.floor(mins / 60);
       if (hours < 24) return `${hours}h`;
-      const days = Math.round(hours / 24);
+      const days = Math.floor(hours / 24);
       if (days < 7) return `${days}d`;
-      const weeks = Math.round(days / 7);
+      const weeks = Math.floor(days / 7);
       return `${weeks}w`;
     };
     const emailHref = (id: string, metadata: string | null) => {
@@ -203,6 +196,16 @@ ${
       : [];
     if (ids.length === 0) {
       res.status(400).json({ error: 'itemIds required (non-empty string[])' });
+      return;
+    }
+    // Cap per-request batch size. Each id triggers a Gmail API call; without
+    // a cap a single request can wedge the event loop and burn through the
+    // account's per-minute rate budget.
+    const MAX_BULK = 100;
+    if (ids.length > MAX_BULK) {
+      res.status(413).json({
+        error: `Too many itemIds: ${ids.length} > ${MAX_BULK}`,
+      });
       return;
     }
 
@@ -329,7 +332,6 @@ ${
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
     });
 
     // Send current state immediately
@@ -451,13 +453,8 @@ ${
     const idForGmail = gmailId || emailId;
     if (!meta && opts.gmailOps && account) {
       try {
-        if ('getMessageMeta' in opts.gmailOps) {
-          meta = await (opts.gmailOps as any).getMessageMeta(
-            account,
-            idForGmail,
-          );
-          if (meta) cacheEmailMeta(emailId, meta);
-        }
+        meta = await opts.gmailOps.getMessageMeta(account, idForGmail);
+        if (meta) cacheEmailMeta(emailId, meta);
       } catch (err) {
         logger.warn(
           { emailId, idForGmail, err },
@@ -504,41 +501,55 @@ ${
   });
 
   // --- Archive email API ---
+  // Resolve `account` and Gmail thread id from tracked_items by emailId.
+  // We do NOT trust the request body for either field — a caller who knows
+  // an emailId should not be able to archive a thread in an arbitrary
+  // account by supplying its alias in the POST payload.
   app.post('/api/email/:emailId/archive', async (req, res) => {
     const { emailId } = req.params;
-    const { account, threadId } = req.body;
-    if (!opts.gmailOps || !account) {
-      res.status(400).json({ error: 'Missing account or gmailOps' });
+    if (!opts.gmailOps) {
+      res.status(503).json({ error: 'Gmail not configured' });
       return;
     }
-    // emailId in the URL is nanoclaw's internal tracked_items.id (e.g.
-    // "sse-..."), not a Gmail thread id. If the client didn't pass an explicit
-    // threadId, look the row up and extract the Gmail id from source_id —
-    // same resolution logic as GET /email/:emailId.
-    let resolvedThreadId = threadId as string | undefined;
-    if (!resolvedThreadId) {
-      try {
-        const row = opts.db
-          .prepare(
-            `SELECT source_id, thread_id FROM tracked_items
-             WHERE id = ? OR thread_id = ? OR source_id = ?
-             ORDER BY detected_at DESC LIMIT 1`,
-          )
-          .get(emailId, emailId, emailId) as
-          | { source_id: string | null; thread_id: string | null }
-          | undefined;
-        if (row) {
-          const raw = row.source_id || row.thread_id || '';
-          resolvedThreadId = raw.startsWith('gmail:')
-            ? raw.slice('gmail:'.length)
-            : raw || emailId;
+    let account: string | null = null;
+    let resolvedThreadId: string | null = null;
+    try {
+      const row = opts.db
+        .prepare(
+          `SELECT metadata, source_id, thread_id FROM tracked_items
+           WHERE id = ? OR thread_id = ? OR source_id = ?
+           ORDER BY detected_at DESC LIMIT 1`,
+        )
+        .get(emailId, emailId, emailId) as
+        | {
+            metadata: string | null;
+            source_id: string | null;
+            thread_id: string | null;
+          }
+        | undefined;
+      if (row) {
+        if (row.metadata) {
+          try {
+            const m = JSON.parse(row.metadata) as { account?: string };
+            account = m.account ?? null;
+          } catch {
+            /* treat as missing account */
+          }
         }
-      } catch {
-        /* tracked_items may not exist in minimal test DBs */
+        const raw = row.source_id || row.thread_id || '';
+        resolvedThreadId = raw.startsWith('gmail:')
+          ? raw.slice('gmail:'.length)
+          : raw || null;
       }
+    } catch {
+      /* tracked_items may not exist in minimal test DBs */
+    }
+    if (!account || !resolvedThreadId) {
+      res.status(404).json({ error: 'Tracked item not found' });
+      return;
     }
     try {
-      await opts.gmailOps.archiveThread(account, resolvedThreadId || emailId);
+      await opts.gmailOps.archiveThread(account, resolvedThreadId);
       res.json({ success: true });
     } catch (err) {
       logger.error({ emailId, err }, 'Mini app archive failed');
