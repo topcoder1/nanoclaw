@@ -4,6 +4,8 @@ import { renderTaskDetail } from './templates/task-detail.js';
 import { renderEmailFull } from './templates/email-full.js';
 import { renderDraftDiff } from './templates/draft-diff.js';
 import { escapeHtml } from './templates/escape.js';
+import { renderProfileForm } from './templates/signer-profile.js';
+import { getProfile, upsertProfile } from '../signer/profile.js';
 import {
   getCachedEmailBody,
   cacheEmailBody,
@@ -37,6 +39,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   const registry = opts.pendingSendRegistry ?? new PendingSendRegistry();
   const app = express();
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
   app.use(
     createActionsRouter({
       db: opts.db,
@@ -1030,6 +1033,29 @@ ${
       logger.info({ draftId, component: 'mini-app' }, 'Draft send cancelled');
     }
     res.json({ ok: true, cancelled });
+  });
+
+  // --- Signer profile settings page ---
+  app.get('/signer/profile', (_req, res) => {
+    const profile = getProfile(opts.db);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderProfileForm(profile));
+  });
+
+  app.post('/signer/profile', (req, res) => {
+    const body = req.body as Record<string, string | undefined>;
+    if (!body.fullName || !body.initials) {
+      res.status(400).send('fullName and initials are required');
+      return;
+    }
+    upsertProfile(opts.db, {
+      fullName: body.fullName,
+      initials: body.initials,
+      title: body.title || null,
+      address: body.address || null,
+      phone: body.phone || null,
+    });
+    res.redirect('/signer/profile');
   });
 
   return app;
