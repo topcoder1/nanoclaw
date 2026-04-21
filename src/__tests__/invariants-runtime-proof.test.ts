@@ -20,7 +20,12 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { _initTestDatabase, _closeDatabase, getDb, runMigrations } from '../db.js';
+import {
+  _initTestDatabase,
+  _closeDatabase,
+  getDb,
+  runMigrations,
+} from '../db.js';
 import {
   handleArchive,
   handleDismiss,

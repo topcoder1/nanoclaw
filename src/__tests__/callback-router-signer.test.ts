@@ -69,7 +69,10 @@ describe('callback-router sign callbacks', () => {
     const emitSpy = vi.spyOn(bus, 'emit');
     const deps = makeDeps(bus);
 
-    await handleCallback(makeQuery('sign:cancel:ceremony-xyz:user_dismissed'), deps);
+    await handleCallback(
+      makeQuery('sign:cancel:ceremony-xyz:user_dismissed'),
+      deps,
+    );
 
     expect(emitSpy).toHaveBeenCalledWith(
       'sign.cancelled',
