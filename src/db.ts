@@ -857,6 +857,53 @@ function createSchema(database: Database.Database): void {
   if (!trackedNames.has('subtype')) {
     database.exec(`ALTER TABLE tracked_items ADD COLUMN subtype TEXT`);
   }
+
+  // DocuSign auto-sign: signer identity + ceremony state machine
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS signer_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      full_name TEXT NOT NULL,
+      initials TEXT NOT NULL,
+      title TEXT,
+      address TEXT,
+      phone TEXT,
+      default_date_format TEXT DEFAULT 'MM/DD/YYYY',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sign_ceremonies (
+      id TEXT PRIMARY KEY,
+      email_id TEXT NOT NULL,
+      vendor TEXT NOT NULL,
+      sign_url TEXT NOT NULL,
+      doc_title TEXT,
+      state TEXT NOT NULL CHECK (state IN (
+        'detected','summarized','approval_requested','approved',
+        'signing','signed','failed','cancelled'
+      )),
+      summary_text TEXT,
+      risk_flags_json TEXT,
+      signed_pdf_path TEXT,
+      failure_reason TEXT,
+      failure_screenshot_path TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      CHECK (
+        (state IN ('signed','failed','cancelled') AND completed_at IS NOT NULL) OR
+        (state NOT IN ('signed','failed','cancelled') AND completed_at IS NULL)
+      ),
+      CHECK (state <> 'signed' OR signed_pdf_path IS NOT NULL),
+      CHECK (state <> 'failed' OR failure_reason IS NOT NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sign_ceremonies_email ON sign_ceremonies(email_id);
+    CREATE INDEX IF NOT EXISTS idx_sign_ceremonies_state ON sign_ceremonies(state);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sign_ceremonies_email_active
+      ON sign_ceremonies(email_id)
+      WHERE state NOT IN ('failed','cancelled');
+  `);
 }
 
 /**
