@@ -16,6 +16,11 @@ import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
 import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
+import {
+  detectSignUrl,
+  isSignInvite,
+  type SignDetection,
+} from '../triage/sign-detector.js';
 
 export interface MiniAppServerOpts {
   port: number;
@@ -92,6 +97,19 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
         return '';
       }
     };
+    const parseMetadata = (
+      metadata: string | null,
+    ): { sender?: string; sign?: SignDetection } => {
+      if (!metadata) return {};
+      try {
+        return JSON.parse(metadata) as {
+          sender?: string;
+          sign?: SignDetection;
+        };
+      } catch {
+        return {};
+      }
+    };
 
     const esc = escapeHtml;
     const formatAge = (detectedAt: number) => {
@@ -120,7 +138,15 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       metadata: string | null;
     }) => {
       const age = formatAge(it.detected_at);
-      return `<li><a href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a> <span class="age">${age}</span></li>`;
+      const meta = parseMetadata(it.metadata);
+      const signable = isSignInvite({
+        from: meta.sender ?? '',
+        subject: it.title ?? '',
+      });
+      const signBtn = signable
+        ? ` <a class="sign-btn" href="/api/email/${esc(it.id)}/sign" target="_blank" rel="noopener" title="Open signing page">✍ Sign</a>`
+        : '';
+      return `<li><a class="title" href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a>${signBtn} <span class="age">${age}</span></li>`;
     };
     const archiveRow = (it: {
       id: string;
@@ -129,7 +155,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       metadata: string | null;
     }) => {
       const age = formatAge(it.detected_at);
-      return `<li><label class="check"><input type="checkbox" class="sel" value="${esc(it.id)}"><a href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a> <span class="age">${age}</span></label></li>`;
+      return `<li><label class="check"><input type="checkbox" class="sel" value="${esc(it.id)}"><a class="title" href="${emailHref(it.id, it.metadata)}">${esc(it.title || '(no subject)')}</a> <span class="age">${age}</span></label></li>`;
     };
 
     res.type('html').send(`<!doctype html><html><head>
@@ -143,7 +169,10 @@ h2 .tools{font-size:12px;font-weight:400;color:#0366d6;cursor:pointer;user-selec
 ul{list-style:none;padding:0;margin:0;background:#fff;border-radius:10px;overflow:hidden}
 li{border-bottom:1px solid #eee}
 li:last-child{border-bottom:none}
-li a{color:#0366d6;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li a.title{color:#0366d6;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li a{color:#0366d6;text-decoration:none}
+.sign-btn{flex:none;background:#1f6feb;color:#fff!important;padding:4px 10px;border-radius:14px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.sign-btn:hover{background:#388bfd}
 .age{color:#888;font-size:12px;flex:none}
 .empty{color:#888;font-style:italic;padding:10px 14px;background:#fff;border-radius:10px}
 #attention li{padding:10px 14px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
@@ -553,6 +582,53 @@ ${
       metaHeaders?.['List-Unsubscribe'] || metaHeaders?.['list-unsubscribe']
     );
 
+    // Opportunistic sign-URL caching — if the body looks like a signature
+    // invite, persist the detection into metadata so the Attention list
+    // can offer an immediate deep link on next render. Fire-and-forget;
+    // the detail page render does not depend on it.
+    if (meta.body) {
+      try {
+        const detection = detectSignUrl({
+          from: meta.from || '',
+          subject: meta.subject || '',
+          body: meta.body,
+        });
+        if (detection) {
+          const row = opts.db
+            .prepare(
+              `SELECT id, metadata FROM tracked_items
+               WHERE id = ? OR thread_id = ? OR source_id = ?
+               ORDER BY detected_at DESC LIMIT 1`,
+            )
+            .get(emailId, emailId, emailId) as
+            | { id: string; metadata: string | null }
+            | undefined;
+          if (row) {
+            let parsed: Record<string, unknown> = {};
+            if (row.metadata) {
+              try {
+                parsed = JSON.parse(row.metadata);
+              } catch {
+                parsed = {};
+              }
+            }
+            const existing = (parsed as { sign?: SignDetection }).sign;
+            if (!existing || existing.signUrl !== detection.signUrl) {
+              const updated = { ...parsed, sign: detection };
+              opts.db
+                .prepare(`UPDATE tracked_items SET metadata = ? WHERE id = ?`)
+                .run(JSON.stringify(updated), row.id);
+            }
+          }
+        }
+      } catch (err) {
+        logger.debug(
+          { err, emailId, component: 'mini-app' },
+          'sign-detector cache-on-view failed',
+        );
+      }
+    }
+
     const html = renderEmailFull({
       subject: meta.subject || `Email ${emailId}`,
       from: meta.from || '',
@@ -571,6 +647,106 @@ ${
       hasUnsubscribeHeader,
     });
     res.type('html').send(html);
+  });
+
+  // Resolves the e-signature URL for a tracked item. Returns the cached
+  // detection from metadata.sign if present, otherwise fetches the body
+  // once, runs the detector, and persists the hit so the Attention list
+  // can surface an immediate deep-link next render. Returns null when no
+  // signing URL is recognizable — caller should 302 to the email detail
+  // page as a fallback.
+  async function resolveSignDetection(
+    emailId: string,
+  ): Promise<SignDetection | null> {
+    const row = opts.db
+      .prepare(
+        `SELECT id, metadata, source_id, thread_id, title FROM tracked_items
+         WHERE id = ? OR thread_id = ? OR source_id = ?
+         ORDER BY detected_at DESC LIMIT 1`,
+      )
+      .get(emailId, emailId, emailId) as
+      | {
+          id: string;
+          metadata: string | null;
+          source_id: string | null;
+          thread_id: string | null;
+          title: string | null;
+        }
+      | undefined;
+    if (!row) return null;
+
+    let parsed: {
+      account?: string;
+      sender?: string;
+      sign?: SignDetection;
+      [k: string]: unknown;
+    } = {};
+    if (row.metadata) {
+      try {
+        parsed = JSON.parse(row.metadata);
+      } catch {
+        parsed = {};
+      }
+    }
+    if (parsed.sign?.signUrl) return parsed.sign;
+
+    if (!opts.gmailOps || !parsed.account) return null;
+
+    const raw = row.source_id || row.thread_id || '';
+    const gmailId = raw.startsWith('gmail:')
+      ? raw.slice('gmail:'.length)
+      : raw;
+
+    let body = getCachedEmailBody(emailId);
+    if (!body) {
+      try {
+        body = await opts.gmailOps.getMessageBody(parsed.account, gmailId);
+        if (body) cacheEmailBody(emailId, body);
+      } catch (err) {
+        logger.warn(
+          { emailId, err, component: 'mini-app' },
+          'sign-resolve: body fetch failed',
+        );
+        return null;
+      }
+    }
+    if (!body) return null;
+
+    const detection = detectSignUrl({
+      from: parsed.sender ?? '',
+      subject: row.title ?? '',
+      body,
+    });
+    if (!detection) return null;
+
+    const updated = { ...parsed, sign: detection };
+    opts.db
+      .prepare(`UPDATE tracked_items SET metadata = ? WHERE id = ?`)
+      .run(JSON.stringify(updated), row.id);
+
+    return detection;
+  }
+
+  // Sign redirect — resolves the signing URL (cached or lazy-fetched) and
+  // 302s to the vendor page. Never signs anything itself; the vendor
+  // still requires the user to review + click Sign on their page.
+  app.get('/api/email/:emailId/sign', async (req, res) => {
+    const { emailId } = req.params;
+    try {
+      const detection = await resolveSignDetection(emailId);
+      if (detection) {
+        res.redirect(302, detection.signUrl);
+        return;
+      }
+      // Fallback: open the full email so the user can click the link themselves.
+      res.redirect(302, `/email/${encodeURIComponent(emailId)}`);
+    } catch (err) {
+      logger.warn(
+        { emailId, err, component: 'mini-app' },
+        'sign-redirect failed',
+      );
+      res.redirect(302, `/email/${encodeURIComponent(emailId)}`);
+    }
   });
 
   // --- Archive email API ---
