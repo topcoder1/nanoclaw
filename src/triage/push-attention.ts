@@ -8,6 +8,11 @@ export interface PushAttentionInput {
   title: string;
   reason: string;
   sender: string;
+  // When the caller has already resolved the vendor's signing URL from the
+  // email body, pass it here. The Sign button will link straight to the
+  // vendor (DocuSign/Adobe Sign/etc.) instead of routing through the
+  // mini-app — skips the Cloudflare Access prompt on tap.
+  signUrl?: string;
 }
 
 type InlineButton =
@@ -53,10 +58,13 @@ export async function pushAttentionItem(
     const base = MINI_APP_URL.replace(/\/$/, '');
     const topRow: InlineButton[] = [];
     if (isSignInvite({ from: input.sender, subject: input.title })) {
-      topRow.push({
-        text: '✍ Sign',
-        url: `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`,
-      });
+      // Prefer the vendor URL directly when the caller resolved it — the
+      // mini-app route sits behind Cloudflare Access and forces a login
+      // prompt on every tap once the session cookie expires.
+      const signUrl =
+        input.signUrl ??
+        `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`;
+      topRow.push({ text: '✍ Sign', url: signUrl });
     }
     topRow.push({
       text: '🌐 Full Email',

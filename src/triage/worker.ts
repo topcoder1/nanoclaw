@@ -186,6 +186,12 @@ export async function triageEmail(
     if (chatId) {
       try {
         const { pushAttentionItem } = await import('./push-attention.js');
+        const { detectSignUrl } = await import('./sign-detector.js');
+        const detected = detectSignUrl({
+          from: input.sender,
+          subject: input.subject,
+          body: input.emailBody,
+        });
         await pushAttentionItem({
           chatId,
           itemId: input.trackedItemId,
@@ -195,6 +201,7 @@ export async function triageEmail(
             result.decision.reasons[0] ??
             '(no reason)',
           sender: input.sender,
+          signUrl: detected?.signUrl,
         });
         // Mark pushed so dashboards + invariants know this item was
         // surfaced to the user. Before, the state stayed 'queued' forever
