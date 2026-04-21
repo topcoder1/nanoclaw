@@ -23,6 +23,16 @@ export interface CreateDraftReplyInput {
   body: string;
 }
 
+export interface MessageStub {
+  id: string;
+  threadId: string;
+}
+
+export interface ModifyLabelsInput {
+  add?: string[];
+  remove?: string[];
+}
+
 export interface DraftReplyContext {
   body: string;
   incoming: {
@@ -60,6 +70,21 @@ export interface GmailOps {
     account: string,
     input: CreateDraftReplyInput,
   ): Promise<{ draftId: string }>;
+  listMessagesByLabel(
+    account: string,
+    labelName: string,
+    max: number,
+  ): Promise<MessageStub[]>;
+  getMessageHeaders(
+    account: string,
+    messageId: string,
+    headerNames: string[],
+  ): Promise<Record<string, string>>;
+  modifyMessageLabels(
+    account: string,
+    messageId: string,
+    input: ModifyLabelsInput,
+  ): Promise<void>;
 }
 
 export interface GmailOpsProvider {
@@ -78,6 +103,18 @@ export interface GmailOpsProvider {
   sendDraft(draftId: string): Promise<void>;
   sendEmail(input: SendEmailInput): Promise<void>;
   createDraftReply(input: CreateDraftReplyInput): Promise<{ draftId: string }>;
+  listMessagesByLabel?(
+    labelName: string,
+    max: number,
+  ): Promise<MessageStub[]>;
+  getMessageHeaders?(
+    messageId: string,
+    headerNames: string[],
+  ): Promise<Record<string, string>>;
+  modifyMessageLabels?(
+    messageId: string,
+    input: ModifyLabelsInput,
+  ): Promise<void>;
 }
 
 export function deriveLocalPart(account: string): string | null {
@@ -217,5 +254,47 @@ export class GmailOpsRouter implements GmailOps {
     input: CreateDraftReplyInput,
   ): Promise<{ draftId: string }> {
     return this.getChannel(account).createDraftReply(input);
+  }
+
+  async listMessagesByLabel(
+    account: string,
+    labelName: string,
+    max: number,
+  ): Promise<MessageStub[]> {
+    const ch = this.getChannel(account);
+    if (!ch.listMessagesByLabel) {
+      throw new Error(
+        `Gmail channel for ${account} does not support listMessagesByLabel`,
+      );
+    }
+    return ch.listMessagesByLabel(labelName, max);
+  }
+
+  async getMessageHeaders(
+    account: string,
+    messageId: string,
+    headerNames: string[],
+  ): Promise<Record<string, string>> {
+    const ch = this.getChannel(account);
+    if (!ch.getMessageHeaders) {
+      throw new Error(
+        `Gmail channel for ${account} does not support getMessageHeaders`,
+      );
+    }
+    return ch.getMessageHeaders(messageId, headerNames);
+  }
+
+  async modifyMessageLabels(
+    account: string,
+    messageId: string,
+    input: ModifyLabelsInput,
+  ): Promise<void> {
+    const ch = this.getChannel(account);
+    if (!ch.modifyMessageLabels) {
+      throw new Error(
+        `Gmail channel for ${account} does not support modifyMessageLabels`,
+      );
+    }
+    return ch.modifyMessageLabels(messageId, input);
   }
 }

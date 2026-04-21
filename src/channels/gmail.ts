@@ -11,6 +11,8 @@ import type {
   EmailMeta,
   SendEmailInput,
   CreateDraftReplyInput,
+  MessageStub,
+  ModifyLabelsInput,
 } from '../gmail-ops.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import type { DraftReplyContext } from '../gmail-ops.js';
@@ -59,6 +61,7 @@ export class GmailChannel implements Channel {
 
   private accountAlias: string;
   private credDir: string;
+  private labelIdCache = new Map<string, string>();
 
   constructor(
     opts: GmailChannelOpts,
@@ -719,6 +722,87 @@ export class GmailChannel implements Channel {
     await this.gmail.users.messages.send({
       userId: 'me',
       requestBody: { raw },
+    });
+  }
+
+  private async resolveLabelId(labelName: string): Promise<string | null> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    // System labels (INBOX, UNREAD, etc.) are their own ids and never
+    // appear in users.labels.list results as resolvable name→id pairs.
+    if (labelName === labelName.toUpperCase() && !labelName.includes('/')) {
+      return labelName;
+    }
+    const cached = this.labelIdCache.get(labelName);
+    if (cached) return cached;
+
+    const res = await this.gmail.users.labels.list({ userId: 'me' });
+    const labels = res.data.labels || [];
+    for (const l of labels) {
+      if (l.name && l.id) this.labelIdCache.set(l.name, l.id);
+    }
+    return this.labelIdCache.get(labelName) ?? null;
+  }
+
+  async listMessagesByLabel(
+    labelName: string,
+    max: number,
+  ): Promise<MessageStub[]> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const q = `label:"${labelName.replace(/"/g, '\\"')}"`;
+    const res = await this.gmail.users.messages.list({
+      userId: 'me',
+      q,
+      maxResults: max,
+    });
+    const msgs = res.data.messages || [];
+    const out: MessageStub[] = [];
+    for (const m of msgs) {
+      if (m.id && m.threadId) out.push({ id: m.id, threadId: m.threadId });
+    }
+    return out;
+  }
+
+  async getMessageHeaders(
+    messageId: string,
+    headerNames: string[],
+  ): Promise<Record<string, string>> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const res = await this.gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'metadata',
+      metadataHeaders: headerNames,
+    });
+    const headers = res.data.payload?.headers || [];
+    const out: Record<string, string> = {};
+    const wanted = new Set(headerNames.map((h) => h.toLowerCase()));
+    for (const h of headers) {
+      if (!h.name || !h.value) continue;
+      if (wanted.has(h.name.toLowerCase())) out[h.name] = h.value;
+    }
+    return out;
+  }
+
+  async modifyMessageLabels(
+    messageId: string,
+    input: ModifyLabelsInput,
+  ): Promise<void> {
+    if (!this.gmail) throw new Error('Gmail not connected');
+    const addIds: string[] = [];
+    for (const name of input.add ?? []) {
+      const id = await this.resolveLabelId(name);
+      if (id) addIds.push(id);
+    }
+    const removeIds: string[] = [];
+    for (const name of input.remove ?? []) {
+      const id = await this.resolveLabelId(name);
+      if (id) removeIds.push(id);
+    }
+    if (addIds.length === 0 && removeIds.length === 0) return;
+    await this.gmail.users.messages.modify({
+      userId: 'me',
+      id: messageId,
+      requestBody: { addLabelIds: addIds, removeLabelIds: removeIds },
     });
   }
 

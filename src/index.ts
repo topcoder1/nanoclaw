@@ -1871,6 +1871,16 @@ async function main(): Promise<void> {
     startReconcilerHealthWatcher();
     logger.info('Reconciler health watcher started');
 
+    if (process.env.JUNK_REAPER_ENABLED !== 'false') {
+      const { startJunkReaper } = await import('./triage/junk-reaper.js');
+      startJunkReaper({
+        db: getDb(),
+        gmailOps: gmailOpsRouter,
+        dryRun: process.env.JUNK_REAPER_DRY_RUN === 'true',
+      });
+      logger.info('Junk-reaper started');
+    }
+
     const { startSnoozeScheduler } =
       await import('./triage/snooze-scheduler.js');
     stopSnooze = startSnoozeScheduler({ db: getDb(), eventBus });
