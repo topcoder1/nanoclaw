@@ -20,7 +20,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
+import { _initTestDatabase, _closeDatabase, getDb, runMigrations } from '../db.js';
 import {
   handleArchive,
   handleDismiss,
@@ -471,5 +471,58 @@ describe('muted-threads-never-visible', () => {
       INSERT INTO tracked_items (id, thread_id, state) VALUES ('x', 'T1', 'pushed');
     `);
     expect(mutedThreadsNeverVisible(db).ok).toBe(true);
+  });
+});
+
+describe('sign_ceremonies invariants', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db);
+  });
+
+  it('terminal-state ↔ completed_at NOT NULL (enforced at DB)', () => {
+    // signed requires signed_pdf_path; test cancelled (terminal, no PDF needed)
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at)
+           VALUES ('x1', 'e', 'docusign', 'x', 'cancelled', ?, ?)`,
+        )
+        .run(Date.now(), Date.now()),
+    ).toThrow(/CHECK/);
+  });
+
+  it('non-terminal state cannot have completed_at', () => {
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
+           VALUES ('x2', 'e', 'docusign', 'x', 'detected', ?, ?, ?)`,
+        )
+        .run(Date.now(), Date.now(), Date.now()),
+    ).toThrow(/CHECK/);
+  });
+
+  it('signed requires signed_pdf_path', () => {
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
+           VALUES ('x3', 'e', 'docusign', 'x', 'signed', ?, ?, ?)`,
+        )
+        .run(Date.now(), Date.now(), Date.now()),
+    ).toThrow(/CHECK/);
+  });
+
+  it('failed requires failure_reason', () => {
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
+           VALUES ('x4', 'e', 'docusign', 'x', 'failed', ?, ?, ?)`,
+        )
+        .run(Date.now(), Date.now(), Date.now()),
+    ).toThrow(/CHECK/);
   });
 });
