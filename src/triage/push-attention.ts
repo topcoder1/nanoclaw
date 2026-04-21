@@ -8,6 +8,8 @@ export interface PushAttentionInput {
   title: string;
   reason: string;
   sender: string;
+  /** When set, renders callback_data Sign/Cancel buttons instead of the legacy URL button. */
+  signerCeremonyId?: string;
 }
 
 type InlineButton =
@@ -45,17 +47,27 @@ export async function pushAttentionItem(
     ],
   ];
 
-  if (
-    MINI_APP_URL &&
-    isSignInvite({ from: input.sender, subject: input.title })
-  ) {
-    const base = MINI_APP_URL.replace(/\/$/, '');
-    keyboard.unshift([
-      {
-        text: '✍ Sign',
-        url: `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`,
-      },
-    ]);
+  if (isSignInvite({ from: input.sender, subject: input.title })) {
+    if (input.signerCeremonyId) {
+      keyboard.unshift([
+        {
+          text: '✍ Sign',
+          callback_data: `sign:approve:${input.signerCeremonyId}`,
+        },
+        {
+          text: '✕ Cancel Sign',
+          callback_data: `sign:cancel:${input.signerCeremonyId}`,
+        },
+      ]);
+    } else if (MINI_APP_URL) {
+      const base = MINI_APP_URL.replace(/\/$/, '');
+      keyboard.unshift([
+        {
+          text: '✍ Sign',
+          url: `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`,
+        },
+      ]);
+    }
   }
 
   await sendTelegramMessage(input.chatId, text, {
