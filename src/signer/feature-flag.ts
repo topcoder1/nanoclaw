@@ -1,3 +1,5 @@
+import { readEnvValue } from '../env.js';
+
 export function isSignerAutoSignEnabled(): boolean {
-  return process.env.SIGNER_AUTO_SIGN_ENABLED === 'true';
+  return readEnvValue('SIGNER_AUTO_SIGN_ENABLED') === 'true';
 }
