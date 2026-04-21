@@ -4,6 +4,7 @@ import type { AutoApprovalTimer } from './auto-approval.js';
 import type { StatusBarManager } from './status-bar.js';
 import type { GmailOps } from './gmail-ops.js';
 import type { DraftEnrichmentWatcher } from './draft-enrichment.js';
+import type { EventBus } from './event-bus.js';
 import { getDraftIdForThread } from './draft-enrichment.js';
 import type Database from 'better-sqlite3';
 import { MINI_APP_URL } from './config.js';
@@ -55,6 +56,7 @@ export interface CallbackRouterDeps {
    * container; false falls back to enqueuing a new container run.
    */
   injectUserReply?: (jid: string, text: string) => boolean;
+  bus?: EventBus;
 }
 
 /**
@@ -80,6 +82,30 @@ export async function handleCallback(
 
   try {
     switch (action) {
+      case 'sign': {
+        const subAction = entityId;
+        const ceremonyId = extra;
+        const reason = extra2 || 'user_dismissed';
+        if (subAction === 'approve') {
+          deps.bus?.emit('sign.approved', {
+            type: 'sign.approved',
+            source: 'callback-router',
+            timestamp: Date.now(),
+            payload: { ceremonyId, userId: query.senderName },
+          });
+        } else if (subAction === 'cancel') {
+          deps.bus?.emit('sign.cancelled', {
+            type: 'sign.cancelled',
+            source: 'callback-router',
+            timestamp: Date.now(),
+            payload: { ceremonyId, reason },
+          });
+        } else {
+          logger.warn({ subAction, data: query.data }, 'Unknown sign sub-action');
+        }
+        break;
+      }
+
       case 'archive': {
         if (channel?.editMessageButtons) {
           await channel.editMessageButtons(query.chatJid, query.messageId, [
