@@ -196,6 +196,11 @@ import { runVerifierSweep } from './memory/shared/verifier.js';
 import { regenerateIndex } from './memory/shared/store.js';
 import { ensureMemoryDirs } from './memory/shared/paths.js';
 import { NANOCLAW_MEMORY_EXTRACT, NANOCLAW_MEMORY_VERIFY } from './env.js';
+import { startSigner, fetchDocTextViaExecutor } from './signer/index.js';
+import { isSignerAutoSignEnabled } from './signer/feature-flag.js';
+import { PlaywrightClient } from './browser/playwright-client.js';
+import { resolveUtilityModel } from './llm/utility.js';
+import { generateText } from 'ai';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -1930,6 +1935,64 @@ async function main(): Promise<void> {
     ];
     channel.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
   });
+
+  // --- Signer module ---
+  if (isSignerAutoSignEnabled()) {
+    const signerClient = new PlaywrightClient();
+
+    const signerLlm = async (prompt: string) => {
+      const model = resolveUtilityModel();
+      const result = await generateText({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        maxOutputTokens: 1200,
+      });
+      const trimmed = result.text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return null;
+      }
+    };
+
+    const mainGroupRoot = path.join(GROUPS_DIR, 'main');
+    const mainChatId =
+      Object.keys(registeredGroups).find((jid) => registeredGroups[jid]?.isMain) ??
+      process.env.MAIN_GROUP_CHAT_ID ??
+      '';
+
+    startSigner({
+      db: getDb(),
+      bus: eventBus,
+      groupRoot: mainGroupRoot,
+      chatId: mainChatId,
+      connectBrowser: async () => {
+        await signerClient.connect();
+        return signerClient.getBrowser();
+      },
+      fetchDocText: async (signUrl: string) => {
+        await signerClient.connect();
+        return fetchDocTextViaExecutor({
+          browser: signerClient.getBrowser(),
+          vendor: 'docusign',
+          signUrl,
+        });
+      },
+      llm: signerLlm,
+      sendText: async (chatId, text, opts) => {
+        const { sendTelegramMessage } = await import('./channels/telegram.js');
+        return await sendTelegramMessage(chatId, text, opts as any);
+      },
+      sendDocument: async (chatId, filePath, opts) => {
+        const { sendTelegramDocument } = await import('./channels/telegram.js');
+        await sendTelegramDocument(chatId, filePath, opts as any);
+      },
+      sendPhoto: async (chatId, filePath, opts) => {
+        const { sendTelegramPhoto } = await import('./channels/telegram.js');
+        await sendTelegramPhoto(chatId, filePath, opts as any);
+      },
+    });
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
