@@ -436,15 +436,24 @@ export class GmailChannel implements Channel {
   }
 
   /**
-   * Check current INBOX membership for a thread.
-   * Returns 'in' if any message in the thread still has INBOX,
-   * 'out' if it exists but no message has INBOX,
-   * 'missing' if the thread is not found (deleted / 404).
-   * Used by the reconciler to catch out-of-band archives in Gmail.
+   * Check current resolution state for a thread.
+   *   'in'           — at least one message still has INBOX, and (if
+   *                    `sinceMs` given) no user reply after that point.
+   *   'user-replied' — inbox-active, but the user has sent a message in
+   *                    this thread after `sinceMs`. Treated as "handled"
+   *                    by the reconciler so attention cards clear after
+   *                    the user replies in Gmail directly without
+   *                    archiving.
+   *   'out'          — thread exists but no message has INBOX (archived).
+   *   'missing'      — thread not found (deleted / 404).
+   *
+   * `sinceMs` is only consulted for the user-reply check; when omitted
+   * the method behaves like the original 3-value API.
    */
   async getThreadInboxStatus(
     threadId: string,
-  ): Promise<'in' | 'out' | 'missing'> {
+    sinceMs?: number,
+  ): Promise<'in' | 'out' | 'missing' | 'user-replied'> {
     if (!this.gmail) throw new Error('Gmail not connected');
     try {
       const res = await this.gmail.users.threads.get({
@@ -453,10 +462,23 @@ export class GmailChannel implements Channel {
         format: 'metadata',
       });
       const messages = res.data.messages || [];
+      let inInbox = false;
+      let userReplied = false;
       for (const m of messages) {
-        if ((m.labelIds || []).includes('INBOX')) return 'in';
+        const labels = m.labelIds || [];
+        if (labels.includes('INBOX')) inInbox = true;
+        if (
+          sinceMs !== undefined &&
+          labels.includes('SENT') &&
+          m.internalDate &&
+          Number(m.internalDate) > sinceMs
+        ) {
+          userReplied = true;
+        }
       }
-      return 'out';
+      if (!inInbox) return 'out';
+      if (userReplied) return 'user-replied';
+      return 'in';
     } catch (err: unknown) {
       const status = (err as { code?: number; status?: number })?.code;
       if (status === 404) return 'missing';

@@ -100,6 +100,7 @@ interface QueuedRow {
   id: string;
   thread_id: string;
   metadata: string | null;
+  detected_at: number;
   state?: string;
 }
 
@@ -139,7 +140,7 @@ export async function reconcileOnce(
   //     archived after replying or otherwise handling in Gmail
   const rows = deps.db
     .prepare(
-      `SELECT id, thread_id, metadata, state FROM tracked_items
+      `SELECT id, thread_id, metadata, detected_at, state FROM tracked_items
        WHERE state IN ('queued','pushed','pending','held')
          AND source = 'gmail'
          AND thread_id IS NOT NULL
@@ -169,7 +170,7 @@ export async function reconcileOnce(
   const resolveStmt = deps.db.prepare(
     `UPDATE tracked_items
      SET state = 'resolved',
-         resolution_method = 'gmail:external',
+         resolution_method = ?,
          resolved_at = ?
      WHERE state IN ('queued','pushed','pending','held') AND id = ?`,
   );
@@ -192,7 +193,11 @@ export async function reconcileOnce(
     result.checked++;
     try {
       const status = await withTimeout(
-        deps.gmailOps.getThreadInboxStatus(account, row.thread_id),
+        deps.gmailOps.getThreadInboxStatus(
+          account,
+          row.thread_id,
+          row.detected_at,
+        ),
         deps.gmailCallTimeoutMs ?? GMAIL_CALL_TIMEOUT_MS,
         `getThreadInboxStatus(${account}, ${row.thread_id})`,
       );
@@ -211,11 +216,18 @@ export async function reconcileOnce(
         continue;
       }
       const wasMissing = missingSeen.has(row.thread_id);
-      // Either status === 'out', or 'missing' seen twice in a row.
+      // status is one of: 'out', 'user-replied', or 'missing' (seen twice).
       missingSeen.delete(row.thread_id);
-      resolveStmt.run(now, row.id);
+      const method =
+        status === 'user-replied' ? 'gmail:user-replied' : 'gmail:external';
+      resolveStmt.run(method, now, row.id);
       result.resolved++;
-      if (status === 'missing' && wasMissing) {
+      if (status === 'user-replied') {
+        log.info(
+          { itemId: row.id, threadId: row.thread_id, account },
+          'Gmail reconciler: user replied in thread → resolved',
+        );
+      } else if (status === 'missing' && wasMissing) {
         log.info(
           { itemId: row.id, threadId: row.thread_id, account },
           'Gmail reconciler: thread missing twice in a row → resolved',

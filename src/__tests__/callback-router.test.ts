@@ -259,6 +259,66 @@ describe('handleCallback', () => {
     );
   });
 
+  it('confirm_archive surfaces a message when entry is missing instead of failing silently', async () => {
+    const deps = makeDeps();
+    (deps.archiveTracker.getUnarchived as any).mockReturnValue([]);
+    (deps.archiveTracker.getByEmailId as any).mockReturnValue(null);
+
+    await handleCallback(makeQuery('confirm_archive:unknown'), deps);
+
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining("Couldn't find"),
+      [],
+    );
+    expect(deps.gmailOps!.archiveThread).not.toHaveBeenCalled();
+  });
+
+  it('confirm_archive reports "already archived" when entry is archived', async () => {
+    const deps = makeDeps();
+    (deps.archiveTracker.getUnarchived as any).mockReturnValue([]);
+    (deps.archiveTracker.getByEmailId as any).mockReturnValue({
+      email_id: 'email1',
+      thread_id: 'thread1',
+      account: 'personal',
+      action_taken: 'replied',
+      acted_at: new Date().toISOString(),
+      archived_at: new Date().toISOString(),
+    });
+
+    await handleCallback(makeQuery('confirm_archive:email1'), deps);
+
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining('Already archived'),
+      [],
+    );
+  });
+
+  it('expand surfaces a retry when the body cannot be fetched', async () => {
+    const deps = makeDeps();
+    (deps.gmailOps!.getMessageBody as any).mockResolvedValue(null);
+    (deps.gmailOps as any).getMessageMeta = vi.fn().mockResolvedValue(null);
+
+    await handleCallback(makeQuery('expand:msg-bad:personal'), deps);
+
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      expect.stringContaining("Couldn't load"),
+      expect.arrayContaining([
+        expect.objectContaining({
+          callbackData: 'retry:expand:msg-bad:personal',
+        }),
+      ]),
+    );
+  });
+
   it('retry_archive legacy alias still re-attempts archiveThread', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('retry_archive:email1'), deps);
