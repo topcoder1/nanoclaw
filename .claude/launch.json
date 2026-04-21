@@ -24,6 +24,14 @@
       "cwd": "/Users/topcoder1/dev/nanoclaw"
     },
     {
+      "name": "miniapp-preview",
+      "description": "Standalone mini-app preview with seeded in-memory DB. Used for local UI verification of Attention queue changes.",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "scripts/preview-miniapp.ts"],
+      "autoPort": true,
+      "cwd": "/Users/topcoder1/dev/nanoclaw/.claude/worktrees/laughing-newton-2c85bc"
+    },
+    {
       "name": "miniapp-tunnel",
       "description": "Cloudflare tunnel exposing localhost:3847 as https://miniapp.inboxsuperpilot.com.",
       "runtimeExecutable": "cloudflared",
