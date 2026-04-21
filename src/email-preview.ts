@@ -27,6 +27,31 @@ export function truncatePreview(text: string, maxChars: number): string {
 }
 
 /**
+ * Prepare a preview for inline channel rendering. Strips HTML tags and
+ * decodes common entities so transactional HTML-only emails don't blow
+ * up Telegram's HTML parse_mode (which only allows b/i/u/s/code/pre/a).
+ */
+export function plaintextPreview(body: string, maxChars: number): string {
+  const stripped = body
+    // Remove script/style blocks including contents.
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    // Convert <br> and </p> to newlines before stripping all tags.
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    // Decode a small set of common entities — good enough for previews.
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return truncatePreview(stripped, maxChars);
+}
+
+/**
  * Get email body from cache, or return null if not cached / expired.
  */
 export function getCachedEmailBody(emailId: string): string | null {

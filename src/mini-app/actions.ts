@@ -82,9 +82,19 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
   function lookupItem(
     id: string,
   ): { id: string; thread_id: string | null; account: string | null } | null {
+    // The URL :id is usually the Gmail thread_id (that's what the Telegram
+    // card's "Full Email" button passes through), not nanoclaw's internal
+    // tracked_items.id. Match all three keys so action endpoints work
+    // regardless of which identifier the caller has. Mirrors the lookup in
+    // mini-app /email/:emailId route.
+    const withGmailPrefix = id.startsWith('gmail:') ? id : 'gmail:' + id;
     const row = deps.db
-      .prepare('SELECT id, thread_id, metadata FROM tracked_items WHERE id = ?')
-      .get(id) as
+      .prepare(
+        `SELECT id, thread_id, metadata FROM tracked_items
+         WHERE id = ? OR thread_id = ? OR source_id = ? OR source_id = ?
+         ORDER BY detected_at DESC LIMIT 1`,
+      )
+      .get(id, id, id, withGmailPrefix) as
       | { id: string; thread_id: string | null; metadata: string | null }
       | undefined;
     if (!row) return null;
@@ -216,7 +226,7 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
 
     const row = deps.db
       .prepare('SELECT source_id FROM tracked_items WHERE id = ?')
-      .get(req.params.id) as { source_id: string | null } | undefined;
+      .get(item.id) as { source_id: string | null } | undefined;
     const rawGmailId = row?.source_id ?? null;
     const gmailId = rawGmailId?.startsWith('gmail:')
       ? rawGmailId.slice('gmail:'.length)
@@ -256,7 +266,7 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        req.params.id,
+        item.id,
         result.method,
         result.url ?? null,
         result.status,

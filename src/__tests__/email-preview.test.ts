@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   truncatePreview,
+  plaintextPreview,
   cacheEmailBody,
   getCachedEmailBody,
   cacheEmailMeta,
@@ -26,6 +27,42 @@ describe('truncatePreview', () => {
     const text = 'a'.repeat(600);
     const preview = truncatePreview(text, 500);
     expect(preview.length).toBeLessThanOrEqual(550);
+  });
+});
+
+describe('plaintextPreview', () => {
+  it('strips HTML tags from transactional email bodies', () => {
+    const html =
+      '<html><body><p>Hello <b>topcoder1</b>,</p><p>Your order is pending.</p></body></html>';
+    const preview = plaintextPreview(html, 500);
+    expect(preview).not.toMatch(/<[a-z]/i);
+    expect(preview).toContain('Hello');
+    expect(preview).toContain('Your order is pending');
+  });
+
+  it('decodes common HTML entities', () => {
+    const html = 'Tom &amp; Jerry &lt;3 &nbsp; fun';
+    expect(plaintextPreview(html, 500)).toBe('Tom & Jerry <3   fun');
+  });
+
+  it('drops script/style content entirely', () => {
+    const html =
+      '<html><head><style>.x{color:red}</style></head><body><script>alert(1)</script>visible</body></html>';
+    const preview = plaintextPreview(html, 500);
+    expect(preview).not.toMatch(/color:red|alert/);
+    expect(preview).toContain('visible');
+  });
+
+  it('converts <br> to newlines so preview keeps some structure', () => {
+    const html = 'line1<br>line2<br/>line3';
+    expect(plaintextPreview(html, 500)).toBe('line1\nline2\nline3');
+  });
+
+  it('still truncates at the requested char cap', () => {
+    const html = '<p>' + 'word '.repeat(400) + '</p>';
+    const preview = plaintextPreview(html, 100);
+    expect(preview.length).toBeLessThanOrEqual(150);
+    expect(preview).toContain('— truncated');
   });
 });
 

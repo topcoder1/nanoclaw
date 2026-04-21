@@ -22,7 +22,7 @@ export function resolveFullEmailUrl(input: FullEmailUrlInput): string {
   return `${base}/email/${encodeURIComponent(input.emailId)}?account=${encodeURIComponent(input.account)}`;
 }
 import {
-  truncatePreview,
+  plaintextPreview,
   getCachedEmailBody,
   cacheEmailBody,
   cacheEmailMeta,
@@ -263,7 +263,7 @@ export async function handleCallback(
           break;
         }
         if (channel?.editMessageTextAndButtons) {
-          const preview = truncatePreview(body, 800);
+          const preview = plaintextPreview(body, 800);
           const actedExpand = deps.archiveTracker.getByEmailId
             ? deps.archiveTracker.getByEmailId(entityId)
             : null;
@@ -308,7 +308,7 @@ export async function handleCallback(
       case 'collapse': {
         const body = getCachedEmailBody(entityId);
         if (body && channel?.editMessageTextAndButtons) {
-          const summary = truncatePreview(body, 300);
+          const summary = plaintextPreview(body, 300);
           // collapse callback carries account as `extra` (collapse:entityId:account).
           // Fall back to acted_emails lookup for legacy callbacks that lack it.
           const actedCollapse = deps.archiveTracker.getByEmailId
