@@ -183,6 +183,43 @@ describe('gmail-reconciler', () => {
     expect(missingSeen.has('thread-flap')).toBe(true);
   });
 
+  it('resolves items when the user replied in the thread after detection', async () => {
+    // Dmitrii-style case: email lands in attention queue, user replies in
+    // Gmail directly without archiving. Thread stays in INBOX but the
+    // reply is a clear "handled" signal.
+    insertTrackedItem({
+      ...makeGmailItem('item-replied', 'thread-replied', OLD),
+      state: 'pushed',
+      pushed_at: OLD,
+    });
+    const gmailOps = {
+      getThreadInboxStatus: vi.fn(async () => 'user-replied' as const),
+    };
+
+    const result = await reconcileOnce({
+      db: getDb(),
+      gmailOps,
+      now: () => now,
+      missingSeen: new Set(),
+    });
+
+    expect(result.resolved).toBe(1);
+    // sinceMs must be forwarded so the Gmail layer can filter out
+    // pre-existing replies.
+    expect(gmailOps.getThreadInboxStatus).toHaveBeenCalledWith(
+      'topcoder1@gmail.com',
+      'thread-replied',
+      OLD,
+    );
+    const row = getDb()
+      .prepare(
+        'SELECT state, resolution_method FROM tracked_items WHERE id = ?',
+      )
+      .get('item-replied') as { state: string; resolution_method: string };
+    expect(row.state).toBe('resolved');
+    expect(row.resolution_method).toBe('gmail:user-replied');
+  });
+
   it('reconciles attention-queue items the same way', async () => {
     insertTrackedItem({
       ...makeGmailItem('item-att', 'thread-att', OLD),

@@ -101,45 +101,84 @@ export async function handleCallback(
       case 'confirm_archive': {
         const unarchived = deps.archiveTracker.getUnarchived();
         const email = unarchived.find((e) => e.email_id === entityId);
-        if (email && deps.gmailOps) {
-          try {
-            await deps.gmailOps.archiveThread(email.account, email.thread_id);
-            deps.archiveTracker.markArchived(entityId, email.action_taken);
-            if (channel?.editMessageTextAndButtons) {
-              await channel.editMessageTextAndButtons(
-                query.chatJid,
-                query.messageId,
-                '✅ Archived',
-                [],
-              );
-            }
-          } catch (archiveErr) {
-            logger.warn(
-              { err: String(archiveErr), entityId, account: email.account },
-              'Archive failed, showing retry',
+        if (!email) {
+          // No `acted_emails` row for this id. Most common cause: the card's
+          // emailId didn't match the thread_id recorded at post time, or the
+          // email was already archived in a prior action. Either way, fall
+          // back to looking up the tracker record so the click isn't silent.
+          const tracked = deps.archiveTracker.getByEmailId?.(entityId) ?? null;
+          logger.warn(
+            {
+              entityId,
+              alreadyArchived: Boolean(tracked?.archived_at),
+            },
+            'confirm_archive: no unarchived entry for this id',
+          );
+          if (channel?.editMessageTextAndButtons) {
+            const label = tracked?.archived_at
+              ? '✅ Already archived.'
+              : "⚠️ Couldn't find this email to archive. It may have been cleared already.";
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              label,
+              [],
             );
-            if (channel?.editMessageTextAndButtons) {
-              await channel.editMessageTextAndButtons(
-                query.chatJid,
-                query.messageId,
-                "⚠️ Couldn't archive. Try again later.",
-                [
-                  {
-                    label: '🔄 Retry',
-                    // Route through the unified retry: dispatcher so all
-                    // retry flows share one code path. Legacy retry_archive
-                    // case below remains as a back-compat alias.
-                    callbackData: `retry:confirm_archive:${entityId}`,
-                    style: 'primary',
-                  },
-                  {
-                    label: '❌ Dismiss',
-                    callbackData: `dismiss:${entityId}`,
-                    style: 'secondary',
-                  },
-                ],
-              );
-            }
+          }
+          break;
+        }
+        if (!deps.gmailOps) {
+          logger.warn(
+            { entityId },
+            'confirm_archive: gmailOps unavailable, cannot archive',
+          );
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              '⚠️ Gmail not connected — cannot archive right now.',
+              [],
+            );
+          }
+          break;
+        }
+        try {
+          await deps.gmailOps.archiveThread(email.account, email.thread_id);
+          deps.archiveTracker.markArchived(entityId, email.action_taken);
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              '✅ Archived',
+              [],
+            );
+          }
+        } catch (archiveErr) {
+          logger.warn(
+            { err: String(archiveErr), entityId, account: email.account },
+            'Archive failed, showing retry',
+          );
+          if (channel?.editMessageTextAndButtons) {
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              "⚠️ Couldn't archive. Try again later.",
+              [
+                {
+                  label: '🔄 Retry',
+                  // Route through the unified retry: dispatcher so all
+                  // retry flows share one code path. Legacy retry_archive
+                  // case below remains as a back-compat alias.
+                  callbackData: `retry:confirm_archive:${entityId}`,
+                  style: 'primary',
+                },
+                {
+                  label: '❌ Dismiss',
+                  callbackData: `dismiss:${entityId}`,
+                  style: 'secondary',
+                },
+              ],
+            );
           }
         }
         break;
@@ -187,7 +226,43 @@ export async function handleCallback(
             if (body) cacheEmailBody(entityId, body);
           }
         }
-        if (body && channel?.editMessageTextAndButtons) {
+        if (!body) {
+          // Body couldn't be fetched — don't leave the button looking
+          // unresponsive. Surface a retry so transient Gmail issues
+          // (token expiry, network blip, empty payload) aren't a dead end.
+          logger.warn(
+            { entityId, account, hasGmailOps: Boolean(deps.gmailOps) },
+            'expand: no body available',
+          );
+          if (channel?.editMessageTextAndButtons) {
+            const reason = !deps.gmailOps
+              ? '⚠️ Gmail not connected — cannot expand.'
+              : !account
+                ? '⚠️ Missing account on this card — cannot expand.'
+                : "⚠️ Couldn't load this email. Try again.";
+            await channel.editMessageTextAndButtons(
+              query.chatJid,
+              query.messageId,
+              reason,
+              deps.gmailOps && account
+                ? [
+                    {
+                      label: '🔄 Retry',
+                      callbackData: `retry:expand:${entityId}:${account}`,
+                      style: 'primary',
+                    },
+                    {
+                      label: '❌ Dismiss',
+                      callbackData: `dismiss_failure:${entityId}`,
+                      style: 'secondary',
+                    },
+                  ]
+                : [],
+            );
+          }
+          break;
+        }
+        if (channel?.editMessageTextAndButtons) {
           const preview = truncatePreview(body, 800);
           const actedExpand = deps.archiveTracker.getByEmailId
             ? deps.archiveTracker.getByEmailId(entityId)
