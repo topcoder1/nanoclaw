@@ -1,0 +1,11 @@
+CONSULTING AGREEMENT
+
+This Consulting Agreement is entered into on April 20, 2026 between Acme Corp
+("Company") and Alice Example ("Consultant").
+
+1. Services. Consultant agrees to provide software development services for a
+   period of 6 months beginning May 1, 2026.
+
+2. Compensation. Company will pay Consultant $150 per hour.
+
+3. Term. This agreement terminates on October 31, 2026.
