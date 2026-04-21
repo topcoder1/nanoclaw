@@ -13,7 +13,10 @@ function makeFakeExecutor(overrides: Partial<SignExecutor> = {}): SignExecutor {
     vendor: 'docusign',
     urlHostWhitelist: [/(^|\.)docusign\.net$/i],
     extractDocText: vi.fn(async () => 'doc text'),
-    sign: vi.fn(async () => ({ signedPdfPath: '', completionScreenshotPath: null })),
+    sign: vi.fn(async () => ({
+      signedPdfPath: '',
+      completionScreenshotPath: null,
+    })),
     downloadSignedPdf: vi.fn(async (_p, dest) => {
       const fs = await import('node:fs/promises');
       await fs.writeFile(dest, 'PDF');
@@ -41,8 +44,14 @@ describe('ceremony orchestrator', () => {
   it('on sign.approved for unflagged ceremony: transitions signing→signed', async () => {
     const exec = makeFakeExecutor();
     registerExecutor(exec);
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://na3.docusign.net/x' });
-    const { transitionState, updateSummary } = await import('../ceremony-repo.js');
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://na3.docusign.net/x',
+    });
+    const { transitionState, updateSummary } =
+      await import('../ceremony-repo.js');
     updateSummary(db, 'c1', ['ok'], []);
     transitionState(db, 'c1', 'detected', 'summarized');
     transitionState(db, 'c1', 'summarized', 'approved');
@@ -52,7 +61,12 @@ describe('ceremony orchestrator', () => {
     );
 
     const browserConnect = vi.fn(async () => ({
-      newContext: async () => ({ newPage: async () => ({} as any), pages: () => [] as any[], close: async () => undefined }) as any,
+      newContext: async () =>
+        ({
+          newPage: async () => ({}) as any,
+          pages: () => [] as any[],
+          close: async () => undefined,
+        }) as any,
     }));
 
     startCeremonyOrchestrator({
@@ -84,11 +98,20 @@ describe('ceremony orchestrator', () => {
     // Pre-approval: summarizer produced high flags.
     const exec = makeFakeExecutor();
     registerExecutor(exec);
-    createCeremony(db, { id: 'c2', emailId: 'e2', vendor: 'docusign', signUrl: 'https://na3.docusign.net/x' });
-    const { transitionState, updateSummary } = await import('../ceremony-repo.js');
-    updateSummary(db, 'c2', ['risky'], [
-      { category: 'non_compete', severity: 'high', evidence: 'xx' },
-    ]);
+    createCeremony(db, {
+      id: 'c2',
+      emailId: 'e2',
+      vendor: 'docusign',
+      signUrl: 'https://na3.docusign.net/x',
+    });
+    const { transitionState, updateSummary } =
+      await import('../ceremony-repo.js');
+    updateSummary(
+      db,
+      'c2',
+      ['risky'],
+      [{ category: 'non_compete', severity: 'high', evidence: 'xx' }],
+    );
     transitionState(db, 'c2', 'detected', 'summarized');
 
     const approvalRequested = new Promise<void>((resolve) =>
@@ -125,8 +148,14 @@ describe('ceremony orchestrator', () => {
       }),
     });
     registerExecutor(exec);
-    createCeremony(db, { id: 'c3', emailId: 'e3', vendor: 'docusign', signUrl: 'https://na3.docusign.net/x' });
-    const { transitionState, updateSummary } = await import('../ceremony-repo.js');
+    createCeremony(db, {
+      id: 'c3',
+      emailId: 'e3',
+      vendor: 'docusign',
+      signUrl: 'https://na3.docusign.net/x',
+    });
+    const { transitionState, updateSummary } =
+      await import('../ceremony-repo.js');
     updateSummary(db, 'c3', ['ok'], []);
     transitionState(db, 'c3', 'detected', 'summarized');
     transitionState(db, 'c3', 'summarized', 'approved');
@@ -140,13 +169,16 @@ describe('ceremony orchestrator', () => {
       bus,
       groupRoot: tempGroup,
       chatId: 'chat-1',
-      connectBrowser: async () => ({
-        newContext: async () => ({
-          newPage: async () => ({ screenshot: async () => Buffer.from('PNG') } as any),
-          pages: () => [],
-          close: async () => undefined,
-        } as any),
-      } as any),
+      connectBrowser: async () =>
+        ({
+          newContext: async () =>
+            ({
+              newPage: async () =>
+                ({ screenshot: async () => Buffer.from('PNG') }) as any,
+              pages: () => [],
+              close: async () => undefined,
+            }) as any,
+        }) as any,
       sendText: vi.fn(),
       sendDocument: vi.fn(),
       sendPhoto: vi.fn(),
@@ -164,11 +196,77 @@ describe('ceremony orchestrator', () => {
     expect(getCeremony(db, 'c3')!.state).toBe('failed');
   });
 
+  it('postReceipt failure after signed does not mark ceremony as failed', async () => {
+    const exec = makeFakeExecutor();
+    registerExecutor(exec);
+    createCeremony(db, {
+      id: 'c5',
+      emailId: 'e5',
+      vendor: 'docusign',
+      signUrl: 'https://na3.docusign.net/x',
+    });
+    const { transitionState, updateSummary } =
+      await import('../ceremony-repo.js');
+    updateSummary(db, 'c5', ['ok'], []);
+    transitionState(db, 'c5', 'detected', 'summarized');
+    transitionState(db, 'c5', 'summarized', 'approved');
+
+    const completed = new Promise<void>((resolve) =>
+      bus.on('sign.completed', () => resolve()),
+    );
+
+    // sendDocument throws to simulate postReceipt failure on the success path
+    const sendDocument = vi.fn(async () => {
+      throw new Error('telegram_send_failed');
+    });
+
+    startCeremonyOrchestrator({
+      db,
+      bus,
+      groupRoot: tempGroup,
+      chatId: 'chat-1',
+      connectBrowser: async () =>
+        ({
+          newContext: async () =>
+            ({
+              newPage: async () => ({}) as any,
+              pages: () => [] as any[],
+              close: async () => undefined,
+            }) as any,
+        }) as any,
+      sendText: vi.fn(),
+      sendDocument,
+      sendPhoto: vi.fn(),
+    });
+
+    bus.emit('sign.approved', {
+      type: 'sign.approved',
+      source: 'callback-router',
+      timestamp: Date.now(),
+      payload: { ceremonyId: 'c5', userId: 'u1' },
+    });
+
+    await completed;
+
+    // Give the caught postReceipt error time to settle
+    await new Promise((r) => setTimeout(r, 20));
+
+    const row = getCeremony(db, 'c5')!;
+    expect(row.state).toBe('signed');
+    expect(row.signedPdfPath).toBeTruthy();
+  });
+
   it('duplicate sign.approved is idempotent', async () => {
     const exec = makeFakeExecutor();
     registerExecutor(exec);
-    createCeremony(db, { id: 'c4', emailId: 'e4', vendor: 'docusign', signUrl: 'https://na3.docusign.net/x' });
-    const { transitionState, updateSummary } = await import('../ceremony-repo.js');
+    createCeremony(db, {
+      id: 'c4',
+      emailId: 'e4',
+      vendor: 'docusign',
+      signUrl: 'https://na3.docusign.net/x',
+    });
+    const { transitionState, updateSummary } =
+      await import('../ceremony-repo.js');
     updateSummary(db, 'c4', ['ok'], []);
     transitionState(db, 'c4', 'detected', 'summarized');
     transitionState(db, 'c4', 'summarized', 'approved');
@@ -178,13 +276,15 @@ describe('ceremony orchestrator', () => {
       bus,
       groupRoot: tempGroup,
       chatId: 'chat-1',
-      connectBrowser: async () => ({
-        newContext: async () => ({
-          newPage: async () => ({} as any),
-          pages: () => [],
-          close: async () => undefined,
-        } as any),
-      } as any),
+      connectBrowser: async () =>
+        ({
+          newContext: async () =>
+            ({
+              newPage: async () => ({}) as any,
+              pages: () => [],
+              close: async () => undefined,
+            }) as any,
+        }) as any,
       sendText: vi.fn(),
       sendDocument: vi.fn(),
       sendPhoto: vi.fn(),

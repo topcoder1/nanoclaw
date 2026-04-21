@@ -18,7 +18,11 @@ import {
   updateSignedPdf,
 } from './ceremony-repo.js';
 import { resolveExecutor, isWhitelistedUrl } from './executor-registry.js';
-import { archivePathFor, failureScreenshotPathFor, postReceipt } from './receipt.js';
+import {
+  archivePathFor,
+  failureScreenshotPathFor,
+  postReceipt,
+} from './receipt.js';
 import { renderDoubleConfirmCard } from './card-renderer.js';
 
 export interface OrchestratorDeps {
@@ -32,8 +36,16 @@ export interface OrchestratorDeps {
     text: string,
     opts?: unknown,
   ) => Promise<{ message_id: number } | void>;
-  sendDocument: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
-  sendPhoto: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
+  sendDocument: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
+  sendPhoto: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
 }
 
 const CEREMONY_DEADLINE_MS = 90_000;
@@ -55,14 +67,20 @@ export function startCeremonyOrchestrator(deps: OrchestratorDeps): () => void {
   };
 }
 
-async function handleCancelled(deps: OrchestratorDeps, evt: SignCancelledEvent): Promise<void> {
+async function handleCancelled(
+  deps: OrchestratorDeps,
+  evt: SignCancelledEvent,
+): Promise<void> {
   const c = getCeremony(deps.db, evt.payload.ceremonyId);
   if (!c) return;
   if (['signed', 'failed', 'cancelled'].includes(c.state)) return;
   transitionState(deps.db, c.id, c.state, 'cancelled');
 }
 
-async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): Promise<void> {
+async function handleApproved(
+  deps: OrchestratorDeps,
+  evt: SignApprovedEvent,
+): Promise<void> {
   const { db, bus, chatId, sendText } = deps;
   const ceremonyId = evt.payload.ceremonyId;
   const c = getCeremony(db, ceremonyId);
@@ -87,9 +105,10 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: card.buttons },
     });
-    const msgId = result && typeof result === 'object' && 'message_id' in result
-      ? (result as { message_id: number }).message_id
-      : 0;
+    const msgId =
+      result && typeof result === 'object' && 'message_id' in result
+        ? (result as { message_id: number }).message_id
+        : 0;
     bus.emit('sign.approval_requested', {
       type: 'sign.approval_requested',
       source: 'signer',
@@ -151,14 +170,17 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
     context = await browser.newContext();
 
     const pendingInputs = new Map<string, (value: string | null) => void>();
-    const unsubInput = bus.on('sign.field_input_provided', (e: SignFieldInputProvidedEvent) => {
-      if (e.payload.ceremonyId !== c.id) return;
-      const pending = pendingInputs.get(e.payload.fieldLabel);
-      if (pending) {
-        pendingInputs.delete(e.payload.fieldLabel);
-        pending(e.payload.value);
-      }
-    });
+    const unsubInput = bus.on(
+      'sign.field_input_provided',
+      (e: SignFieldInputProvidedEvent) => {
+        if (e.payload.ceremonyId !== c.id) return;
+        const pending = pendingInputs.get(e.payload.fieldLabel);
+        if (pending) {
+          pendingInputs.delete(e.payload.fieldLabel);
+          pending(e.payload.value);
+        }
+      },
+    );
 
     try {
       const result = await executor.sign({
@@ -166,7 +188,9 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
         profile,
         context,
         signal: aborter.signal,
-        onFieldInputNeeded: async (req: SignFieldInputNeededEvent['payload']) => {
+        onFieldInputNeeded: async (
+          req: SignFieldInputNeededEvent['payload'],
+        ) => {
           bus.emit('sign.field_input_needed', {
             type: 'sign.field_input_needed',
             source: 'signer',
@@ -177,7 +201,9 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
             pendingInputs.set(req.fieldLabel, resolve);
           });
           const remaining = CEREMONY_DEADLINE_MS - (Date.now() - start);
-          const timeout = new Promise<null>((r) => setTimeout(() => r(null), Math.max(remaining, 0)));
+          const timeout = new Promise<null>((r) =>
+            setTimeout(() => r(null), Math.max(remaining, 0)),
+          );
           return Promise.race([waiter, timeout]);
         },
       });
@@ -211,7 +237,12 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
           await deps.sendText(...args);
         },
         sendDocument: deps.sendDocument,
-      });
+      }).catch((e) =>
+        logger.warn(
+          { err: e, ceremonyId: c.id },
+          'postReceipt(signed) threw after successful sign',
+        ),
+      );
 
       void result;
     } finally {
@@ -231,7 +262,10 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
         }
       }
     } catch (shotErr) {
-      logger.warn({ err: shotErr, ceremonyId: c.id }, 'screenshot capture failed');
+      logger.warn(
+        { err: shotErr, ceremonyId: c.id },
+        'screenshot capture failed',
+      );
     }
 
     updateFailure(db, c.id, reason, screenshotPath);
@@ -253,7 +287,9 @@ async function handleApproved(deps: OrchestratorDeps, evt: SignApprovedEvent): P
       },
       sendDocument: deps.sendDocument,
       sendPhoto: deps.sendPhoto,
-    }).catch((e) => logger.warn({ err: e, ceremonyId: c.id }, 'postReceipt(failed) threw'));
+    }).catch((e) =>
+      logger.warn({ err: e, ceremonyId: c.id }, 'postReceipt(failed) threw'),
+    );
   } finally {
     clearTimeout(deadline);
     signingSlots--;
