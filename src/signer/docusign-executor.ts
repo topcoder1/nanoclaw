@@ -1,11 +1,27 @@
 import type { Page, BrowserContext } from 'playwright-core';
-import type { SignExecutor, SignExecutorInput, SignExecutorResult } from './executor-registry.js';
+import type {
+  SignExecutor,
+  SignExecutorInput,
+  SignExecutorResult,
+} from './executor-registry.js';
 import type { FieldTag } from './types.js';
 import { matchProfileFieldByLabel } from './profile.js';
 import { logger } from '../logger.js';
 
 const ACCESS_CODE_URL_PATTERNS = [/accessCode/i, /authenticate/i, /idcheck/i];
 const EXPIRED_URL_PATTERNS = [/expired/i, /\/error/i];
+
+function abortRace<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('aborted'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error('aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
 
 function formatDate(fmt: string): string {
   const d = new Date();
@@ -17,8 +33,10 @@ function formatDate(fmt: string): string {
 
 async function detectErrorState(page: Page): Promise<string | null> {
   const url = page.url();
-  if (ACCESS_CODE_URL_PATTERNS.some((re) => re.test(url))) return 'auth_challenge';
-  if (EXPIRED_URL_PATTERNS.some((re) => re.test(url))) return 'invite_expired_or_used';
+  if (ACCESS_CODE_URL_PATTERNS.some((re) => re.test(url)))
+    return 'auth_challenge';
+  if (EXPIRED_URL_PATTERNS.some((re) => re.test(url)))
+    return 'invite_expired_or_used';
 
   // DOM-based error detection (works for fixture pages served over http)
   const accessCode = await page.$('[data-qa="access-code"]');
@@ -62,7 +80,11 @@ async function listTags(page: Page): Promise<TagInfo[]> {
     .filter((t): t is { type: FieldTag; label: string; qa: string } =>
       ['signature', 'initial', 'date_signed', 'text', 'check'].includes(t.type),
     )
-    .map((t) => ({ type: t.type, label: t.label, inputSelector: `[data-qa="${t.qa}"]` }));
+    .map((t) => ({
+      type: t.type,
+      label: t.label,
+      inputSelector: `[data-qa="${t.qa}"]`,
+    }));
 }
 
 async function resolveTagValue(
@@ -100,24 +122,27 @@ async function fillTag(page: Page, tag: TagInfo, value: string): Promise<void> {
 
 export const docusignExecutor: SignExecutor = {
   vendor: 'docusign',
-  urlHostWhitelist: [
-    /(^|\.)docusign\.net$/i,
-    /(^|\.)docusign\.com$/i,
-  ],
+  urlHostWhitelist: [/(^|\.)docusign\.net$/i, /(^|\.)docusign\.com$/i],
 
   async extractDocText(page: Page): Promise<string> {
     const frames = page.frames();
     for (const frame of frames) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const text = await frame.evaluate(() => (globalThis as any).document?.body?.textContent || '');
+        const text = await frame.evaluate(
+          () => (globalThis as any).document?.body?.textContent || '',
+        );
         if (text && text.length > 50) return text;
       } catch {
         // frame may be cross-origin
       }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (await page.evaluate(() => (globalThis as any).document?.body?.textContent || '')) || '';
+    return (
+      (await page.evaluate(
+        () => (globalThis as any).document?.body?.textContent || '',
+      )) || ''
+    );
   },
 
   async sign(input: SignExecutorInput): Promise<SignExecutorResult> {
@@ -126,7 +151,9 @@ export const docusignExecutor: SignExecutor = {
     page.setDefaultTimeout(15_000);
 
     try {
-      await page.goto(ceremony.signUrl, { waitUntil: 'domcontentloaded' });
+      const gotoP = page.goto(ceremony.signUrl, { waitUntil: 'domcontentloaded' });
+      gotoP.catch(() => undefined); // suppress unhandled rejection if abortRace wins
+      await abortRace(gotoP, signal);
       const err = await detectErrorState(page);
       if (err) throw new Error(err);
 
@@ -139,7 +166,7 @@ export const docusignExecutor: SignExecutor = {
       for (const tag of tags) {
         if (signal.aborted) throw new Error('aborted');
         const value = await resolveTagValue(tag, input);
-        if (value === null) {
+        if (value === null || value === '') {
           if (tag.type === 'check') continue;
           throw new Error('field_input_timeout');
         }
@@ -149,7 +176,13 @@ export const docusignExecutor: SignExecutor = {
       if (signal.aborted) throw new Error('aborted');
       const finish = await page.$('[data-qa="finish-button"]');
       if (!finish) throw new Error('layout_changed');
-      await Promise.all([page.waitForURL(/completion/i, { timeout: 15_000 }), finish.click()]);
+      await abortRace(
+        Promise.all([
+          page.waitForURL(/completion/i, { timeout: 15_000 }),
+          finish.click(),
+        ]),
+        signal,
+      );
 
       // Confirmation page reached
       const completionHeader = await page.$('[data-qa="signing-complete"]');
@@ -160,6 +193,7 @@ export const docusignExecutor: SignExecutor = {
         completionScreenshotPath: null,
       };
     } catch (err) {
+      await page.close().catch(() => undefined);
       logger.warn(
         { err, ceremonyId: ceremony.id, component: 'signer/docusign-executor' },
         'DocuSign executor threw',
@@ -171,7 +205,10 @@ export const docusignExecutor: SignExecutor = {
   async downloadSignedPdf(page: Page, destPath: string): Promise<void> {
     // Prefer HTTP fetch fallback — <a download> doesn't reliably fire Playwright's download event
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const href = await page.$eval('[data-qa="download-button"]', (el: any) => el.href as string);
+    const href = await page.$eval(
+      '[data-qa="download-button"]',
+      (el: any) => el.href as string,
+    );
     const url = new URL(href, page.url()).toString();
     const resp = await page.request.get(url);
     if (!resp.ok()) throw new Error(`download_failed:${resp.status()}`);

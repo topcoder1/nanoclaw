@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from 'vitest';
 import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -54,16 +62,22 @@ describe('docusignExecutor', () => {
       const url = req.url || '/';
       const name = url === '/' ? '/signing.html' : url;
       if (name === '/signing.html') {
-        res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-signing-page.html')));
+        res.end(
+          fs.readFileSync(path.join(FIXTURES, 'docusign-signing-page.html')),
+        );
       } else if (name === '/completion.html') {
-        res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-completion-page.html')));
+        res.end(
+          fs.readFileSync(path.join(FIXTURES, 'docusign-completion-page.html')),
+        );
       } else if (name === '/signed.pdf') {
         res.setHeader('Content-Type', 'application/pdf');
         res.end(fs.readFileSync(path.join(FIXTURES, 'sample-signed.pdf')));
       } else if (name === '/expired.html') {
         res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-expired.html')));
       } else if (name === '/access-code.html') {
-        res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-access-code.html')));
+        res.end(
+          fs.readFileSync(path.join(FIXTURES, 'docusign-access-code.html')),
+        );
       } else {
         res.statusCode = 404;
         res.end('not found');
@@ -85,15 +99,23 @@ describe('docusignExecutor', () => {
   });
 
   it('has a whitelist matching docusign.net and docusign.com', () => {
-    expect(isWhitelistedUrl(docusignExecutor, 'https://na3.docusign.net/x')).toBe(true);
-    expect(isWhitelistedUrl(docusignExecutor, 'https://app.docusign.com/x')).toBe(true);
-    expect(isWhitelistedUrl(docusignExecutor, 'https://evil.com/x')).toBe(false);
+    expect(
+      isWhitelistedUrl(docusignExecutor, 'https://na3.docusign.net/x'),
+    ).toBe(true);
+    expect(
+      isWhitelistedUrl(docusignExecutor, 'https://app.docusign.com/x'),
+    ).toBe(true);
+    expect(isWhitelistedUrl(docusignExecutor, 'https://evil.com/x')).toBe(
+      false,
+    );
   });
 
   it('signs a fixture page end-to-end', async () => {
     const dest = path.join(tmpDir, 'signed.pdf');
     const result = await docusignExecutor.sign({
-      ceremony: makeCeremony({ signUrl: `http://127.0.0.1:${port}/signing.html` }),
+      ceremony: makeCeremony({
+        signUrl: `http://127.0.0.1:${port}/signing.html`,
+      }),
       profile,
       context,
       onFieldInputNeeded: async () => null,
@@ -113,7 +135,9 @@ describe('docusignExecutor', () => {
     const onFieldInputNeeded = vi.fn().mockResolvedValue('Project Lead');
     const sparseProfile = { ...profile, title: null };
     const result = await docusignExecutor.sign({
-      ceremony: makeCeremony({ signUrl: `http://127.0.0.1:${port}/signing.html` }),
+      ceremony: makeCeremony({
+        signUrl: `http://127.0.0.1:${port}/signing.html`,
+      }),
       profile: sparseProfile,
       context,
       onFieldInputNeeded,
@@ -128,7 +152,9 @@ describe('docusignExecutor', () => {
   it('throws auth_challenge when access-code page appears', async () => {
     await expect(
       docusignExecutor.sign({
-        ceremony: makeCeremony({ signUrl: `http://127.0.0.1:${port}/access-code.html` }),
+        ceremony: makeCeremony({
+          signUrl: `http://127.0.0.1:${port}/access-code.html`,
+        }),
         profile,
         context,
         onFieldInputNeeded: async () => null,
@@ -140,7 +166,9 @@ describe('docusignExecutor', () => {
   it('throws invite_expired_or_used when expired page appears', async () => {
     await expect(
       docusignExecutor.sign({
-        ceremony: makeCeremony({ signUrl: `http://127.0.0.1:${port}/expired.html` }),
+        ceremony: makeCeremony({
+          signUrl: `http://127.0.0.1:${port}/expired.html`,
+        }),
         profile,
         context,
         onFieldInputNeeded: async () => null,
@@ -153,10 +181,43 @@ describe('docusignExecutor', () => {
     const sparseProfile = { ...profile, title: null };
     await expect(
       docusignExecutor.sign({
-        ceremony: makeCeremony({ signUrl: `http://127.0.0.1:${port}/signing.html` }),
+        ceremony: makeCeremony({
+          signUrl: `http://127.0.0.1:${port}/signing.html`,
+        }),
         profile: sparseProfile,
         context,
         onFieldInputNeeded: async () => null, // refuses to provide value
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/field_input_timeout/);
+  }, 15_000);
+
+  it('throws aborted when signal is already aborted before sign() runs', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      docusignExecutor.sign({
+        ceremony: makeCeremony({
+          signUrl: `http://127.0.0.1:${port}/signing.html`,
+        }),
+        profile,
+        context,
+        onFieldInputNeeded: async () => null,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/aborted/);
+  }, 10_000);
+
+  it('throws field_input_timeout when onFieldInputNeeded returns empty string for a needed field', async () => {
+    const sparseProfile = { ...profile, title: null };
+    await expect(
+      docusignExecutor.sign({
+        ceremony: makeCeremony({
+          signUrl: `http://127.0.0.1:${port}/signing.html`,
+        }),
+        profile: sparseProfile,
+        context,
+        onFieldInputNeeded: async () => '', // returns empty string
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(/field_input_timeout/);
