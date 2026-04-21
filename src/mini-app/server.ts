@@ -51,6 +51,33 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     }),
   );
 
+  // Lightweight queue fingerprint for polling refresh. Returns sorted IDs so
+  // the client can detect any add/remove/resolve without re-rendering HTML.
+  app.get('/api/queue/status', (_req, res) => {
+    const attentionIds = opts.db
+      .prepare(
+        `SELECT id FROM tracked_items
+         WHERE state IN ('pushed','pending','held')
+           AND (queue = 'attention'
+                OR (queue IS NULL AND classification = 'push'))
+         ORDER BY id`,
+      )
+      .all() as Array<{ id: string }>;
+    const archiveIds = opts.db
+      .prepare(
+        `SELECT id FROM tracked_items
+         WHERE state = 'queued'
+           AND (queue = 'archive_candidate'
+                OR (queue IS NULL AND classification = 'digest'))
+         ORDER BY id`,
+      )
+      .all() as Array<{ id: string }>;
+    res.json({
+      attention: attentionIds.map((r) => r.id),
+      archive: archiveIds.map((r) => r.id),
+    });
+  });
+
   // Root page — opened when user taps the "📱 App" menu button in Telegram.
   // Lists the attention and archive queues with live counts. The archive
   // queue supports bulk-select + "Archive selected" (POST /api/archive/bulk).
@@ -191,6 +218,35 @@ li a{color:#0366d6;text-decoration:none}
 ${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul id="attention">${attention.map(attentionRow).join('')}</ul>`}
 <h2>🗂 Archive queue (${archive.length}) ${archive.length > 0 ? '<span class="tools" id="sel-all">Select all</span> <span class="tools" id="sel-none">Clear</span>' : ''}</h2>
 ${archive.length === 0 ? '<div class="empty">Nothing queued for archive.</div>' : `<ul id="archive">${archive.map(archiveRow).join('')}</ul>`}
+<script>
+// Auto-refresh: poll the queue fingerprint every 15s and on visibility change.
+// If the server-side queue changed (items resolved by reconciler, new items
+// arrived, archive action completed elsewhere), reload. Guards against Telegram
+// WebView showing stale snapshots for hours.
+(function(){
+  const initial=${JSON.stringify({
+    attention: attention.map((i) => i.id).sort(),
+    archive: archive.map((i) => i.id).sort(),
+  })};
+  let inFlight=false;
+  async function check(){
+    if(inFlight||document.hidden)return;
+    inFlight=true;
+    try{
+      const r=await fetch('/api/queue/status',{cache:'no-store'});
+      if(!r.ok)return;
+      const j=await r.json();
+      const a=(j.attention||[]).slice().sort();
+      const b=(j.archive||[]).slice().sort();
+      const changed=JSON.stringify(a)!==JSON.stringify(initial.attention)||JSON.stringify(b)!==JSON.stringify(initial.archive);
+      if(changed)location.reload();
+    }catch(_){}finally{inFlight=false;}
+  }
+  setInterval(check,15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});
+  window.addEventListener('pageshow',check);
+})();
+</script>
 ${
   archive.length > 0
     ? `<div id="bar">
