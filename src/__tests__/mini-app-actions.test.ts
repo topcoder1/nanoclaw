@@ -423,4 +423,36 @@ describe('mini-app actions — draft-with-ai', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('unknown');
   });
+
+  it('POST /api/email/:id/draft-with-ai resolves by thread_id (URL from mini-app Full Email link)', async () => {
+    // The Telegram "Full Email" button links to /email/<thread_id>, so the
+    // mini-app action buttons carry thread_id as data-email-id. The draft
+    // endpoint must resolve that to the tracked_items row.
+    seedItem(db, 'i1', 'thread-xyz', 'alice@example.com');
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    const res = await request(app)
+      .post('/api/email/thread-xyz/draft-with-ai')
+      .send({});
+    expect(res.status).toBe(200);
+    expect(res.body.taskId).toBe('task-abc');
+  });
+
+  it('POST /api/email/:id/draft-with-ai resolves by raw gmail id (source_id lookup)', async () => {
+    seedItem(db, 'i1', 'thread-xyz', 'alice@example.com');
+    // source_id is stored as "gmail:i1"; callers may pass just "i1".
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
+    });
+    const res = await request(app).post('/api/email/i1/draft-with-ai').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.taskId).toBe('task-abc');
+  });
 });
