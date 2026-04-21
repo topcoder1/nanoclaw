@@ -88,8 +88,7 @@ Legal`;
       }),
     ).toEqual({
       vendor: 'docusign',
-      signUrl:
-        'https://na4.docusign.net/Signing/EmailStart.aspx?a=abc&etti=1',
+      signUrl: 'https://na4.docusign.net/Signing/EmailStart.aspx?a=abc&etti=1',
     });
   });
 
@@ -140,8 +139,7 @@ Legal`;
   });
 
   it('strips trailing punctuation from extracted URL', () => {
-    const body =
-      'See (https://app.pandadoc.com/s/abc123).';
+    const body = 'See (https://app.pandadoc.com/s/abc123).';
     const out = detectSignUrl({
       from: 'notifications@pandadoc.com',
       subject: 'Please sign',

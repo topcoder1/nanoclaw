@@ -26,6 +26,7 @@ export interface EmailFullData {
   senderKind?: SenderKind;
   subtype?: Subtype;
   hasUnsubscribeHeader?: boolean;
+  signable?: boolean;
 }
 
 // Gmail's extractTextBody prefers text/plain, so many messages arrive as raw
@@ -103,6 +104,7 @@ export function renderEmailFull(data: EmailFullData): string {
     senderKind: data.senderKind ?? null,
     subtype: data.subtype ?? null,
     hasUnsubscribeHeader: data.hasUnsubscribeHeader ?? false,
+    signable: data.signable ?? false,
   });
 
   const viewControls = `${bodyHtml}
@@ -395,6 +397,9 @@ export function renderEmailFull(data: EmailFullData): string {
       case 'quick-draft':  return handleQuickDraft(emailId, btn);
       case 'draft-prompt': return handleDraftPrompt(emailId, btn);
       case 'more':         return toggleMoreRow();
+      case 'sign':
+        window.open('/api/email/' + encodeURIComponent(emailId) + '/sign', '_blank', 'noopener');
+        return;
       case 'open-gmail':
         window.open(OPEN_GMAIL_URL, '_blank', 'noopener');
         return;

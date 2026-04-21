@@ -17,10 +17,15 @@ export interface ActionRowInput {
   senderKind: SenderKind;
   subtype: Subtype;
   hasUnsubscribeHeader: boolean;
+  // True when the email looks like an e-signature invite (DocuSign, Adobe
+  // Sign, Dropbox Sign, PandaDoc, SignNow). Surfaces a primary "Sign" button
+  // that deep-links to the vendor via /api/email/:id/sign.
+  signable?: boolean;
   expanded?: boolean;
 }
 
 const ALL_ACTIONS = [
+  'sign',
   'quick-draft',
   'draft-prompt',
   'archive',
@@ -31,6 +36,13 @@ const ALL_ACTIONS = [
 ] as const;
 
 function primaryActions(i: ActionRowInput): string[] {
+  // Signing is the dominant action for these emails — everything else
+  // (archive/snooze/reply) is secondary until the user has signed.
+  if (i.signable) {
+    if (i.classification === 'push' && i.senderKind === 'human')
+      return ['sign', 'quick-draft', 'archive'];
+    return ['sign', 'archive', 'snooze'];
+  }
   if (i.subtype === 'transactional') return ['archive', 'open-gmail'];
   if (i.classification === 'push' && i.senderKind === 'human')
     return ['quick-draft', 'draft-prompt', 'archive'];
@@ -71,6 +83,7 @@ function btn(
 }
 
 const LABELS: Record<string, string> = {
+  sign: '✍ Sign',
   'quick-draft': '⚡ Quick draft',
   'draft-prompt': '✍️ Draft with prompt',
   archive: 'Archive',
@@ -85,7 +98,8 @@ export function renderActionRow(input: ActionRowInput): string {
   const secondary = ALL_ACTIONS.filter(
     (a) =>
       !primary.includes(a) &&
-      !(a === 'unsubscribe' && !input.hasUnsubscribeHeader),
+      !(a === 'unsubscribe' && !input.hasUnsubscribeHeader) &&
+      !(a === 'sign' && !input.signable),
   );
 
   const chipsHtml = chipsFor(input)
@@ -97,15 +111,20 @@ export function renderActionRow(input: ActionRowInput): string {
     : '';
 
   const primaryHtml = primary
-    .map((a) =>
-      btn(a, LABELS[a], {
+    .map((a) => {
+      const style =
+        a === 'sign'
+          ? 'background:#1f6feb;color:#fff;'
+          : a === 'archive'
+            ? 'background:#276749;color:#c6f6d5;'
+            : undefined;
+      return btn(a, LABELS[a], {
         emailId: input.emailId,
         account: input.account,
         threadId: input.threadId,
-        style:
-          a === 'archive' ? 'background:#276749;color:#c6f6d5;' : undefined,
-      }),
-    )
+        style,
+      });
+    })
     .join('');
 
   const moreBtn = btn('more', '⋯ More', {

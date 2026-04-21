@@ -79,6 +79,34 @@ describe('renderActionRow', () => {
     expect(primarySection).not.toContain('data-action="mute"');
   });
 
+  it('signable=true surfaces Sign as a primary action with vendor blue style', () => {
+    const html = renderActionRow({
+      ...base,
+      classification: 'push',
+      senderKind: 'bot',
+      subtype: null,
+      hasUnsubscribeHeader: false,
+      signable: true,
+    });
+    const primarySection = html.split('id="more-row"')[0];
+    expect(primarySection).toContain('data-action="sign"');
+    expect(primarySection).toContain('✍ Sign');
+    // Blue = #1f6feb.
+    expect(primarySection).toContain('#1f6feb');
+  });
+
+  it('signable=false omits the Sign action entirely (not even in More)', () => {
+    const html = renderActionRow({
+      ...base,
+      classification: 'push',
+      senderKind: 'bot',
+      subtype: null,
+      hasUnsubscribeHeader: false,
+      signable: false,
+    });
+    expect(html).not.toContain('data-action="sign"');
+  });
+
   it('missing/ignore classification still shows More and Archive+Open', () => {
     const html = renderActionRow({
       ...base,
