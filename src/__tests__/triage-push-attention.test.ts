@@ -64,7 +64,7 @@ describe('pushAttentionItem', () => {
     expect(flat).not.toContain('triage:override:archive:x1');
   });
 
-  it('prepends a Sign URL button when the email is an e-signature invite', async () => {
+  it('prepends a Sign URL button alongside Full Email when the email is an e-signature invite', async () => {
     mockSend.mockResolvedValueOnce({ message_id: 202 });
     await pushAttentionItem({
       chatId: '-100456',
@@ -78,17 +78,19 @@ describe('pushAttentionItem', () => {
     const keyboard = opts.reply_markup.inline_keyboard as Array<
       Array<{ text: string; url?: string; callback_data?: string }>
     >;
-    // Top row is the single Sign button; existing 4-button row follows.
+    // Top row: [Sign, Full Email]; second row: 4 triage buttons.
     expect(keyboard.length).toBe(2);
-    expect(keyboard[0]).toHaveLength(1);
+    expect(keyboard[0]).toHaveLength(2);
     expect(keyboard[0][0].text).toContain('Sign');
     expect(keyboard[0][0].url).toBe(
       'https://mini.example.com/api/email/sign-1/sign',
     );
+    expect(keyboard[0][1].text).toContain('Full Email');
+    expect(keyboard[0][1].url).toBe('https://mini.example.com/email/sign-1');
     expect(keyboard[1]).toHaveLength(4);
   });
 
-  it('omits the Sign button for non-signing emails', async () => {
+  it('includes a Full Email URL button for non-signing emails (lets the user actually read the email)', async () => {
     mockSend.mockResolvedValueOnce({ message_id: 203 });
     await pushAttentionItem({
       chatId: '-100456',
@@ -100,9 +102,12 @@ describe('pushAttentionItem', () => {
 
     const [, , opts] = mockSend.mock.calls[0];
     const keyboard = opts.reply_markup.inline_keyboard as Array<
-      Array<{ text: string }>
+      Array<{ text: string; url?: string }>
     >;
-    expect(keyboard.length).toBe(1);
-    expect(keyboard[0]).toHaveLength(4);
+    expect(keyboard.length).toBe(2);
+    expect(keyboard[0]).toHaveLength(1);
+    expect(keyboard[0][0].text).toContain('Full Email');
+    expect(keyboard[0][0].url).toBe('https://mini.example.com/email/normal-1');
+    expect(keyboard[1]).toHaveLength(4);
   });
 });

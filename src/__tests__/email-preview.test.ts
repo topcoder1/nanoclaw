@@ -64,6 +64,34 @@ describe('plaintextPreview', () => {
     expect(preview.length).toBeLessThanOrEqual(150);
     expect(preview).toContain('— truncated');
   });
+
+  it('collapses the whitespace-only padding rows Gmail HTML wraps messages in', () => {
+    // Gmail notification emails are deeply-nested tables with <tr><td>
+    // padding rows. Each empty row ends up as a line of just indent
+    // whitespace; a naive \n{3,} → \n\n collapse leaves them, so the
+    // preview renders with huge vertical gaps.
+    const html = `<table>
+      <tr><td>
+        <p>You</p>
+      </td></tr>
+      <tr><td>
+        <p>hi, i tried to purchase residential proxy</p>
+      </td></tr>
+      <tr><td>
+        <p>Dora</p>
+      </td></tr>
+      <tr><td>
+        <p>ok</p>
+      </td></tr>
+    </table>`;
+    const preview = plaintextPreview(html, 500);
+    // At most one blank line between paragraphs — never two or more.
+    expect(preview).not.toMatch(/\n\s*\n\s*\n/);
+    expect(preview).toContain('You');
+    expect(preview).toContain('hi, i tried');
+    expect(preview).toContain('Dora');
+    expect(preview).toContain('ok');
+  });
 });
 
 describe('email cache metadata', () => {

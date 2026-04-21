@@ -29,7 +29,7 @@ export async function pushAttentionItem(
 ): Promise<void> {
   const text = `📌 *${input.title}*\nfrom: ${input.sender}\nreason: ${input.reason}`;
 
-  // Single row of four compact actions. "Move to archive queue" was dropped
+  // Row 1: snooze + triage decisions. "Move to archive queue" was dropped
   // — its learning signal (negative override) is now what Archive records
   // by default when clicked from an attention card, since an archive action
   // on a classifier-escalated item IS the classifier being wrong.
@@ -45,17 +45,24 @@ export async function pushAttentionItem(
     ],
   ];
 
-  if (
-    MINI_APP_URL &&
-    isSignInvite({ from: input.sender, subject: input.title })
-  ) {
+  // Row 0 (top): Sign (for e-sig invites) and/or Full Email. Without a
+  // way to actually open the email, the user has to switch to Gmail to
+  // read past the two-line reason before deciding — defeats the purpose
+  // of pushing the card to Telegram in the first place.
+  if (MINI_APP_URL) {
     const base = MINI_APP_URL.replace(/\/$/, '');
-    keyboard.unshift([
-      {
+    const topRow: InlineButton[] = [];
+    if (isSignInvite({ from: input.sender, subject: input.title })) {
+      topRow.push({
         text: '✍ Sign',
         url: `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`,
-      },
-    ]);
+      });
+    }
+    topRow.push({
+      text: '🌐 Full Email',
+      url: `${base}/email/${encodeURIComponent(input.itemId)}`,
+    });
+    keyboard.unshift(topRow);
   }
 
   await sendTelegramMessage(input.chatId, text, {
