@@ -586,6 +586,7 @@ ${
     // invite, persist the detection into metadata so the Attention list
     // can offer an immediate deep link on next render. Fire-and-forget;
     // the detail page render does not depend on it.
+    let signableDetected = false;
     if (meta.body) {
       try {
         const detection = detectSignUrl({
@@ -594,6 +595,7 @@ ${
           body: meta.body,
         });
         if (detection) {
+          signableDetected = true;
           const row = opts.db
             .prepare(
               `SELECT id, metadata FROM tracked_items
@@ -629,6 +631,10 @@ ${
       }
     }
 
+    const signable =
+      signableDetected ||
+      isSignInvite({ from: meta.from || '', subject: meta.subject || '' });
+
     const html = renderEmailFull({
       subject: meta.subject || `Email ${emailId}`,
       from: meta.from || '',
@@ -645,6 +651,7 @@ ${
       senderKind: senderKind as import('./templates/action-row.js').SenderKind,
       subtype: subtype as import('./templates/action-row.js').Subtype,
       hasUnsubscribeHeader,
+      signable,
     });
     res.type('html').send(html);
   });
@@ -693,9 +700,7 @@ ${
     if (!opts.gmailOps || !parsed.account) return null;
 
     const raw = row.source_id || row.thread_id || '';
-    const gmailId = raw.startsWith('gmail:')
-      ? raw.slice('gmail:'.length)
-      : raw;
+    const gmailId = raw.startsWith('gmail:') ? raw.slice('gmail:'.length) : raw;
 
     let body = getCachedEmailBody(emailId);
     if (!body) {
