@@ -35,9 +35,9 @@ export function plaintextPreview(body: string, maxChars: number): string {
   const stripped = body
     // Remove script/style blocks including contents.
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-    // Convert <br> and </p> to newlines before stripping all tags.
+    // Block-level structure maps to newlines before we drop all tags.
     .replace(/<\s*br\s*\/?\s*>/gi, '\n')
-    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<\/(p|div|tr|li|h[1-6])\s*>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     // Decode a small set of common entities — good enough for previews.
     .replace(/&nbsp;/g, ' ')
@@ -46,7 +46,14 @@ export function plaintextPreview(body: string, maxChars: number): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, '\n\n')
+    // Gmail HTML has nested tables with lots of whitespace-only padding; a
+    // bare \n{3,} → \n\n collapse misses these because the "blank" lines
+    // carry indent spaces. Strip trailing whitespace per line first, THEN
+    // collapse, so table rows don't render as huge vertical gaps.
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .join('\n')
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
     .trim();
   return truncatePreview(stripped, maxChars);
 }
