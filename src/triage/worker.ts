@@ -186,6 +186,39 @@ export async function triageEmail(
     if (chatId) {
       try {
         const { pushAttentionItem } = await import('./push-attention.js');
+
+        let signerCeremonyId: string | undefined;
+        const { isSignerAutoSignEnabled } = await import(
+          '../signer/feature-flag.js'
+        );
+        if (isSignerAutoSignEnabled()) {
+          const { detectSignUrl } = await import('./sign-detector.js');
+          const detection = detectSignUrl({
+            from: input.sender,
+            subject: input.subject || '',
+            body: input.emailBody,
+          });
+          if (detection) {
+            const { onSignInviteDetected } = await import(
+              '../signer/triage-hook.js'
+            );
+            const { eventBus } = await import('../event-bus.js');
+            const id = await onSignInviteDetected({
+              db: getDb(),
+              bus: eventBus,
+              emailId: input.trackedItemId,
+              // detection.vendor is the wider sign-detector SignVendor; events.ts
+              // only declares 'docusign' for now (v1). Cast until events.ts widens.
+              vendor: detection.vendor as import('../signer/types.js').SignVendor,
+              signUrl: detection.signUrl,
+              docTitle: input.subject || null,
+              groupId: 'main',
+              flagEnabled: true,
+            });
+            signerCeremonyId = id ?? undefined;
+          }
+        }
+
         await pushAttentionItem({
           chatId,
           itemId: input.trackedItemId,
@@ -195,6 +228,7 @@ export async function triageEmail(
             result.decision.reasons[0] ??
             '(no reason)',
           sender: input.sender,
+          signerCeremonyId,
         });
         // Mark pushed so dashboards + invariants know this item was
         // surfaced to the user. Before, the state stayed 'queued' forever
