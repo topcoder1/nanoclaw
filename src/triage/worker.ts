@@ -189,9 +189,38 @@ export async function triageEmail(
         const { detectSignUrl } = await import('./sign-detector.js');
         const detected = detectSignUrl({
           from: input.sender,
-          subject: input.subject,
+          subject: input.subject || '',
           body: input.emailBody,
         });
+
+        // Signer auto-sign: when the feature flag is on and we resolved a
+        // sign URL, create a ceremony so the Telegram card can show a
+        // callback-based Sign button. Falls back to the direct signUrl
+        // below when the flag is off or no ceremony was created.
+        let signerCeremonyId: string | undefined;
+        const { isSignerAutoSignEnabled } = await import(
+          '../signer/feature-flag.js'
+        );
+        if (isSignerAutoSignEnabled() && detected) {
+          const { onSignInviteDetected } = await import(
+            '../signer/triage-hook.js'
+          );
+          const { eventBus } = await import('../event-bus.js');
+          const id = await onSignInviteDetected({
+            db: getDb(),
+            bus: eventBus,
+            emailId: input.trackedItemId,
+            // detected.vendor is the wider sign-detector SignVendor; events.ts
+            // only declares 'docusign' for now (v1). Cast until events.ts widens.
+            vendor: detected.vendor as import('../signer/types.js').SignVendor,
+            signUrl: detected.signUrl,
+            docTitle: input.subject || null,
+            groupId: 'main',
+            flagEnabled: true,
+          });
+          signerCeremonyId = id ?? undefined;
+        }
+
         await pushAttentionItem({
           chatId,
           itemId: input.trackedItemId,
@@ -202,6 +231,7 @@ export async function triageEmail(
             '(no reason)',
           sender: input.sender,
           signUrl: detected?.signUrl,
+          signerCeremonyId,
         });
         // Mark pushed so dashboards + invariants know this item was
         // surfaced to the user. Before, the state stayed 'queued' forever

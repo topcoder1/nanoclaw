@@ -57,6 +57,11 @@ export class PlaywrightClient {
     return this.browser?.isConnected() ?? false;
   }
 
+  getBrowser(): Browser {
+    if (!this.browser) throw new Error('PlaywrightClient not connected');
+    return this.browser;
+  }
+
   setOnDisconnect(handler: () => void): void {
     this.onDisconnect = handler;
   }

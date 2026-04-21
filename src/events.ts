@@ -610,6 +610,121 @@ export interface EmailDraftFailedEvent extends NanoClawEvent {
   };
 }
 
+// --- Signer events ---
+
+export type SignVendor = 'docusign'; // v1; future: 'adobe_sign' | 'dropbox_sign' | 'pandadoc' | 'signnow'
+
+export interface RiskFlag {
+  category:
+    | 'auto_renewal'
+    | 'non_compete'
+    | 'indemnity'
+    | 'arbitration_waiver'
+    | 'unusual_duration'
+    | 'liability_cap_low'
+    | 'exclusivity'
+    | 'ip_assignment';
+  severity: 'low' | 'high';
+  evidence: string;
+}
+
+export interface SignInviteDetectedEvent extends NanoClawEvent {
+  type: 'sign.invite.detected';
+  source: 'triage';
+  payload: {
+    ceremonyId: string;
+    emailId: string;
+    vendor: SignVendor;
+    signUrl: string;
+    groupId: string;
+  };
+}
+
+export interface SignSummarizedEvent extends NanoClawEvent {
+  type: 'sign.summarized';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+    summary: string[];
+    riskFlags: RiskFlag[];
+  };
+}
+
+export interface SignApprovalRequestedEvent extends NanoClawEvent {
+  type: 'sign.approval_requested';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+    telegramMessageId: number;
+  };
+}
+
+export interface SignApprovedEvent extends NanoClawEvent {
+  type: 'sign.approved';
+  source: 'callback-router';
+  payload: {
+    ceremonyId: string;
+    userId: string;
+  };
+}
+
+export interface SignCancelledEvent extends NanoClawEvent {
+  type: 'sign.cancelled';
+  source: 'callback-router' | 'signer';
+  payload: {
+    ceremonyId: string;
+    reason: string;
+  };
+}
+
+export interface SignSigningStartedEvent extends NanoClawEvent {
+  type: 'sign.signing_started';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+  };
+}
+
+export interface SignFieldInputNeededEvent extends NanoClawEvent {
+  type: 'sign.field_input_needed';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+    fieldLabel: string;
+    fieldType: 'text' | 'boolean';
+  };
+}
+
+export interface SignFieldInputProvidedEvent extends NanoClawEvent {
+  type: 'sign.field_input_provided';
+  source: 'callback-router';
+  payload: {
+    ceremonyId: string;
+    fieldLabel: string;
+    value: string;
+  };
+}
+
+export interface SignCompletedEvent extends NanoClawEvent {
+  type: 'sign.completed';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+    signedPdfPath: string;
+    durationMs: number;
+  };
+}
+
+export interface SignFailedEvent extends NanoClawEvent {
+  type: 'sign.failed';
+  source: 'signer';
+  payload: {
+    ceremonyId: string;
+    reason: string;
+    screenshotPath: string | null;
+  };
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -667,6 +782,16 @@ export interface EventMap {
   'email.snooze.waked': EmailSnoozeWakedEvent;
   'email.draft.ready': EmailDraftReadyEvent;
   'email.draft.failed': EmailDraftFailedEvent;
+  'sign.invite.detected': SignInviteDetectedEvent;
+  'sign.summarized': SignSummarizedEvent;
+  'sign.approval_requested': SignApprovalRequestedEvent;
+  'sign.approved': SignApprovedEvent;
+  'sign.cancelled': SignCancelledEvent;
+  'sign.signing_started': SignSigningStartedEvent;
+  'sign.field_input_needed': SignFieldInputNeededEvent;
+  'sign.field_input_provided': SignFieldInputProvidedEvent;
+  'sign.completed': SignCompletedEvent;
+  'sign.failed': SignFailedEvent;
 }
 
 export type EventType = keyof EventMap;

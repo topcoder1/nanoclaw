@@ -3,12 +3,19 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const { mockClassify, mockPushAttentionItem, mockRenderAttentionDashboard } =
-  vi.hoisted(() => ({
-    mockClassify: vi.fn(),
-    mockPushAttentionItem: vi.fn(),
-    mockRenderAttentionDashboard: vi.fn(),
-  }));
+const {
+  mockClassify,
+  mockPushAttentionItem,
+  mockRenderAttentionDashboard,
+  mockOnSignInviteDetected,
+  mockIsSignerAutoSignEnabled,
+} = vi.hoisted(() => ({
+  mockClassify: vi.fn(),
+  mockPushAttentionItem: vi.fn(),
+  mockRenderAttentionDashboard: vi.fn(),
+  mockOnSignInviteDetected: vi.fn().mockResolvedValue(null),
+  mockIsSignerAutoSignEnabled: vi.fn().mockReturnValue(false),
+}));
 vi.mock('../triage/classifier.js', () => ({
   classifyWithLlm: mockClassify,
 }));
@@ -25,6 +32,15 @@ vi.mock('../triage/push-attention.js', () => ({
 }));
 vi.mock('../triage/dashboards.js', () => ({
   renderAttentionDashboard: mockRenderAttentionDashboard,
+}));
+vi.mock('../signer/feature-flag.js', () => ({
+  isSignerAutoSignEnabled: mockIsSignerAutoSignEnabled,
+}));
+vi.mock('../signer/triage-hook.js', () => ({
+  onSignInviteDetected: mockOnSignInviteDetected,
+}));
+vi.mock('../event-bus.js', () => ({
+  eventBus: {},
 }));
 vi.mock('../logger.js', () => ({
   logger: {
@@ -49,6 +65,10 @@ describe('triageEmail', () => {
     mockClassify.mockReset();
     mockPushAttentionItem.mockReset();
     mockRenderAttentionDashboard.mockReset();
+    mockOnSignInviteDetected.mockReset();
+    mockOnSignInviteDetected.mockResolvedValue(null);
+    mockIsSignerAutoSignEnabled.mockReset();
+    mockIsSignerAutoSignEnabled.mockReturnValue(false);
   });
   afterEach(() => {
     _closeDatabase();

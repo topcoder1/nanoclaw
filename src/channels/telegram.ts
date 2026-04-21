@@ -755,6 +755,56 @@ export async function pinTelegramMessage(
   return { ok: true };
 }
 
+async function callBotApiMultipart(
+  method: string,
+  chatId: string | number,
+  fileField: string,
+  filePath: string,
+  extra?: Record<string, unknown>,
+): Promise<void> {
+  const token = resolveBotToken();
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN not set');
+  const url = `https://api.telegram.org/bot${token}/${method}`;
+  const form = new FormData();
+  form.append('chat_id', normalizeChatId(chatId));
+  const fileBlob = new Blob([fs.readFileSync(filePath)]);
+  form.append(fileField, fileBlob, path.basename(filePath));
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      form.append(k, typeof v === 'string' ? v : JSON.stringify(v));
+    }
+  }
+  const resp = await fetch(url, { method: 'POST', body: form });
+  const json = (await resp.json()) as { ok: boolean; description?: string };
+  if (!resp.ok || !json.ok) {
+    throw new Error(
+      `Telegram ${method} failed: ${resp.status} ${json.description || ''}`,
+    );
+  }
+}
+
+/**
+ * Send a document file to a Telegram chat.
+ */
+export async function sendTelegramDocument(
+  chatId: string | number,
+  filePath: string,
+  opts?: Record<string, unknown>,
+): Promise<void> {
+  await callBotApiMultipart('sendDocument', chatId, 'document', filePath, opts);
+}
+
+/**
+ * Send a photo file to a Telegram chat.
+ */
+export async function sendTelegramPhoto(
+  chatId: string | number,
+  filePath: string,
+  opts?: Record<string, unknown>,
+): Promise<void> {
+  await callBotApiMultipart('sendPhoto', chatId, 'photo', filePath, opts);
+}
+
 registerChannel('telegram', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token =

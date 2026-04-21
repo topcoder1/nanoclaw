@@ -106,6 +106,13 @@ describe('PlaywrightClient', () => {
     });
   });
 
+  describe('getBrowser', () => {
+    it('getBrowser throws before connect', () => {
+      const client = new PlaywrightClient('http://localhost:9999');
+      expect(() => client.getBrowser()).toThrow(/not connected/);
+    });
+  });
+
   describe('disconnect', () => {
     it('closes the browser connection', async () => {
       await client.connect();

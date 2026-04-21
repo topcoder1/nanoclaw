@@ -13,6 +13,8 @@ export interface PushAttentionInput {
   // vendor (DocuSign/Adobe Sign/etc.) instead of routing through the
   // mini-app — skips the Cloudflare Access prompt on tap.
   signUrl?: string;
+  /** When set (signer feature flag on + ceremony created), renders callback Sign/Cancel buttons for auto-sign instead of a URL button. Takes precedence over signUrl. */
+  signerCeremonyId?: string;
 }
 
 type InlineButton =
@@ -50,21 +52,36 @@ export async function pushAttentionItem(
     ],
   ];
 
-  // Row 0 (top): Sign (for e-sig invites) and/or Full Email. Without a
-  // way to actually open the email, the user has to switch to Gmail to
-  // read past the two-line reason before deciding — defeats the purpose
-  // of pushing the card to Telegram in the first place.
+  // Row 0 (top): Sign (for e-sig invites) and/or Full Email. Without a way
+  // to open the email, the user has to switch to Gmail to read past the
+  // two-line reason — defeats the purpose of pushing the card.
+  //
+  // Sign-button precedence (highest first):
+  //   1. signerCeremonyId → callback buttons that auto-sign via the signer
+  //      module (ceremony, LLM summary, risk-flag double-confirm, etc.).
+  //   2. signUrl → direct vendor URL, skips the mini-app route and its
+  //      Cloudflare Access prompt. Manual sign on the vendor page.
+  //   3. fallback → mini-app /api/email/:id/sign (302 to vendor; gated by
+  //      Cloudflare Access).
   if (MINI_APP_URL) {
     const base = MINI_APP_URL.replace(/\/$/, '');
     const topRow: InlineButton[] = [];
     if (isSignInvite({ from: input.sender, subject: input.title })) {
-      // Prefer the vendor URL directly when the caller resolved it — the
-      // mini-app route sits behind Cloudflare Access and forces a login
-      // prompt on every tap once the session cookie expires.
-      const signUrl =
-        input.signUrl ??
-        `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`;
-      topRow.push({ text: '✍ Sign', url: signUrl });
+      if (input.signerCeremonyId) {
+        topRow.push({
+          text: '✍ Sign',
+          callback_data: `sign:approve:${input.signerCeremonyId}`,
+        });
+        topRow.push({
+          text: '✕ Cancel Sign',
+          callback_data: `sign:cancel:${input.signerCeremonyId}`,
+        });
+      } else {
+        const signUrl =
+          input.signUrl ??
+          `${base}/api/email/${encodeURIComponent(input.itemId)}/sign`;
+        topRow.push({ text: '✍ Sign', url: signUrl });
+      }
     }
     topRow.push({
       text: '🌐 Full Email',
