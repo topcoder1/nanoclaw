@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Please sign your document</title>
+</head>
+<body>
+  <div id="banner">
+    <button id="continue-btn" data-qa="continue-button">Continue</button>
+    <label>
+      <input type="checkbox" id="agree-esign" data-qa="agree-esign"> I agree to use electronic records and signatures
+    </label>
+  </div>
+
+  <div id="document-viewer">
+    <iframe id="pdf-frame" name="pdf-frame" srcdoc="<html><body><p>CONSULTING AGREEMENT between Acme Corp and Alice Example. Fee: $150/hr. Term: 6 months.</p></body></html>"></iframe>
+  </div>
+
+  <div id="tag-list">
+    <div class="tag" data-tag-type="signature" data-tag-label="Sign here">
+      <input type="text" class="tag-input" data-qa="signature-input" placeholder="Type your name">
+    </div>
+    <div class="tag" data-tag-type="initial" data-tag-label="Initials">
+      <input type="text" class="tag-input" data-qa="initial-input" placeholder="Initials">
+    </div>
+    <div class="tag" data-tag-type="date_signed" data-tag-label="Date">
+      <input type="text" class="tag-input" data-qa="date-input" placeholder="MM/DD/YYYY">
+    </div>
+    <div class="tag" data-tag-type="text" data-tag-label="Title">
+      <input type="text" class="tag-input" data-qa="text-input-title" placeholder="Your title">
+    </div>
+  </div>
+
+  <button id="finish-btn" data-qa="finish-button">Finish</button>
+
+  <script>
+    document.getElementById('finish-btn').addEventListener('click', () => {
+      // All inputs must be filled for navigation to happen
+      const inputs = document.querySelectorAll('.tag-input');
+      const allFilled = Array.from(inputs).every((i) => i.value.trim().length > 0);
+      if (allFilled) {
+        window.location.href = '/completion.html';
+      }
+    });
+  </script>
+</body>
+</html>
