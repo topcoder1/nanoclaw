@@ -96,6 +96,7 @@ import {
   initKnowledgeStore,
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
+import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1204,6 +1205,9 @@ async function main(): Promise<void> {
     logger.warn({ err }, 'Qdrant collection init failed'),
   );
   initOutcomeStore();
+  // Brain P0: raw_events capture from email.received. Must start before
+  // the SSE/watchers do any emitting so no events are missed.
+  startBrainIngest();
   logger.info('Database initialized');
   loadState();
 
@@ -1263,6 +1267,7 @@ async function main(): Promise<void> {
       logger.warn({ err }, 'Failed to shutdown pending-send registry');
     }
     await queue.shutdown(10000);
+    await stopBrainIngest();
     await browserSessionManager.shutdown();
     for (const ch of channels) await ch.disconnect();
     stopBrowserSidecar();
