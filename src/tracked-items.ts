@@ -73,6 +73,9 @@ export interface TrackedItem {
   // block in db.ts. See src/triage/sender-kind.ts.
   sender_kind?: 'human' | 'bot' | 'unknown' | null;
   subtype?: 'transactional' | null;
+  // SuperPilot upstream signals, populated at SSE intake (2026-04-23).
+  suggested_action?: string | null;
+  needs_reply?: boolean | null;
 }
 
 export interface Thread {
@@ -126,7 +129,8 @@ export function insertTrackedItem(item: TrackedItem): void {
       digest_count, telegram_message_id, classification_reason, metadata,
       confidence, model_tier, action_intent,
       facts_extracted_json, repo_candidates_json, reasons_json,
-      reminded_at, sender_kind, subtype
+      reminded_at, sender_kind, subtype,
+      suggested_action, needs_reply
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
@@ -134,7 +138,8 @@ export function insertTrackedItem(item: TrackedItem): void {
       ?, ?, ?, ?,
       ?, ?, ?,
       ?, ?, ?,
-      ?, ?, ?
+      ?, ?, ?,
+      ?, ?
     )`,
   ).run(
     item.id,
@@ -167,6 +172,8 @@ export function insertTrackedItem(item: TrackedItem): void {
     item.reminded_at ?? null,
     item.sender_kind ?? null,
     item.subtype ?? null,
+    item.suggested_action ?? null,
+    typeof item.needs_reply === 'boolean' ? (item.needs_reply ? 1 : 0) : null,
   );
 }
 

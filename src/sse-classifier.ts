@@ -21,6 +21,13 @@ export interface SSEEmail {
   sender?: string;
   snippet?: string;
   superpilot_label?: string;
+  // Upstream SuperPilot SSE signals. email_type is the 7-value enum
+  // (people | newsletters | promotions | social | transactions | updates
+  // | uncategorized) — persisted as the effective superpilot_label when
+  // no explicit label is provided.
+  email_type?: string;
+  suggested_action?: string;
+  needs_reply?: boolean;
 }
 
 export interface ClassifyResult {
@@ -81,10 +88,16 @@ export function classifyFromSSE(
       body: email.snippet ?? '',
     });
 
+    // Effective label: explicit superpilot_label wins, otherwise fall back
+    // to upstream email_type. SuperPilot currently only ships email_type;
+    // superpilot_label is retained for forward compat / testing.
+    const effectiveLabel =
+      email.superpilot_label ?? email.email_type ?? null;
+
     const result = classify({
       source: 'gmail',
       sourceId,
-      superpilotLabel: email.superpilot_label ?? null,
+      superpilotLabel: effectiveLabel,
       trustTier: null,
       senderPattern: sender,
       title: subject,
@@ -103,7 +116,7 @@ export function classifyFromSSE(
       group_name: groupName,
       state: result.decision === 'push' ? 'pending' : 'queued',
       classification: result.decision,
-      superpilot_label: email.superpilot_label ?? null,
+      superpilot_label: effectiveLabel,
       trust_tier: null,
       title: subject,
       summary: null,
@@ -124,6 +137,9 @@ export function classifyFromSSE(
       reasons: null,
       sender_kind: senderKind,
       subtype,
+      suggested_action: email.suggested_action ?? null,
+      needs_reply:
+        typeof email.needs_reply === 'boolean' ? email.needs_reply : null,
     });
 
     if (result.decision === 'digest') {

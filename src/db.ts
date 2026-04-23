@@ -857,6 +857,20 @@ function createSchema(database: Database.Database): void {
   if (!trackedNames.has('subtype')) {
     database.exec(`ALTER TABLE tracked_items ADD COLUMN subtype TEXT`);
   }
+  // SuperPilot upstream signals. email_type is persisted into the existing
+  // superpilot_label column (SuperPilot never shipped a literal
+  // `superpilot_label` field — it ships `email_type`). suggested_action and
+  // needs_reply are new columns so the ingestion agent can pre-filter
+  // without re-classifying. Placed after the table-rebuild blocks above so
+  // the columns survive any future CHECK-constraint rebuilds.
+  if (!trackedNames.has('suggested_action')) {
+    database.exec(
+      `ALTER TABLE tracked_items ADD COLUMN suggested_action TEXT`,
+    );
+  }
+  if (!trackedNames.has('needs_reply')) {
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN needs_reply INTEGER`);
+  }
 
   // DocuSign auto-sign: signer identity + ceremony state machine
   database.exec(`

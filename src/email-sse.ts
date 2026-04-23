@@ -38,7 +38,9 @@ const connections: SSEConnection[] = [];
 
 let debouncer: EmailTriggerDebouncer | null = null;
 
-export function setEmailTriggerDebouncer(d: EmailTriggerDebouncer): void {
+export function setEmailTriggerDebouncer(
+  d: EmailTriggerDebouncer | null,
+): void {
   debouncer = d;
 }
 
@@ -244,6 +246,18 @@ export function writeIpcTrigger(
   );
 }
 
+/**
+ * Test-only entry point that invokes the internal SSE payload handler.
+ * Production callers use `connect()` which wires it up through the HTTP
+ * stream.
+ */
+export function _handleTriagedEmailsForTest(
+  data: string,
+  label: string,
+): void {
+  handleTriagedEmails(data, label);
+}
+
 function handleTriagedEmails(data: string, label: string): void {
   try {
     const parsed = JSON.parse(data);
@@ -299,27 +313,43 @@ function handleTriagedEmails(data: string, label: string): void {
       );
     }
 
+    // Shape one SSE row into our internal SSEEmail. Upstream SuperPilot
+    // fields (email_type, suggested_action, needs_reply) are forwarded
+    // as-is when present; omission leaves them undefined so downstream
+    // consumers can distinguish "absent" from "false/empty string".
+    type RawSseEmail = {
+      thread_id: string;
+      account: string;
+      subject?: string;
+      sender?: string;
+      snippet?: string;
+      superpilot_label?: string;
+      email_type?: string;
+      suggested_action?: string;
+      needs_reply?: boolean;
+    };
+    const shapeEmail = (e: RawSseEmail) => ({
+      thread_id: e.thread_id,
+      account: e.account || 'unknown',
+      subject: e.subject || '',
+      sender: e.sender || '',
+      snippet: e.snippet || '',
+      ...(e.superpilot_label !== undefined && {
+        superpilot_label: e.superpilot_label,
+      }),
+      ...(e.email_type !== undefined && { email_type: e.email_type }),
+      ...(e.suggested_action !== undefined && {
+        suggested_action: e.suggested_action,
+      }),
+      ...(typeof e.needs_reply === 'boolean' && {
+        needs_reply: e.needs_reply,
+      }),
+    });
+
     // Buffer emails in debouncer (merges rapid-fire triggers into one IPC file)
     // or write IPC directly if no debouncer is configured
     if (debouncer) {
-      debouncer.add(
-        emails.map(
-          (e: {
-            thread_id: string;
-            account: string;
-            subject?: string;
-            sender?: string;
-            snippet?: string;
-          }) => ({
-            thread_id: e.thread_id,
-            account: e.account || 'unknown',
-            subject: e.subject || '',
-            sender: e.sender || '',
-            snippet: e.snippet || '',
-          }),
-        ),
-        label,
-      );
+      debouncer.add(emails.map(shapeEmail), label);
     } else {
       writeIpcTrigger(emails, label);
     }
@@ -331,21 +361,7 @@ function handleTriagedEmails(data: string, label: string): void {
       timestamp: Date.now(),
       payload: {
         count: emails.length,
-        emails: emails.map(
-          (e: {
-            thread_id: string;
-            account: string;
-            subject?: string;
-            sender?: string;
-            snippet?: string;
-          }) => ({
-            thread_id: e.thread_id,
-            account: e.account || 'unknown',
-            subject: e.subject || '',
-            sender: e.sender || '',
-            snippet: e.snippet || '',
-          }),
-        ),
+        emails: emails.map(shapeEmail),
         connection: label,
       },
     };
