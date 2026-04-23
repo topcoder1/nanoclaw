@@ -1,0 +1,78 @@
+/**
+ * Brain database — store/brain.db. Separate file from the existing
+ * store/messages.db to keep the augmented-brain schema independent and
+ * migrateable on its own cadence (see .omc/design/brain-architecture-v2.md §5).
+ *
+ * Singleton pattern mirrors src/db.ts. First call opens the file with WAL,
+ * applies the schema, and caches the handle. Subsequent calls return the
+ * same handle. Schema application is idempotent (CREATE TABLE IF NOT EXISTS
+ * / CREATE INDEX IF NOT EXISTS everywhere), so reopening an already-
+ * populated DB is a no-op at the schema level.
+ */
+
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+import { STORE_DIR } from '../config.js';
+import { logger } from '../logger.js';
+
+let db: Database.Database | null = null;
+
+// __dirname equivalent for ESM. schema.sql lives alongside this file
+// at runtime (tsx) and build time (dist/brain/schema.sql — copied via
+// build step; for now we read from the source tree).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function loadSchemaSql(): string {
+  // In dev (tsx): __dirname = .../src/brain, schema.sql is adjacent.
+  // In build: tsc does not copy .sql; we fall back to the src path if
+  // the adjacent file is missing. This keeps unit tests and `pnpm dev`
+  // working. Production deploy must ensure schema.sql ships with the JS.
+  const adjacent = path.join(__dirname, 'schema.sql');
+  if (fs.existsSync(adjacent)) return fs.readFileSync(adjacent, 'utf8');
+
+  // Best-effort fallback: look in the project's src/brain directory
+  // (handles `tsc` builds that drop .sql).
+  const srcPath = path.resolve(process.cwd(), 'src', 'brain', 'schema.sql');
+  return fs.readFileSync(srcPath, 'utf8');
+}
+
+function applySchema(database: Database.Database): void {
+  database.pragma('journal_mode = WAL');
+  database.pragma('synchronous = NORMAL');
+  database.pragma('foreign_keys = ON');
+  database.exec(loadSchemaSql());
+}
+
+/**
+ * Open (or return cached) brain.db handle.
+ * Creates the store directory if missing.
+ */
+export function getBrainDb(): Database.Database {
+  if (db) return db;
+
+  fs.mkdirSync(STORE_DIR, { recursive: true });
+  const dbPath = path.join(STORE_DIR, 'brain.db');
+  db = new Database(dbPath);
+  applySchema(db);
+  logger.info({ path: dbPath }, 'Brain DB initialized');
+  return db;
+}
+
+/** @internal — for tests only. Opens a fresh DB at the given path (or :memory:). */
+export function _openBrainDbForTest(dbPath: string = ':memory:'): Database.Database {
+  const fresh = new Database(dbPath);
+  applySchema(fresh);
+  return fresh;
+}
+
+/** @internal — for tests only. Closes and clears the cached handle. */
+export function _closeBrainDb(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
