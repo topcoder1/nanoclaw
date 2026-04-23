@@ -256,6 +256,7 @@ export async function storeFactWithVector(
             group_id: input.groupId ?? 'global',
             source: input.source,
             created_at: new Date().toISOString(),
+            model_version: 'openai:text-embedding-3-small:1536',
           },
         },
       ],
