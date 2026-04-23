@@ -99,11 +99,16 @@ export class AsyncWriteQueue<T> {
   }
 
   private async triggerFlush(): Promise<void> {
-    if (this.flushing) return;
+    // Always null out any timer reference at the top — a stale (already-fired)
+    // handle must never block future reschedules. (Bug fix from code review:
+    // early-return on `flushing=true` previously skipped this clear, leaving
+    // `flushTimer` non-null so subsequent enqueues would not schedule a new
+    // timer, stranding items in the buffer until maxBatchSize was reached.)
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
+    if (this.flushing) return;
     if (this.buffer.length === 0) return;
     this.flushing = true;
     const batch = this.buffer.splice(0, this.buffer.length);
@@ -116,6 +121,13 @@ export class AsyncWriteQueue<T> {
       for (const p of batch) p.resolver.reject(error);
     } finally {
       this.flushing = false;
+      // Items enqueued during the in-flight flush need a new flush cycle.
+      // Without this kick they'd sit buffered until maxBatchSize triggers.
+      if (this.buffer.length > 0 && !this.shuttingDown) {
+        this.flushTimer = setTimeout(() => {
+          void this.triggerFlush();
+        }, this.maxLatencyMs);
+      }
     }
   }
 

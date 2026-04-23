@@ -133,4 +133,58 @@ describe('AsyncWriteQueue', () => {
     await q.shutdown();
     await expect(q.enqueue(1)).rejects.toThrow(/shut down/);
   });
+
+  // Regression: items enqueued while a flush is in flight must still be
+  // flushed after the in-flight flush completes. Previously a stale
+  // `flushTimer` reference left over from the in-flight cycle prevented the
+  // next enqueue from scheduling a new timer, so items sat buffered until
+  // maxBatchSize was reached.
+  it('flushes items enqueued during an in-flight flush', async () => {
+    vi.useRealTimers();
+
+    const flushed: number[][] = [];
+    let releaseFirstFlush: (() => void) | null = null;
+    let firstFlushStarted: (() => void) | null = null;
+    const firstFlushStartedPromise = new Promise<void>((r) => {
+      firstFlushStarted = r;
+    });
+
+    let flushCount = 0;
+    const q = new AsyncWriteQueue<number>(
+      async (batch) => {
+        flushCount++;
+        flushed.push([...batch]);
+        if (flushCount === 1) {
+          firstFlushStarted!();
+          // Block the first flush until test releases it.
+          await new Promise<void>((r) => {
+            releaseFirstFlush = r;
+          });
+        }
+      },
+      { maxBatchSize: 2, maxLatencyMs: 50 },
+    );
+
+    // First batch fills to maxBatchSize → triggers flush synchronously.
+    const p1 = q.enqueue(1);
+    const p2 = q.enqueue(2);
+
+    // Wait for the first flush to actually start (inside flushFn).
+    await firstFlushStartedPromise;
+
+    // Now enqueue a third item while the first flush is blocked. Below
+    // maxBatchSize, so it depends on the timer/finally-kick to land.
+    const p3 = q.enqueue(3);
+    expect(flushed).toEqual([[1, 2]]);
+
+    // Release the first flush; the finally-block should schedule a new
+    // timer for the pending item.
+    releaseFirstFlush!();
+    await Promise.all([p1, p2]);
+
+    // Give the reschedule timer (maxLatencyMs=50) time to fire.
+    await p3;
+    expect(flushed).toEqual([[1, 2], [3]]);
+    expect(q.getDeadLetters()).toEqual([]);
+  });
 });

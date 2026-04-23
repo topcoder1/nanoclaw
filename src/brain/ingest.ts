@@ -81,6 +81,10 @@ export function startBrainIngest(): void {
   });
 
   unsubscribe = eventBus.on('email.received', (event: EmailReceivedEvent) => {
+    // Capture queue reference atomically — if shutdown races with in-flight
+    // dispatch, we avoid calling `.enqueue` on a null target.
+    const q = queue;
+    if (!q) return;
     const receivedAt = new Date(event.timestamp).toISOString();
     for (const email of event.payload.emails) {
       const threadId = email.thread_id;
@@ -98,7 +102,7 @@ export function startBrainIngest(): void {
         payload: Buffer.from(JSON.stringify(email), 'utf8'),
         received_at: receivedAt,
       };
-      queue?.enqueue(row).catch((err) => {
+      q.enqueue(row).catch((err) => {
         logger.error(
           { err: err instanceof Error ? err.message : String(err), threadId },
           'raw_events enqueue failed — dead-lettered',
