@@ -164,6 +164,12 @@ function ftsSearchTopN(
 function loadKuRows(db: Database.Database, ids: string[]): Map<string, KuRow> {
   if (ids.length === 0) return new Map();
   const placeholders = ids.map(() => '?').join(',');
+  // TODO(P2): v2 §6 requires Qdrant-side filtering of superseded KUs to
+  // preserve the top-K budget after RRF. P1 has no supersession yet
+  // (consolidation lands in P2), so this SQLite-side filter is sufficient
+  // for correctness — Qdrant hits that point at superseded rows are
+  // dropped here before rerank. Will move to Qdrant payload filter
+  // alongside the P2 consolidation worker. See qdrant.ts:searchSemantic.
   const rows = db
     .prepare(
       `SELECT id, text, source_type, source_ref, account, valid_from,

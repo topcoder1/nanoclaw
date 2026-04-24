@@ -147,6 +147,12 @@ export async function searchSemantic(
 ): Promise<BrainSearchHit[]> {
   const c = getClient();
   if (!c) return [];
+  // TODO(P2): v2 §6 requires filtering out superseded KUs on the Qdrant side
+  // to preserve top-K budget after RRF. P1 has no supersession logic yet
+  // (consolidation lands in P2), so all live KUs are returned. SQLite-side
+  // filter in retrieve.ts:loadKuRows ensures correct results; Qdrant filter
+  // will be added alongside the P2 consolidation worker that sets
+  // superseded_at. Track: design-doc §6.
   const must: Array<Record<string, unknown>> = [
     { key: 'model_version', match: { value: filter.modelVersion } },
   ];
