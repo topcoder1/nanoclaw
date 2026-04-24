@@ -20,10 +20,22 @@ Brain / second-brain subcommands:
   claw know "Q4 renewal" --kb-only          # skip local brain
   claw know "alice mentioned" --json        # raw JSON output
 
-Repo indexing (v1.0 — markdown + READMEs only; code files in v1.1):
+Repo indexing (v1.0–v1.2):
   claw sync                                 # index all tracked repos from ~/.claw/repos.yaml
   claw sync --repo nanoclaw                 # just one repo (by name or path)
   claw sync --dry-run                       # report what would change without writing
+  claw sync --code                          # v1.2: also index source files per repo scope
+
+User-captured notes (v2 second-brain inbox):
+  claw save "quick thought"                 # write a note into the brain
+  claw save "..." --project attaxion        # tag with project scope
+  claw save "..." --tags contact:alice,type:meeting
+
+Per-project journals (v2 cached view of notes):
+  claw journal nanoclaw                     # write ~/dev/nanoclaw/docs/journal.md
+  claw journal --all                        # regenerate every tracked repo's journal
+  claw journal nanoclaw --limit 50          # cap how many entries in the rendered file
+  claw journal nanoclaw --dry-run           # preview to stdout, no file write
 """
 
 from __future__ import annotations
@@ -486,6 +498,8 @@ def _render_hit(hit: dict, width: int) -> str:
             tag = "📄 repo "
         elif src_type == "email":
             tag = "✉️  email"
+        elif src_type == "note":
+            tag = "📝 note "
         else:
             tag = "🧠 brain"
     else:
@@ -1016,9 +1030,244 @@ def cmd_sync(argv: list[str]) -> int:
     return 0
 
 
+# ── `claw save` — user-captured notes ───────────────────────────────────────
+
+def _note_id() -> str:
+    """ULID-like id for note KUs. We use a timestamp-prefixed random hex so
+    notes sort naturally by creation time; good enough for primary key
+    uniqueness without importing a ULID lib."""
+    ts_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    rand = hashlib.sha256(os.urandom(16)).hexdigest()[:12]
+    return f"note-{ts_ms:013d}-{rand}"
+
+
+def cmd_save(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog="claw save",
+        description="Capture a note into the second brain. "
+                    "Writes a knowledge_unit with source_type='note'.")
+    p.add_argument("text", nargs="+", help="The note text (joined with spaces)")
+    p.add_argument("--project", help="Project slug — becomes tag `project:<slug>`")
+    p.add_argument("--tags", help="Comma-separated extra tags (e.g. "
+                                  "'contact:alice,type:meeting')")
+    p.add_argument("--account", default="work", choices=("work", "personal"),
+                   help="Brain account bucket (default: work)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the would-be row without writing")
+    p.add_argument("-v", "--verbose", action="store_true")
+    args = p.parse_args(argv)
+
+    global VERBOSE
+    VERBOSE = args.verbose
+    text = " ".join(args.text).strip()
+    if not text:
+        print("error: empty note", file=sys.stderr)
+        return 2
+    if not _BRAIN_DB_PATH.exists():
+        sys.exit(f"error: brain.db not found at {_BRAIN_DB_PATH}")
+
+    now_iso = datetime.now(timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+    ku_id = _note_id()
+    source_ref = f"cli:{ku_id}"
+
+    tags: list[str] = ["kind:note", "source:claw-save"]
+    if args.project:
+        tags.append(f"project:{args.project}")
+    if args.tags:
+        for t in args.tags.split(","):
+            t = t.strip()
+            if t and t not in tags:
+                tags.append(t)
+
+    metadata = {
+        "captured_at": now_iso,
+        "captured_by": "claw-save",
+        "cwd": os.getcwd(),
+    }
+
+    if args.dry_run:
+        print(f"[dry-run] would insert note {ku_id}")
+        print(f"  source_ref: {source_ref}")
+        print(f"  account:    {args.account}")
+        print(f"  tags:       {tags}")
+        print(f"  text:       {text[:200]}{'…' if len(text) > 200 else ''}")
+        return 0
+
+    conn = sqlite3.connect(_BRAIN_DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute(
+            """INSERT INTO knowledge_units
+                 (id, text, source_type, source_ref, account, scope,
+                  confidence, valid_from, recorded_at, topic_key, tags,
+                  extracted_by, extraction_chain, metadata, needs_review,
+                  important)
+               VALUES (?, ?, 'note', ?, ?, NULL, 1.0, ?, ?, NULL, ?,
+                       'claw-save', NULL, ?, 0, 0)""",
+            (
+                ku_id,
+                text,
+                source_ref,
+                args.account,
+                now_iso,
+                now_iso,
+                json.dumps(tags),
+                json.dumps(metadata, sort_keys=True),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"saved note {ku_id} ({len(text)} chars, tags={tags})", file=sys.stderr)
+    print(f"  → run `npx tsx scripts/brain-embed-repos.ts` later to index "
+          f"semantically  (FTS already live)", file=sys.stderr)
+    return 0
+
+
+# ── `claw journal` — per-project journal rendered from notes ────────────────
+
+def _render_journal(repo_name: str, repo_path: Path, notes: list[dict],
+                    limit: int) -> str:
+    """Group notes by UTC date (YYYY-MM-DD) and render as markdown."""
+    header = (
+        f"# Journal — {repo_name}\n\n"
+        f"> Auto-generated by `claw journal {repo_name}` from the second "
+        f"brain. Edits made here are overwritten on the next run. To keep\n"
+        f"> a note, move it into a separate file.\n\n"
+        f"Source: `brain.db` ∋ notes tagged `project:{repo_name}`. "
+        f"Showing up to {limit} most recent.\n\n---\n\n"
+    )
+    if not notes:
+        return header + "_No notes yet for this project. "\
+                        "Use `claw save \"...\" --project "\
+                        f"{repo_name}` to capture one._\n"
+
+    by_day: dict[str, list[dict]] = {}
+    for n in notes:
+        day = (n.get("recorded_at") or "")[:10] or "unknown"
+        by_day.setdefault(day, []).append(n)
+
+    body: list[str] = []
+    for day in sorted(by_day.keys(), reverse=True):
+        body.append(f"## {day}\n")
+        for n in by_day[day]:
+            time_part = (n.get("recorded_at") or "")[11:16] or "??:??"
+            tags = n.get("tags") or []
+            visible_tags = [t for t in tags
+                            if not t.startswith(("kind:", "source:",
+                                                 f"project:{repo_name}"))]
+            tags_str = (" _[" + ", ".join(visible_tags) + "]_") if visible_tags else ""
+            text = (n.get("text") or "").strip()
+            # Indent continuation lines so markdown renders the entry as one
+            # list item even when the note is multi-paragraph.
+            indented = text.replace("\n", "\n    ")
+            body.append(f"- **{time_part}** — {indented}{tags_str}\n")
+        body.append("")
+    return header + "\n".join(body)
+
+
+def cmd_journal(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog="claw journal",
+        description="Generate docs/journal.md for one or all tracked repos "
+                    "from captured notes.")
+    p.add_argument("repo", nargs="?", help="Repo name (last path segment) or absolute path")
+    p.add_argument("--all", action="store_true",
+                   help="Regenerate journals for every tracked repo with notes")
+    p.add_argument("--limit", type=int, default=200,
+                   help="Max notes per journal (default: 200)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print to stdout instead of writing docs/journal.md")
+    p.add_argument("-v", "--verbose", action="store_true")
+    args = p.parse_args(argv)
+
+    global VERBOSE
+    VERBOSE = args.verbose
+
+    if not args.repo and not args.all:
+        sys.exit("error: pass a repo name or --all")
+
+    if not _BRAIN_DB_PATH.exists():
+        sys.exit(f"error: brain.db not found at {_BRAIN_DB_PATH}")
+
+    cfg = _load_repos_config()
+    all_repos = cfg.get("repos") or []
+
+    # Figure out the (repo_name, repo_path) pairs to regenerate.
+    targets: list[tuple[str, Path]] = []
+    if args.repo:
+        target_abs = Path(os.path.expanduser(args.repo)).resolve()
+        for r in all_repos:
+            pr = Path(os.path.expanduser(r.get("path", ""))).resolve()
+            if pr == target_abs or pr.name == args.repo:
+                targets.append((pr.name, pr))
+                break
+        if not targets:
+            sys.exit(f"error: repo {args.repo!r} not in repos.yaml")
+    else:  # --all
+        for r in all_repos:
+            if not r.get("tracked", True):
+                continue
+            pr = Path(os.path.expanduser(r.get("path", ""))).resolve()
+            if pr.is_dir():
+                targets.append((pr.name, pr))
+
+    conn = sqlite3.connect(f"file:{_BRAIN_DB_PATH}?mode=ro", uri=True)
+    written = 0
+    skipped_empty_on_all = 0
+    try:
+        for repo_name, repo_path in targets:
+            rows = conn.execute(
+                """SELECT id, text, recorded_at, tags, metadata
+                     FROM knowledge_units
+                    WHERE source_type = 'note'
+                      AND superseded_at IS NULL
+                      AND tags LIKE ?
+                    ORDER BY recorded_at DESC
+                    LIMIT ?""",
+                (f'%"project:{repo_name}"%', args.limit),
+            ).fetchall()
+            notes = [
+                {
+                    "id": r[0],
+                    "text": r[1],
+                    "recorded_at": r[2],
+                    "tags": json.loads(r[3]) if r[3] else [],
+                    "metadata": json.loads(r[4]) if r[4] else {},
+                }
+                for r in rows
+            ]
+            # With --all, skip repos that have no notes so we don't litter
+            # empty journals. With explicit repo name, still render so the
+            # user sees the placeholder.
+            if args.all and not notes:
+                skipped_empty_on_all += 1
+                continue
+
+            rendered = _render_journal(repo_name, repo_path, notes, args.limit)
+            target = repo_path / "docs" / "journal.md"
+            if args.dry_run:
+                print(f"--- {target} ---")
+                print(rendered)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(rendered, encoding="utf-8")
+            print(f"wrote {target}  ({len(notes)} notes)", file=sys.stderr)
+            written += 1
+    finally:
+        conn.close()
+
+    if args.all:
+        print(f"\nwrote {written} journal(s); skipped {skipped_empty_on_all} "
+              f"empty repo(s)", file=sys.stderr)
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-_SUBCOMMANDS = {"know", "sync"}
+_SUBCOMMANDS = {"know", "sync", "save", "journal"}
 
 
 def main():
@@ -1031,6 +1280,10 @@ def main():
             sys.exit(cmd_know(argv[1:]))
         if sub == "sync":
             sys.exit(cmd_sync(argv[1:]))
+        if sub == "save":
+            sys.exit(cmd_save(argv[1:]))
+        if sub == "journal":
+            sys.exit(cmd_journal(argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="claw",

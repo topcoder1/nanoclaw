@@ -146,12 +146,13 @@ Replace the line-count windows with tree-sitter symbol boundaries (function / cl
 
 Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watching paths from `~/.claw/repos.yaml` via `fswatch`. Debounces changes, re-indexes modified files only. Deferred until (a) v1.0 + v1.1 retrieval is felt-to-be-useful and (b) manual `claw sync` + nightly cron becomes annoying. Likely trigger: team grows beyond one person, or you want "saved a file → searchable within 30s" latency.
 
-### v2 — journals + user capture inbox
+### v2 — journals + user capture inbox (shipped 2026-04-24)
 
-Two additions, both writes:
+`claw save "…" [--project X] [--tags a,b]` — captures a thought / meeting takeaway / link into brain.db with `source_type='note'`, `account='work'` (or `--account personal`), and the specified tags. Id format `note-<epochms>-<12hex>` so notes sort chronologically. Immediately FTS-searchable via `claw know`; semantic search activates on the next `brain-embed-repos.ts` run.
 
-1. **`docs/journal.md` per tracked repo** — agent or CLI can append curated summaries; journal is a *cached view* regenerated from brain.db on `claw sync <repo>`, not the source of truth. Append-only + supersession pattern (mirror brain.db's `superseded_at`). Consolidation via an extended `kb-housekeeping` skill pass.
-2. **`claw save "…"` inbox** — one-liner capture of a thought, meeting takeaway, or "save this URL". Writes as `source_type='note'`. The missing bidirectional surface.
+`claw journal <repo|--all> [--limit N] [--dry-run]` — regenerates `<repo>/docs/journal.md` from notes tagged `project:<repo_name>`. Cached-view pattern: file is overwritten on every run, so to keep text you move it elsewhere. Grouped by UTC date, entries show HH:MM + text + visible (non-internal) tags. `--dry-run` prints to stdout for preview.
+
+Both writes piggyback on the existing `knowledge_units` table — no schema change. The `--all` mode silently skips repos with zero notes so it doesn't create noise.
 
 ### v3+ — expression layer
 
