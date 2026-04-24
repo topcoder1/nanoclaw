@@ -93,10 +93,24 @@ describe('brain/retrieve — math', () => {
     expect(accessScore(1e6)).toBe(1);
   });
 
-  it('finalScore = 0.7·rank + 0.2·recency + 0.1·access', () => {
-    expect(finalScore(1, 1, 1)).toBeCloseTo(1, 6);
+  it('finalScore = 0.7·rank + 0.15·recency + 0.1·access + 0.05·important', () => {
+    // With the important axis defaulting to 0, the weights of the remaining
+    // three axes no longer sum to 1 — they sum to 0.95.
+    expect(finalScore(1, 1, 1)).toBeCloseTo(0.95, 6);
+    expect(finalScore(1, 1, 1, 1)).toBeCloseTo(1, 6);
     expect(finalScore(0, 0, 0)).toBe(0);
-    expect(finalScore(0.5, 0.5, 0.5)).toBeCloseTo(0.5, 6);
+    expect(finalScore(0, 0, 0, 1)).toBeCloseTo(0.05, 6);
+    expect(finalScore(0.5, 0.5, 0.5)).toBeCloseTo(0.475, 6);
+  });
+
+  it('important=1 breaks ties but does not swamp ranker signal', () => {
+    // Important-only KU (rank=0) cannot beat a high-quality hit (rank=0.8):
+    //   0.05·1 = 0.05   vs   0.7·0.8 = 0.56
+    expect(finalScore(0, 0, 0, 1)).toBeLessThan(finalScore(0.8, 0, 0, 0));
+    // Two otherwise-identical hits: the important one wins.
+    expect(finalScore(0.5, 0.5, 0.5, 1)).toBeGreaterThan(
+      finalScore(0.5, 0.5, 0.5, 0),
+    );
   });
 });
 
@@ -108,13 +122,18 @@ function seedKu(
   text: string,
   recordedAt: string,
   accessCount = 0,
-  opts: { account?: string; scope?: string | null; superseded?: boolean } = {},
+  opts: {
+    account?: string;
+    scope?: string | null;
+    superseded?: boolean;
+    important?: boolean;
+  } = {},
 ): void {
   db.prepare(
     `INSERT INTO knowledge_units
        (id, text, source_type, source_ref, account, scope, valid_from,
-        recorded_at, superseded_at, access_count)
-     VALUES (?, ?, 'email', ?, ?, ?, ?, ?, ?, ?)`,
+        recorded_at, superseded_at, access_count, important)
+     VALUES (?, ?, 'email', ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     kuId,
     text,
@@ -125,6 +144,7 @@ function seedKu(
     recordedAt,
     opts.superseded ? recordedAt : null,
     accessCount,
+    opts.important ? 1 : 0,
   );
 }
 
@@ -240,6 +260,36 @@ describe('brain/retrieve — end-to-end', () => {
       .prepare(`SELECT access_count FROM knowledge_units WHERE id = 'Q'`)
       .get() as { access_count: number };
     expect(row.access_count).toBe(1);
+  });
+
+  it('important=1 boosts a KU above an identical non-important peer', async () => {
+    const db = getBrainDb();
+    const now = Date.now();
+    const recent = new Date(now - 1000).toISOString();
+    seedKu(db, 'plain', 'same text', recent, 0, { important: false });
+    seedKu(db, 'starred', 'same text', recent, 0, { important: true });
+
+    qdrantMock.searchSemantic.mockResolvedValue([
+      { id: 'plain', score: 0.9, payload: {} },
+      { id: 'starred', score: 0.9, payload: {} },
+    ]);
+    // Rerank treats them as equal — only the important_boost should separate.
+    rerankMock.rerank.mockImplementation(async (_q, cands) =>
+      cands.map((c: { id: string; text: string }) => ({
+        id: c.id,
+        text: c.text,
+        score: 0.8,
+      })),
+    );
+
+    const out = await recall('same', { limit: 5, nowMs: now });
+    expect(out.map((r) => r.ku_id)).toEqual(['starred', 'plain']);
+    expect(out[0].important).toBe(true);
+    expect(out[0].importantScore).toBe(1);
+    expect(out[1].important).toBe(false);
+    expect(out[1].importantScore).toBe(0);
+    // Starred's final beats plain's by exactly 0.05 (the weight).
+    expect(out[0].finalScore - out[1].finalScore).toBeCloseTo(0.05, 6);
   });
 
   it('recency decay affects final ranking', async () => {

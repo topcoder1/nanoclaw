@@ -6,9 +6,11 @@
  *   Qdrant top 100 (model_version filtered) ──┤
  *                                             │→ RRF(k=60) top 50
  *                                             │→ cross-encoder rerank
- *                                             │→ final = 0.7·rank + 0.2·recency + 0.1·access
- *                                                recency = exp(-ln2 · (now-recorded_at)/halfLife)
- *                                                access  = min(log2(1+access_count)/5, 1)
+ *                                             │→ final = 0.7·rank + 0.15·recency
+ *                                                      + 0.1·access + 0.05·important
+ *                                                recency   = exp(-ln2 · (now-recorded_at)/halfLife)
+ *                                                access    = min(log2(1+access_count)/5, 1)
+ *                                                important = ku.important ? 1 : 0
  *   → top N
  *
  * Always filters superseded_at IS NULL and model_version = active.
@@ -49,10 +51,12 @@ export interface RecallResult {
   valid_from: string;
   recorded_at: string;
   topic_key: string | null;
+  important: boolean;
   finalScore: number;
   rankScore: number;
   recencyScore: number;
   accessScore: number;
+  importantScore: number;
 }
 
 // --- RRF + scoring helpers --------------------------------------------------
@@ -93,12 +97,19 @@ export function accessScore(count: number): number {
   return Math.min(Math.log2(1 + Math.max(0, count)) / 5, 1);
 }
 
+/**
+ * Blend ranker + recency + access-count + user-marked-important into a
+ * single score in roughly [0, 1]. Weights sum to 1 so no axis dominates;
+ * 5% for `important` is a deliberately small nudge — enough to break ties
+ * and surface curated KUs, not enough to override a genuinely better hit.
+ */
 export function finalScore(
   rank: number,
   recency: number,
   access: number,
+  important = 0,
 ): number {
-  return 0.7 * rank + 0.2 * recency + 0.1 * access;
+  return 0.7 * rank + 0.15 * recency + 0.1 * access + 0.05 * important;
 }
 
 // --- FTS5 helper -----------------------------------------------------------
@@ -113,6 +124,7 @@ interface KuRow {
   recorded_at: string;
   topic_key: string | null;
   access_count: number;
+  important: number;
   bm25: number | null;
 }
 
@@ -151,7 +163,7 @@ function ftsSearchTopN(
   const sql = `
     SELECT ku.id, ku.text, ku.source_type, ku.source_ref, ku.account,
            ku.valid_from, ku.recorded_at, ku.topic_key, ku.access_count,
-           bm25(ku_fts) AS bm25
+           ku.important, bm25(ku_fts) AS bm25
     FROM ku_fts
     JOIN knowledge_units ku ON ku.rowid = ku_fts.rowid
     WHERE ku_fts MATCH ? ${where}
@@ -173,7 +185,8 @@ function loadKuRows(db: Database.Database, ids: string[]): Map<string, KuRow> {
   const rows = db
     .prepare(
       `SELECT id, text, source_type, source_ref, account, valid_from,
-              recorded_at, topic_key, access_count, NULL as bm25
+              recorded_at, topic_key, access_count, important,
+              NULL as bm25
        FROM knowledge_units
        WHERE id IN (${placeholders}) AND superseded_at IS NULL`,
     )
@@ -297,6 +310,8 @@ export async function recall(
       ? recencyScore(recordedAtMs, nowMs, halfLifeMs)
       : 0;
     const access = accessScore(row.access_count ?? 0);
+    const important = row.important === 1;
+    const importantBoost = important ? 1 : 0;
     return {
       ku_id: row.id,
       text: row.text,
@@ -306,10 +321,12 @@ export async function recall(
       valid_from: row.valid_from,
       recorded_at: row.recorded_at,
       topic_key: row.topic_key,
+      important,
       rankScore: r.score,
       recencyScore: recency,
       accessScore: access,
-      finalScore: finalScore(r.score, recency, access),
+      importantScore: importantBoost,
+      finalScore: finalScore(r.score, recency, access, importantBoost),
     };
   });
 
