@@ -141,10 +141,13 @@ export function extractCheap(input: ExtractInput): CheapExtractionResult {
   const key = topicKey(seed);
 
   // Cheap-rules claim: one KU per event summarizing what we detected.
-  // Confidence is intentionally capped at 0.7 so the LLM tier can supersede.
+  // Cap at 0.8 so deterministic rule extraction lands above the v2 §7
+  // 0.7 review threshold (> 0.7 → needs_review = 0) when multiple
+  // signals are present. Cheap rules are deterministic so the LLM tier
+  // can still supersede via consolidation in P2.
   const claims: Claim[] = [];
   if (mentions.length > 0 || monies.length > 0) {
-    const ruleConf = Math.min(0.7, 0.5 + mentions.length * 0.02);
+    const ruleConf = Math.min(0.8, 0.5 + mentions.length * 0.02);
     claims.push({
       text: full.slice(0, 500),
       topic_seed: seed,

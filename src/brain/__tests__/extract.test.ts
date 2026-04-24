@@ -67,6 +67,26 @@ describe('brain/extract — cheap rules', () => {
     expect(r.signalScore).toBeLessThanOrEqual(0.3);
     expect(r.claims).toEqual([]);
   });
+
+  it('cheap-tier confidence caps at 0.8 so rule extractions bypass review', () => {
+    // Lots of signal: many URLs, emails, deals, calls → mentions.length
+    // is large enough that the uncapped formula would exceed 0.8.
+    const r = extractCheap({
+      subject: 'Budget review 2026-05-12',
+      text: [
+        'See https://a.example https://b.example https://c.example',
+        'deal_1 deal_2 deal_3 deal_4 deal_5',
+        'call_1 call_2 call_3 call_4 call_5',
+        'alice@x.co bob@y.co carol@z.co dave@w.co',
+        'Quote $10,000. Quote $20,000. Phone +1 555 111 2222.',
+      ].join(' '),
+    });
+    expect(r.claims).toHaveLength(1);
+    expect(r.claims[0].confidence).toBeLessThanOrEqual(0.8);
+    // With enough mentions, we hit the 0.8 ceiling exactly (v2 §7: >0.7
+    // → needs_review=0), which is the point of the cap.
+    expect(r.claims[0].confidence).toBe(0.8);
+  });
 });
 
 describe('brain/extract — LLM gating', () => {
