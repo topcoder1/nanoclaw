@@ -99,6 +99,7 @@ import {
 import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
+import { startProviderProbe } from './brain/provider-probe.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
 import { startReconcileSchedule } from './brain/reconcile.js';
@@ -1296,6 +1297,7 @@ async function main(): Promise<void> {
   // Each returns a stop fn for clean SIGTERM shutdown.
   const stopReconcileSched = startReconcileSchedule();
   const stopBackupSched = startNightlyBackupSchedule();
+  const stopProviderProbe = startProviderProbe();
   const stopDigestSched = startWeeklyDigestSchedule((md) => {
     const primary = channels.find((c) => c.name.startsWith('telegram'));
     const mainGroup = Object.entries(registeredGroups).find(
@@ -1338,6 +1340,7 @@ async function main(): Promise<void> {
     stopSnooze?.();
     stopReconcileSched();
     stopBackupSched();
+    stopProviderProbe();
     stopDigestSched();
     process.exit(0);
   };
