@@ -225,8 +225,12 @@ li a{color:#0366d6;text-decoration:none}
 #bar .count{font-size:14px;color:#444;flex:1}
 #bar button{background:#d9534f;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer}
 #bar button:disabled{background:#c6c9cd;cursor:not-allowed}
+.top-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.top-nav h1{margin:0}
+.top-nav .brain-link{background:#0366d6;color:#fff!important;padding:8px 14px;border-radius:14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.top-nav .brain-link:hover{background:#1976d2}
 </style></head><body>
-<h1>nanoclaw</h1>
+<div class="top-nav"><h1>nanoclaw</h1><a class="brain-link" href="/brain">🧠 Brain</a></div>
 <h2>📥 Attention (${attention.length})</h2>
 ${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul id="attention">${attention.map(attentionRow).join('')}</ul>`}
 <h2>🗂 Archive queue (${archive.length}) ${archive.length > 0 ? '<span class="tools" id="sel-all">Select all</span> <span class="tools" id="sel-none">Clear</span>' : ''}</h2>
