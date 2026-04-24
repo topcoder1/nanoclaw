@@ -19,6 +19,8 @@ const envConfig = readEnvFile([
   'WEBHOOK_SECRET',
   'QDRANT_URL',
   'BRAIN_DIGEST_CADENCE',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_INITDATA_REQUIRED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -189,6 +191,28 @@ export const BRAIN_DIGEST_CADENCE: 'weekly' | 'daily' = (() => {
     .toLowerCase();
   return raw === 'daily' ? 'daily' : 'weekly';
 })();
+
+/**
+ * Telegram Bot API token — shared between the bot channel and the Mini App
+ * initData HMAC validator. Read lazily (not captured at import) so tests
+ * can set it via env without rebuilding the module. Returns '' when unset.
+ */
+export function getTelegramBotToken(): string {
+  return (
+    process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || ''
+  );
+}
+
+/**
+ * Enforce Telegram `initData` HMAC validation on the `/brain` and
+ * `/api/brain` sub-routers when `true`. Default `false` — wire is still
+ * gated by Cloudflare Access in prod, and enabling this before dropping
+ * CF Access would lock out browser access for development/QA. Flip via
+ * the launchd plist once the Mini App is the only UI.
+ */
+export const TELEGRAM_INITDATA_REQUIRED =
+  (process.env.TELEGRAM_INITDATA_REQUIRED ||
+    envConfig.TELEGRAM_INITDATA_REQUIRED) === 'true';
 
 // Telegram Mini App: public HTTPS URL that Telegram can open.
 // Must point to the Mini App Express server (default local port 3847).

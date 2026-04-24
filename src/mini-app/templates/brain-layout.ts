@@ -120,6 +120,11 @@ ${body}
 // Telegram WebApp: request full viewport + disable vertical swipes so the
 // sheet doesn't collapse when scrolling long lists. Safe no-op outside
 // Telegram (tg is undefined).
+//
+// Also: if initData is present, wrap window.fetch so every request carries
+// the x-telegram-init-data header. This is how the server-side HMAC
+// middleware (opt-in via TELEGRAM_INITDATA_REQUIRED) authenticates the
+// user without us having to touch every fetch call site.
 (function(){
   try {
     var tg = window.Telegram && window.Telegram.WebApp;
@@ -128,6 +133,19 @@ ${body}
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
     if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
+    var initData = tg.initData || '';
+    if (initData) {
+      var origFetch = window.fetch.bind(window);
+      window.fetch = function(input, init){
+        init = init || {};
+        var headers = new Headers(init.headers || (input && input.headers) || {});
+        if (!headers.has('x-telegram-init-data')) {
+          headers.set('x-telegram-init-data', initData);
+        }
+        init.headers = headers;
+        return origFetch(input, init);
+      };
+    }
   } catch(_) { /* non-Telegram context */ }
 })();
 </script>

@@ -19,6 +19,11 @@ import type { TaskStep, TaskLog } from './templates/task-detail.js';
 import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
 import { createBrainRoutes, createBrainApiRoutes } from './brain-routes.js';
+import { createTelegramAuthMiddleware } from './telegram-auth.js';
+import {
+  getTelegramBotToken,
+  TELEGRAM_INITDATA_REQUIRED,
+} from '../config.js';
 import {
   detectSignUrl,
   isSignInvite,
@@ -61,6 +66,19 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   // 1130-line main server.ts uncluttered. The `/api/brain/*` JSON
   // endpoints live on a parallel router because express scopes each
   // router to a single mount path.
+  //
+  // When TELEGRAM_INITDATA_REQUIRED=true, both brain sub-trees require a
+  // valid Telegram `initData` payload (header x-telegram-init-data OR
+  // query param tgWebAppData). Default is OFF — prod still relies on
+  // Cloudflare Access in front. Flip in launchd plist once CF Access
+  // is retired.
+  if (TELEGRAM_INITDATA_REQUIRED) {
+    const tgAuth = createTelegramAuthMiddleware({
+      getBotToken: getTelegramBotToken,
+    });
+    app.use('/brain', tgAuth);
+    app.use('/api/brain', tgAuth);
+  }
   app.use('/brain', createBrainRoutes({ brainDb: opts.brainDb }));
   app.use('/api/brain', createBrainApiRoutes({ brainDb: opts.brainDb }));
 
