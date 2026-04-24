@@ -253,6 +253,254 @@ ${reviewBanner}
     );
   });
 
+  // --- GET /brain/entities — directory ---------------------------------
+  router.get('/entities', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+
+    const type =
+      typeof req.query.type === 'string' &&
+      ['person', 'company', 'project', 'product', 'topic'].includes(
+        req.query.type,
+      )
+        ? req.query.type
+        : '';
+    const rawPage =
+      typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+    const PAGE_SIZE = 50;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const whereType = type ? 'WHERE e.entity_type = ?' : '';
+    const countParams: unknown[] = type ? [type] : [];
+    const listParams: unknown[] = type
+      ? [type, PAGE_SIZE, offset]
+      : [PAGE_SIZE, offset];
+
+    const total = (
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM entities e ${whereType}`)
+        .get(...countParams) as { n: number }
+    ).n;
+
+    const rows = db
+      .prepare(
+        `SELECT e.entity_id, e.entity_type, e.canonical,
+                COALESCE(cnt.n, 0) AS ku_count
+           FROM entities e
+           LEFT JOIN (
+             SELECT entity_id, COUNT(*) AS n FROM ku_entities GROUP BY entity_id
+           ) cnt ON cnt.entity_id = e.entity_id
+           ${whereType}
+           ORDER BY ku_count DESC, e.entity_id
+           LIMIT ? OFFSET ?`,
+      )
+      .all(...listParams) as Array<{
+      entity_id: string;
+      entity_type: string;
+      canonical: string | null;
+      ku_count: number;
+    }>;
+
+    const tabs = ['', 'person', 'company', 'project', 'product', 'topic']
+      .map((t) => {
+        const label =
+          t === ''
+            ? 'All'
+            : t.charAt(0).toUpperCase() + t.slice(1) + 's';
+        const href = t ? `/brain/entities?type=${t}` : '/brain/entities';
+        const active = t === type ? ' class="active"' : '';
+        return `<a href="${href}"${active}>${label}</a>`;
+      })
+      .join(' · ');
+
+    const listHtml = rows.length
+      ? `<ul>${rows.map(renderEntityRow).join('')}</ul>`
+      : '<p class="empty">No entities match this filter yet.</p>';
+
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const pager =
+      totalPages > 1
+        ? `<p class="meta">Page ${page} of ${totalPages} · ` +
+          (page > 1
+            ? `<a href="?${type ? `type=${type}&` : ''}page=${page - 1}">← prev</a>`
+            : '') +
+          (page > 1 && page < totalPages ? ' · ' : '') +
+          (page < totalPages
+            ? `<a href="?${type ? `type=${type}&` : ''}page=${page + 1}">next →</a>`
+            : '') +
+          '</p>'
+        : '';
+
+    const body = `
+<h1>Entities (${total})</h1>
+<div class="card"><p class="meta">${tabs}</p></div>
+<div class="card">${listHtml}</div>
+${pager}`;
+    res.type('html').send(
+      brainShell('Entities — Brain', body, {
+        activeNav: 'entities',
+        reviewCount,
+      }),
+    );
+  });
+
+  // --- GET /brain/entities/:id — detail page ---------------------------
+  router.get('/entities/:id', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const id = req.params.id;
+
+    const entity = db
+      .prepare(
+        `SELECT entity_id, entity_type, canonical, created_at, updated_at
+           FROM entities WHERE entity_id = ?`,
+      )
+      .get(id) as
+      | {
+          entity_id: string;
+          entity_type: string;
+          canonical: string | null;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+
+    if (!entity) {
+      res.status(404).type('html').send(
+        brainShell('Not found — Brain', `
+<h1>Entity not found</h1>
+<div class="card"><p class="meta">No entity with id <code>${escapeHtml(id)}</code>.</p></div>`, {
+          activeNav: 'entities',
+          reviewCount,
+        }),
+      );
+      return;
+    }
+
+    const aliases = db
+      .prepare(
+        `SELECT field_name, field_value, valid_from, valid_until, confidence
+           FROM entity_aliases WHERE entity_id = ?
+           ORDER BY COALESCE(valid_until, '9999') DESC, valid_from DESC`,
+      )
+      .all(id) as Array<{
+      field_name: string;
+      field_value: string;
+      valid_from: string;
+      valid_until: string | null;
+      confidence: number;
+    }>;
+
+    const rels = db
+      .prepare(
+        `SELECT rel_id, from_entity_id, to_entity_id, relationship,
+                valid_from, valid_until, confidence,
+                CASE WHEN from_entity_id = ? THEN 'outgoing' ELSE 'incoming' END AS direction
+           FROM entity_relationships
+          WHERE from_entity_id = ? OR to_entity_id = ?
+          ORDER BY valid_from DESC`,
+      )
+      .all(id, id, id) as Array<{
+      rel_id: string;
+      from_entity_id: string;
+      to_entity_id: string;
+      relationship: string;
+      valid_from: string;
+      valid_until: string | null;
+      confidence: number;
+      direction: 'outgoing' | 'incoming';
+    }>;
+
+    const timeline = db
+      .prepare(
+        `SELECT ku.id, ku.text, ku.source_type, ku.recorded_at,
+                ku.confidence, ku.superseded_at
+           FROM ku_entities ke
+           JOIN knowledge_units ku ON ku.id = ke.ku_id
+          WHERE ke.entity_id = ?
+          ORDER BY ku.recorded_at DESC
+          LIMIT 100`,
+      )
+      .all(id) as Array<{
+      id: string;
+      text: string;
+      source_type: string;
+      recorded_at: string;
+      confidence: number;
+      superseded_at: string | null;
+    }>;
+
+    const displayName = renderEntityDisplayName(entity);
+
+    const aliasesHtml = aliases.length
+      ? `<ul>${aliases
+          .map(
+            (a) =>
+              `<li>
+                <span class="pill">${escapeHtml(a.field_name)}</span>
+                <strong>${escapeHtml(a.field_value)}</strong>
+                <span class="meta">· from ${escapeHtml(a.valid_from)}${a.valid_until ? ` until ${escapeHtml(a.valid_until)}` : ''} · confidence ${a.confidence.toFixed(2)}</span>
+              </li>`,
+          )
+          .join('')}</ul>`
+      : '<p class="empty">No aliases.</p>';
+
+    const relsHtml = rels.length
+      ? `<ul>${rels
+          .map((r) => {
+            const other = r.direction === 'outgoing' ? r.to_entity_id : r.from_entity_id;
+            const arrow = r.direction === 'outgoing' ? '→' : '←';
+            return `<li>
+              ${arrow} <span class="pill">${escapeHtml(r.relationship)}</span>
+              <a href="/brain/entities/${escapeHtml(other)}">${escapeHtml(other)}</a>
+              <span class="meta">· from ${escapeHtml(r.valid_from)}${r.valid_until ? ` until ${escapeHtml(r.valid_until)}` : ''}</span>
+            </li>`;
+          })
+          .join('')}</ul>`
+      : '<p class="empty">No relationships.</p>';
+
+    const timelineHtml = timeline.length
+      ? `<ul>${timeline
+          .map((k) => {
+            const snippet = k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
+            const muted = k.superseded_at ? ' style="opacity:0.55"' : '';
+            return `<li${muted}>
+              <a class="row-link" href="/brain/ku/${escapeHtml(k.id)}">
+                <div class="snippet"><strong>${escapeHtml(snippet)}</strong></div>
+                <div class="meta">
+                  <span class="pill source">${escapeHtml(k.source_type)}</span>
+                  ${confidenceBar(k.confidence)}
+                  <span>· ${formatAge(k.recorded_at)}</span>
+                  ${k.superseded_at ? '<span class="pill">superseded</span>' : ''}
+                </div>
+              </a>
+            </li>`;
+          })
+          .join('')}</ul>`
+      : '<p class="empty">No KUs mention this entity yet.</p>';
+
+    const body = `
+<h1>${escapeHtml(displayName)} <span class="pill ${escapeHtml(entity.entity_type)}">${escapeHtml(entity.entity_type)}</span></h1>
+<div class="card"><p class="meta">
+  id: <code>${escapeHtml(entity.entity_id)}</code> ·
+  created ${escapeHtml(entity.created_at)} ·
+  updated ${escapeHtml(entity.updated_at)}
+</p></div>
+<h2>Aliases</h2>
+<div class="card">${aliasesHtml}</div>
+<h2>Relationships</h2>
+<div class="card">${relsHtml}</div>
+<h2>Timeline</h2>
+<div class="card">${timelineHtml}</div>`;
+    res.type('html').send(
+      brainShell(`${displayName} — Brain`, body, {
+        activeNav: 'entities',
+        reviewCount,
+      }),
+    );
+  });
+
   // --- GET /brain/search — relevance-ranked search via recall() ---------
   router.get('/search', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -399,6 +647,42 @@ function renderSearchFiltersForm(params: {
     <button type="submit">Apply filters</button>
   </form>
 </div>`;
+}
+
+/** Parse entity.canonical JSON and fall back to entity_id on error. */
+function renderEntityDisplayName(entity: {
+  entity_id: string;
+  canonical: string | null;
+}): string {
+  if (!entity.canonical) return entity.entity_id;
+  try {
+    const parsed = JSON.parse(entity.canonical) as {
+      name?: string;
+      domain?: string;
+      email?: string;
+    };
+    return parsed.name || parsed.domain || parsed.email || entity.entity_id;
+  } catch {
+    return entity.entity_id;
+  }
+}
+
+function renderEntityRow(row: {
+  entity_id: string;
+  entity_type: string;
+  canonical: string | null;
+  ku_count: number;
+}): string {
+  const name = renderEntityDisplayName(row);
+  return `<li>
+    <a class="row-link" href="/brain/entities/${escapeHtml(row.entity_id)}">
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <span class="pill ${escapeHtml(row.entity_type)}">${escapeHtml(row.entity_type)}</span>
+        <span class="meta">· ${row.ku_count} KU${row.ku_count === 1 ? '' : 's'}</span>
+      </div>
+    </a>
+  </li>`;
 }
 
 function renderSearchRow(r: RecallResult): string {
