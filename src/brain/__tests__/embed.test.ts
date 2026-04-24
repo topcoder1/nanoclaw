@@ -69,7 +69,9 @@ describe('brain/embed', () => {
   it('embedText prepends the query prefix in query mode', async () => {
     pipelineMock.mockResolvedValue({ data: fakeVector(2) });
     await embedText('what did she say', 'query');
-    expect(pipelineMock.mock.calls[0][0]).toBe('search_query: what did she say');
+    expect(pipelineMock.mock.calls[0][0]).toBe(
+      'search_query: what did she say',
+    );
   });
 
   it('embedText returns 768 numeric dimensions', async () => {

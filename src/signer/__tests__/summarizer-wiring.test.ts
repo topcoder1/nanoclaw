@@ -24,9 +24,13 @@ describe('summarizer wiring', () => {
     });
 
     const fetchDocText = vi.fn().mockResolvedValue('doc text here');
-    const llm = vi.fn().mockResolvedValue({ summary: ['Doc: NDA'], riskFlags: [] });
+    const llm = vi
+      .fn()
+      .mockResolvedValue({ summary: ['Doc: NDA'], riskFlags: [] });
 
-    const summarized = new Promise<void>((resolve) => bus.on('sign.summarized', () => resolve()));
+    const summarized = new Promise<void>((resolve) =>
+      bus.on('sign.summarized', () => resolve()),
+    );
 
     startSummarizerWiring({ db, bus, fetchDocText, llm });
 

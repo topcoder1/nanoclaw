@@ -13,12 +13,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import { createMiniAppServer } from '../mini-app/server.js';
 
-const SCHEMA_PATH = path.resolve(
-  __dirname,
-  '..',
-  'brain',
-  'schema.sql',
-);
+const SCHEMA_PATH = path.resolve(__dirname, '..', 'brain', 'schema.sql');
 
 function makeBrainDb(): Database.Database {
   const db = new Database(':memory:');
@@ -81,7 +76,9 @@ describe('Brain miniapp — skeleton', () => {
   it('review badge is hidden when queue is empty', async () => {
     const res = await request(app).get('/brain');
     // The review link should NOT carry a badge count span.
-    expect(res.text).not.toMatch(/href="\/brain\/review">[^<]*<span class="count">/);
+    expect(res.text).not.toMatch(
+      /href="\/brain\/review">[^<]*<span class="count">/,
+    );
   });
 
   it('review badge shows the count when queue is non-empty', async () => {

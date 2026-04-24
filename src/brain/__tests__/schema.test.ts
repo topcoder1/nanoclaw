@@ -124,7 +124,9 @@ describe('brain schema', () => {
         (id, text, source_type, account, valid_from, recorded_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    expect(() => stmt.run('k1', 't', 'email', 'work', 'now', 'now')).not.toThrow();
+    expect(() =>
+      stmt.run('k1', 't', 'email', 'work', 'now', 'now'),
+    ).not.toThrow();
     expect(() => stmt.run('k2', 't', 'email', 'other', 'now', 'now')).toThrow();
   });
 
@@ -178,9 +180,7 @@ describe('brain schema', () => {
   it('schema is idempotent — applying twice does not error', () => {
     db = openWithSchema(dbPath);
     // Re-apply.
-    expect(() =>
-      db!.exec(fs.readFileSync(SCHEMA_PATH, 'utf8')),
-    ).not.toThrow();
+    expect(() => db!.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'))).not.toThrow();
 
     // Insert a row, then re-apply once more and verify the row is still there.
     db.prepare(
@@ -196,13 +196,15 @@ describe('brain schema', () => {
 
   it('WAL pragma is persistent across reopens', () => {
     db = openWithSchema(dbPath);
-    expect((db.pragma('journal_mode', { simple: true }) as string).toLowerCase()).toBe(
-      'wal',
-    );
+    expect(
+      (db.pragma('journal_mode', { simple: true }) as string).toLowerCase(),
+    ).toBe('wal');
     db.close();
     const reopened = new Database(dbPath);
     expect(
-      (reopened.pragma('journal_mode', { simple: true }) as string).toLowerCase(),
+      (
+        reopened.pragma('journal_mode', { simple: true }) as string
+      ).toLowerCase(),
     ).toBe('wal');
     reopened.close();
     db = null;

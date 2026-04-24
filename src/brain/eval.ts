@@ -62,7 +62,12 @@ export function seedTemplates(): GoldenTemplate[] {
   // we copy src/brain/*.json via tsc's resolveJsonModule — but at runtime
   // non-imported JSON isn't copied, so fall back to the src tree).
   const adjacent = path.join(__dirname, 'golden-set.json');
-  const srcPath = path.resolve(process.cwd(), 'src', 'brain', 'golden-set.json');
+  const srcPath = path.resolve(
+    process.cwd(),
+    'src',
+    'brain',
+    'golden-set.json',
+  );
   const target = fs.existsSync(adjacent) ? adjacent : srcPath;
   const raw = fs.readFileSync(target, 'utf8');
   cachedTemplates = JSON.parse(raw) as GoldenTemplate[];
@@ -126,8 +131,7 @@ export async function runEval(
   });
 
   const n = perQuery.length || 1;
-  const precisionAt10 =
-    perQuery.reduce((s, m) => s + m.precisionAt10, 0) / n;
+  const precisionAt10 = perQuery.reduce((s, m) => s + m.precisionAt10, 0) / n;
   const recallAt10 = perQuery.reduce((s, m) => s + m.recallAt10, 0) / n;
   const mrr = perQuery.reduce((s, m) => s + m.reciprocalRank, 0) / n;
 

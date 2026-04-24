@@ -15,7 +15,9 @@ export interface TriageHookInput {
   flagEnabled: boolean;
 }
 
-export async function onSignInviteDetected(input: TriageHookInput): Promise<string | null> {
+export async function onSignInviteDetected(
+  input: TriageHookInput,
+): Promise<string | null> {
   if (!input.flagEnabled) return null;
 
   // Idempotency: if there's an active ceremony for this email, reuse it.

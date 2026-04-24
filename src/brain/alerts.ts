@@ -165,7 +165,8 @@ export function evaluateAlerts(input: EvaluateInput = {}): Alert[] {
     const row = getSystemState(LEGACY_DROP_REMINDER_KEY);
     const lastMs = row ? Date.parse(row.value) : NaN;
     const overdue =
-      !row || Number.isNaN(lastMs) ||
+      !row ||
+      Number.isNaN(lastMs) ||
       nowMs - lastMs >= LEGACY_DROP_REMINDER_INTERVAL_MS;
     if (overdue) {
       fired.push({
@@ -199,7 +200,10 @@ export function evaluateAlerts(input: EvaluateInput = {}): Alert[] {
   }
 
   if (fired.length > 0) {
-    logger.warn({ count: fired.length, categories: fired.map((a) => a.category) }, 'brain alerts fired');
+    logger.warn(
+      { count: fired.length, categories: fired.map((a) => a.category) },
+      'brain alerts fired',
+    );
   }
   return fired;
 }

@@ -37,7 +37,10 @@ describe('triage-hook', () => {
     expect(emitted).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'sign.invite.detected',
-        payload: expect.objectContaining({ ceremonyId: id, vendor: 'docusign' }),
+        payload: expect.objectContaining({
+          ceremonyId: id,
+          vendor: 'docusign',
+        }),
       }),
     );
   });

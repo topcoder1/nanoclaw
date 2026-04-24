@@ -57,7 +57,9 @@ export interface BackupResult {
  * Back up brain.db to `store/backups/brain-YYYY-MM-DD.db`. Overwrites
  * same-day files — a re-run replaces an in-progress backup cleanly.
  */
-export async function backupBrainDb(opts: { nowIso?: string; backupDir?: string } = {}): Promise<BackupResult> {
+export async function backupBrainDb(
+  opts: { nowIso?: string; backupDir?: string } = {},
+): Promise<BackupResult> {
   const iso = opts.nowIso ?? new Date().toISOString();
   const dir = opts.backupDir ?? getBrainBackupDir();
   ensureDir(dir);
@@ -69,10 +71,7 @@ export async function backupBrainDb(opts: { nowIso?: string; backupDir?: string 
   await db.backup(tmpPath);
   fs.renameSync(tmpPath, outPath);
   const stat = fs.statSync(outPath);
-  logger.info(
-    { path: outPath, bytes: stat.size },
-    'brain.db backup complete',
-  );
+  logger.info({ path: outPath, bytes: stat.size }, 'brain.db backup complete');
   return { path: outPath, bytes: stat.size, ranAt: iso };
 }
 
@@ -97,8 +96,7 @@ export async function backupQdrant(
   const collection = opts.collection ?? BRAIN_COLLECTION;
   ensureDir(dir);
   const url = QDRANT_URL;
-  const client =
-    opts.client ?? (url ? new QdrantClient({ url }) : null);
+  const client = opts.client ?? (url ? new QdrantClient({ url }) : null);
   if (!client) {
     logger.info('backupQdrant: QDRANT_URL not set — skipping');
     return null;
@@ -141,7 +139,11 @@ export async function backupQdrant(
  * Delete files in `dir` older than `retentionDays` based on mtime.
  * Returns the list of removed paths.
  */
-export function pruneOldBackups(dir: string, retentionDays: number, nowMs: number = Date.now()): string[] {
+export function pruneOldBackups(
+  dir: string,
+  retentionDays: number,
+  nowMs: number = Date.now(),
+): string[] {
   if (!fs.existsSync(dir)) return [];
   const cutoff = nowMs - retentionDays * 24 * 60 * 60 * 1000;
   const removed: string[] = [];
@@ -234,7 +236,10 @@ export function startNightlyBackupSchedule(): () => void {
           );
         })
         .finally(() => {
-          pruneOldBackups(getQdrantSnapshotDir(), QDRANT_SNAPSHOT_RETENTION_DAYS);
+          pruneOldBackups(
+            getQdrantSnapshotDir(),
+            QDRANT_SNAPSHOT_RETENTION_DAYS,
+          );
         });
     }
   };

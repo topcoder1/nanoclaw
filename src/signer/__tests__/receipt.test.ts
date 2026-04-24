@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runMigrations } from '../../db.js';
-import { createCeremony, transitionState, updateSignedPdf, updateFailure } from '../ceremony-repo.js';
+import {
+  createCeremony,
+  transitionState,
+  updateSignedPdf,
+  updateFailure,
+} from '../ceremony-repo.js';
 import { postReceipt, archivePathFor } from '../receipt.js';
 
 describe('receipt', () => {
@@ -20,7 +25,13 @@ describe('receipt', () => {
   it('posts a signed receipt with PDF attachment', async () => {
     const pdfPath = path.join(tmp, 'signed.pdf');
     fs.writeFileSync(pdfPath, 'PDF-CONTENT');
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x', docTitle: 'NDA' });
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+      docTitle: 'NDA',
+    });
     transitionState(db, 'c1', 'detected', 'summarized');
     transitionState(db, 'c1', 'summarized', 'approved');
     transitionState(db, 'c1', 'approved', 'signing');
@@ -39,14 +50,28 @@ describe('receipt', () => {
       sendDocument,
     });
 
-    expect(sendText).toHaveBeenCalledWith('chat-1', expect.stringMatching(/✅ Signed/), expect.any(Object));
-    expect(sendDocument).toHaveBeenCalledWith('chat-1', pdfPath, expect.any(Object));
+    expect(sendText).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringMatching(/✅ Signed/),
+      expect.any(Object),
+    );
+    expect(sendDocument).toHaveBeenCalledWith(
+      'chat-1',
+      pdfPath,
+      expect.any(Object),
+    );
   });
 
   it('posts a failed receipt with screenshot attachment + manual-open button', async () => {
     const shot = path.join(tmp, 'fail.png');
     fs.writeFileSync(shot, 'PNG-CONTENT');
-    createCeremony(db, { id: 'c2', emailId: 'e2', vendor: 'docusign', signUrl: 'https://docusign.net/y', docTitle: 'MSA' });
+    createCeremony(db, {
+      id: 'c2',
+      emailId: 'e2',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/y',
+      docTitle: 'MSA',
+    });
     transitionState(db, 'c2', 'detected', 'summarized');
     transitionState(db, 'c2', 'summarized', 'approved');
     transitionState(db, 'c2', 'approved', 'signing');
@@ -81,7 +106,12 @@ describe('receipt', () => {
   });
 
   it('throws when signed outcome but ceremony has no signed_pdf_path', async () => {
-    createCeremony(db, { id: 'c3', emailId: 'e3', vendor: 'docusign', signUrl: 'x' });
+    createCeremony(db, {
+      id: 'c3',
+      emailId: 'e3',
+      vendor: 'docusign',
+      signUrl: 'x',
+    });
     transitionState(db, 'c3', 'detected', 'cancelled');
     await expect(
       postReceipt({
@@ -96,7 +126,16 @@ describe('receipt', () => {
   });
 
   it('archivePathFor builds YYYY/MM/id__slug path', () => {
-    const p = archivePathFor('/base/groups/main', 'abc-123', 'NDA — Acme & Alice.pdf', new Date('2026-04-20'));
-    expect(p.endsWith('/groups/main/signed-docs/2026/04/abc-123__nda-acme-alice-pdf.pdf')).toBe(true);
+    const p = archivePathFor(
+      '/base/groups/main',
+      'abc-123',
+      'NDA — Acme & Alice.pdf',
+      new Date('2026-04-20'),
+    );
+    expect(
+      p.endsWith(
+        '/groups/main/signed-docs/2026/04/abc-123__nda-acme-alice-pdf.pdf',
+      ),
+    ).toBe(true);
   });
 });

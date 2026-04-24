@@ -115,7 +115,11 @@ describe('brain/extract — LLM gating', () => {
     db.prepare(
       `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
        VALUES ('c1', ?, 'anthropic', 'extract', 1000, ?, ?)`,
-    ).run(new Date().toISOString().slice(0, 10), DAILY_LLM_BUDGET_USD + 0.01, 'now');
+    ).run(
+      new Date().toISOString().slice(0, 10),
+      DAILY_LLM_BUDGET_USD + 0.01,
+      'now',
+    );
 
     const caller = vi.fn();
     const claims = await extractLLM(
@@ -189,9 +193,7 @@ describe('brain/extract — extractPipeline confidence branching', () => {
 
   it('topic_key is stable across calls with same seed', async () => {
     const caller: LlmCaller = vi.fn(async () => ({
-      claims: [
-        { text: 'a', topic_seed: 'Acme renewal Q4', confidence: 0.9 },
-      ],
+      claims: [{ text: 'a', topic_seed: 'Acme renewal Q4', confidence: 0.9 }],
       inputTokens: 1,
       outputTokens: 1,
     }));

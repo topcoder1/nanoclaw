@@ -36,15 +36,20 @@ function rowToProfile(r: Row): SignerProfile {
 }
 
 export function getProfile(db: Database.Database): SignerProfile | null {
-  const row = db.prepare('SELECT * FROM signer_profile WHERE id = 1').get() as Row | undefined;
+  const row = db.prepare('SELECT * FROM signer_profile WHERE id = 1').get() as
+    | Row
+    | undefined;
   return row ? rowToProfile(row) : null;
 }
 
-export function upsertProfile(db: Database.Database, input: UpsertProfileInput): void {
+export function upsertProfile(
+  db: Database.Database,
+  input: UpsertProfileInput,
+): void {
   const now = Date.now();
-  const existing = db.prepare('SELECT id, created_at FROM signer_profile WHERE id = 1').get() as
-    | { id: number; created_at: number }
-    | undefined;
+  const existing = db
+    .prepare('SELECT id, created_at FROM signer_profile WHERE id = 1')
+    .get() as { id: number; created_at: number } | undefined;
 
   if (existing) {
     db.prepare(
@@ -79,7 +84,10 @@ export function upsertProfile(db: Database.Database, input: UpsertProfileInput):
   }
 }
 
-const LABEL_KEYWORDS: Array<{ re: RegExp; key: ProfileFieldMatch['profileKey'] }> = [
+const LABEL_KEYWORDS: Array<{
+  re: RegExp;
+  key: ProfileFieldMatch['profileKey'];
+}> = [
   { re: /\b(title|role|position|job)\b/i, key: 'title' },
   { re: /\b(address|street|city|zip|postal)\b/i, key: 'address' },
   { re: /\b(phone|mobile|tel|cell)\b/i, key: 'phone' },

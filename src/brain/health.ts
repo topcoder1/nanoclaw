@@ -131,7 +131,11 @@ export function getBrainHealthReport(nowIso?: string): BrainHealthReport {
       todayUsd,
       rolling7dAvgUsd: rolling,
       todayRatioOfAvg:
-        rolling === 0 ? (todayUsd > 0 ? Number.POSITIVE_INFINITY : 0) : todayUsd / rolling,
+        rolling === 0
+          ? todayUsd > 0
+            ? Number.POSITIVE_INFINITY
+            : 0
+          : todayUsd / rolling,
       monthToDateUsd: mtd,
       monthlyBudgetUsd: MONTHLY_BUDGET_USD,
       monthlyBudgetUtilization: mtd / MONTHLY_BUDGET_USD,

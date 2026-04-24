@@ -114,7 +114,11 @@ export function collectWeeklyDigest(
         ORDER BY access_count DESC
         LIMIT 5`,
     )
-    .all(startIso, nowIso) as Array<{ id: string; text: string; access_count: number }>;
+    .all(startIso, nowIso) as Array<{
+    id: string;
+    text: string;
+    access_count: number;
+  }>;
 
   const newEntities = (
     db
@@ -131,7 +135,9 @@ export function collectWeeklyDigest(
         `SELECT COUNT(*) AS n FROM raw_events
           WHERE processed_at IS NULL AND received_at < ?`,
       )
-      .get(new Date(Date.parse(nowIso) - 24 * 60 * 60 * 1000).toISOString()) as {
+      .get(
+        new Date(Date.parse(nowIso) - 24 * 60 * 60 * 1000).toISOString(),
+      ) as {
       n: number;
     }
   ).n;
@@ -227,7 +233,9 @@ export function formatWeeklyDigestMarkdown(
       qdrantReachable?: boolean;
     };
     const drift =
-      typeof st.driftRatio === 'number' ? (st.driftRatio * 100).toFixed(2) : '?';
+      typeof st.driftRatio === 'number'
+        ? (st.driftRatio * 100).toFixed(2)
+        : '?';
     lines.push(
       `\n*Last reconcile:* live=${st.sqliteLiveCount ?? '?'}  ` +
         `missing=${st.missingInQdrant?.length ?? '?'}  ` +
@@ -245,7 +253,9 @@ export function formatWeeklyDigestMarkdown(
     lines.push(missedHeader);
   }
   if (s.deadLetterCount > 0) {
-    lines.push(`\n⚠️ *Dead-letter:* ${s.deadLetterCount} raw_events hit retry ≥ 3`);
+    lines.push(
+      `\n⚠️ *Dead-letter:* ${s.deadLetterCount} raw_events hit retry ≥ 3`,
+    );
   }
 
   if (s.firedTriggers.length > 0) {

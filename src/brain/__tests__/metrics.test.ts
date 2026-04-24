@@ -48,9 +48,27 @@ describe('brain/metrics', () => {
 
   describe('cost logging', () => {
     it('records per-day cost and totals correctly', () => {
-      logCost({ provider: 'anthropic', operation: 'extract', units: 100, costUsd: 0.01, nowIso: '2026-04-23T10:00:00Z' });
-      logCost({ provider: 'anthropic', operation: 'extract', units: 200, costUsd: 0.02, nowIso: '2026-04-23T11:00:00Z' });
-      logCost({ provider: 'local', operation: 'embed', units: 50, costUsd: 0, nowIso: '2026-04-22T10:00:00Z' });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 100,
+        costUsd: 0.01,
+        nowIso: '2026-04-23T10:00:00Z',
+      });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 200,
+        costUsd: 0.02,
+        nowIso: '2026-04-23T11:00:00Z',
+      });
+      logCost({
+        provider: 'local',
+        operation: 'embed',
+        units: 50,
+        costUsd: 0,
+        nowIso: '2026-04-22T10:00:00Z',
+      });
       expect(getDailyCostUsd('2026-04-23')).toBeCloseTo(0.03, 5);
       expect(getDailyCostUsd('2026-04-22')).toBe(0);
       expect(getDailyCostUsd('2026-04-20')).toBe(0);
@@ -59,10 +77,22 @@ describe('brain/metrics', () => {
     it('computes rolling 7d avg, excluding today', () => {
       for (let i = 1; i <= 7; i++) {
         const d = new Date(Date.UTC(2026, 3, 23 - i)).toISOString();
-        logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 0.7, nowIso: d });
+        logCost({
+          provider: 'anthropic',
+          operation: 'extract',
+          units: 1,
+          costUsd: 0.7,
+          nowIso: d,
+        });
       }
       // Today (23rd) doesn't count.
-      logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 5, nowIso: '2026-04-23T10:00:00Z' });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 1,
+        costUsd: 5,
+        nowIso: '2026-04-23T10:00:00Z',
+      });
       const avg = getRollingDailyCostUsd('2026-04-23', 7);
       expect(avg).toBeCloseTo(0.7, 5); // 7 × 0.7 / 7
     });
@@ -72,9 +102,27 @@ describe('brain/metrics', () => {
     });
 
     it('sums monthly cost', () => {
-      logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 1.5, nowIso: '2026-04-01T00:00:00Z' });
-      logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 2.5, nowIso: '2026-04-23T00:00:00Z' });
-      logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 9, nowIso: '2026-03-15T00:00:00Z' });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 1,
+        costUsd: 1.5,
+        nowIso: '2026-04-01T00:00:00Z',
+      });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 1,
+        costUsd: 2.5,
+        nowIso: '2026-04-23T00:00:00Z',
+      });
+      logCost({
+        provider: 'anthropic',
+        operation: 'extract',
+        units: 1,
+        costUsd: 9,
+        nowIso: '2026-03-15T00:00:00Z',
+      });
       expect(getMonthlyCostUsd('2026-04')).toBeCloseTo(4.0, 5);
       expect(getMonthlyCostUsd('2026-03')).toBeCloseTo(9, 5);
     });
@@ -82,8 +130,16 @@ describe('brain/metrics', () => {
 
   describe('system_state', () => {
     it('upserts key/value pairs', () => {
-      setSystemState('last_run', '2026-04-23T10:00:00Z', '2026-04-23T10:00:00Z');
-      setSystemState('last_run', '2026-04-23T11:00:00Z', '2026-04-23T11:00:00Z');
+      setSystemState(
+        'last_run',
+        '2026-04-23T10:00:00Z',
+        '2026-04-23T10:00:00Z',
+      );
+      setSystemState(
+        'last_run',
+        '2026-04-23T11:00:00Z',
+        '2026-04-23T11:00:00Z',
+      );
       const row = getSystemState('last_run');
       expect(row?.value).toBe('2026-04-23T11:00:00Z');
     });

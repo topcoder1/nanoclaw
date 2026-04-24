@@ -24,9 +24,8 @@ vi.mock('../logger.js', () => ({
 
 let tmpDir: string;
 vi.mock('../config.js', async () => {
-  const actual = await vi.importActual<typeof import('../config.js')>(
-    '../config.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('../config.js')>('../config.js');
   return {
     ...actual,
     get STORE_DIR() {
@@ -185,9 +184,7 @@ describe('Brain miniapp — feedback POST endpoints', () => {
     expect(res.body).toEqual({ ok: true });
     await new Promise((r) => setTimeout(r, 120));
     const row = brainDb
-      .prepare(
-        `SELECT superseded_at FROM knowledge_units WHERE id = 'K_bad'`,
-      )
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id = 'K_bad'`)
       .get() as { superseded_at: string | null };
     expect(row.superseded_at).not.toBeNull();
     // Should be a parseable ISO timestamp.
@@ -236,14 +233,21 @@ describe('Brain miniapp — feedback POST endpoints', () => {
   });
 
   it('approve after reject is a no-op (does not un-reject or reset confidence)', async () => {
-    seedKu(brainDb, 'K_rejectedThenApprove', { needs_review: 1, confidence: 0.6 });
+    seedKu(brainDb, 'K_rejectedThenApprove', {
+      needs_review: 1,
+      confidence: 0.6,
+    });
     await request(app).post('/api/brain/ku/K_rejectedThenApprove/reject');
     await new Promise((r) => setTimeout(r, 120));
     const afterReject = brainDb
       .prepare(
         `SELECT needs_review, confidence, superseded_at FROM knowledge_units WHERE id = 'K_rejectedThenApprove'`,
       )
-      .get() as { needs_review: number; confidence: number; superseded_at: string | null };
+      .get() as {
+      needs_review: number;
+      confidence: number;
+      superseded_at: string | null;
+    };
     expect(afterReject.superseded_at).toBeTruthy();
     expect(afterReject.confidence).toBe(0.6); // unchanged by reject
     expect(afterReject.needs_review).toBe(1); // unchanged by reject
@@ -254,7 +258,11 @@ describe('Brain miniapp — feedback POST endpoints', () => {
       .prepare(
         `SELECT needs_review, confidence, superseded_at FROM knowledge_units WHERE id = 'K_rejectedThenApprove'`,
       )
-      .get() as { needs_review: number; confidence: number; superseded_at: string | null };
+      .get() as {
+      needs_review: number;
+      confidence: number;
+      superseded_at: string | null;
+    };
     // Approve must NOT fire because superseded_at is set — audit-trail intact,
     // confidence not clobbered back to 1.0.
     expect(afterApprove.superseded_at).toBe(afterReject.superseded_at);

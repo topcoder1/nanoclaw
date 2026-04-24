@@ -69,7 +69,11 @@ describe('brain/alert-dispatcher', () => {
     const fired = await dispatchAlertsOnce(deliver, now);
     const cats = fired.map((a) => a.category).sort();
     expect(cats).toEqual(
-      expect.arrayContaining(['monthly_budget', 'qdrant_drift', 'provider_unreachable']),
+      expect.arrayContaining([
+        'monthly_budget',
+        'qdrant_drift',
+        'provider_unreachable',
+      ]),
     );
     // Each fired alert generated one delivery.
     expect(delivered.length).toBe(fired.length);

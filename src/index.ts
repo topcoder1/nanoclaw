@@ -1305,29 +1305,29 @@ async function main(): Promise<void> {
   // Shared Telegram deliverer reused by both the weekly digest and the
   // alert dispatcher — a single code path for "send brain markdown to the
   // main group, fall back to an info log when no channel is wired".
-  const deliverBrainMessage = (label: string) => (md: string): void => {
-    const primary = channels.find((c) => c.name.startsWith('telegram'));
-    const mainGroup = Object.entries(registeredGroups).find(
-      ([, g]) => g.isMain,
-    );
-    if (primary && mainGroup) {
-      void primary
-        .sendMessage(mainGroup[0], md)
-        .catch((err) =>
-          logger.warn(
-            { err: err instanceof Error ? err.message : String(err), label },
-            'brain message delivery failed',
-          ),
-        );
-    } else {
-      logger.info({ label, md }, 'brain message (no channel)');
-    }
-  };
+  const deliverBrainMessage =
+    (label: string) =>
+    (md: string): void => {
+      const primary = channels.find((c) => c.name.startsWith('telegram'));
+      const mainGroup = Object.entries(registeredGroups).find(
+        ([, g]) => g.isMain,
+      );
+      if (primary && mainGroup) {
+        void primary
+          .sendMessage(mainGroup[0], md)
+          .catch((err) =>
+            logger.warn(
+              { err: err instanceof Error ? err.message : String(err), label },
+              'brain message delivery failed',
+            ),
+          );
+      } else {
+        logger.info({ label, md }, 'brain message (no channel)');
+      }
+    };
 
   const stopDigestSched = startDigestSchedule(BRAIN_DIGEST_CADENCE, (md) => {
-    const delivered = deliverBrainMessage(
-      `${BRAIN_DIGEST_CADENCE}-digest`,
-    );
+    const delivered = deliverBrainMessage(`${BRAIN_DIGEST_CADENCE}-digest`);
     if (md) {
       delivered(md);
     } else {
@@ -2106,7 +2106,9 @@ async function main(): Promise<void> {
         messages: [{ role: 'user', content: prompt }],
         maxOutputTokens: 1200,
       });
-      const trimmed = result.text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+      const trimmed = result.text
+        .replace(/^```(?:json)?\s*|\s*```$/g, '')
+        .trim();
       try {
         return JSON.parse(trimmed);
       } catch {
@@ -2116,7 +2118,9 @@ async function main(): Promise<void> {
 
     const mainGroupRoot = path.join(GROUPS_DIR, 'main');
     const mainChatId =
-      Object.keys(registeredGroups).find((jid) => registeredGroups[jid]?.isMain) ??
+      Object.keys(registeredGroups).find(
+        (jid) => registeredGroups[jid]?.isMain,
+      ) ??
       process.env.MAIN_GROUP_CHAT_ID ??
       '';
 

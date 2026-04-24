@@ -103,10 +103,7 @@ export interface GmailOpsProvider {
   sendDraft(draftId: string): Promise<void>;
   sendEmail(input: SendEmailInput): Promise<void>;
   createDraftReply(input: CreateDraftReplyInput): Promise<{ draftId: string }>;
-  listMessagesByLabel?(
-    labelName: string,
-    max: number,
-  ): Promise<MessageStub[]>;
+  listMessagesByLabel?(labelName: string, max: number): Promise<MessageStub[]>;
   getMessageHeaders?(
     messageId: string,
     headerNames: string[],

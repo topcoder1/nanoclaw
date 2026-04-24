@@ -89,15 +89,39 @@ describe('loadBlocklist', () => {
 describe('isBlocklisted', () => {
   const patterns = ['*@github.com', '*@*.stripe.com', '*@usbank.com'];
 
-  const cases: Array<{ from: string | undefined; expected: boolean; desc: string }> = [
-    { from: 'GitHub <noreply@github.com>', expected: true, desc: 'bracket form' },
+  const cases: Array<{
+    from: string | undefined;
+    expected: boolean;
+    desc: string;
+  }> = [
+    {
+      from: 'GitHub <noreply@github.com>',
+      expected: true,
+      desc: 'bracket form',
+    },
     { from: 'noreply@github.com', expected: true, desc: 'raw email' },
     { from: 'NoReply@GitHub.com', expected: true, desc: 'case-insensitive' },
-    { from: 'foo@notifications.stripe.com', expected: true, desc: 'subdomain wildcard match' },
-    { from: 'foo@stripe.com', expected: false, desc: '*@*.stripe.com does not match bare domain' },
+    {
+      from: 'foo@notifications.stripe.com',
+      expected: true,
+      desc: 'subdomain wildcard match',
+    },
+    {
+      from: 'foo@stripe.com',
+      expected: false,
+      desc: '*@*.stripe.com does not match bare domain',
+    },
     { from: 'x@example.com', expected: false, desc: 'non-match' },
-    { from: 'x@usbank.com.evil.com', expected: false, desc: 'suffix-attack rejected' },
-    { from: 'x@evil-github.com', expected: false, desc: 'no dot boundary rejected' },
+    {
+      from: 'x@usbank.com.evil.com',
+      expected: false,
+      desc: 'suffix-attack rejected',
+    },
+    {
+      from: 'x@evil-github.com',
+      expected: false,
+      desc: 'no dot boundary rejected',
+    },
     { from: undefined, expected: true, desc: 'undefined → safe true' },
     { from: '', expected: true, desc: 'empty → safe true' },
     { from: 'not an email', expected: true, desc: 'unparseable → safe true' },

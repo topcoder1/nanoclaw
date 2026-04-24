@@ -57,8 +57,20 @@ describe('brain/weekly-digest', () => {
     const outsideWindow = '2026-04-10T10:00:00Z';
 
     // Cost rows
-    logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 0.05, nowIso: inWindow });
-    logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 0.99, nowIso: outsideWindow });
+    logCost({
+      provider: 'anthropic',
+      operation: 'extract',
+      units: 1,
+      costUsd: 0.05,
+      nowIso: inWindow,
+    });
+    logCost({
+      provider: 'anthropic',
+      operation: 'extract',
+      units: 1,
+      costUsd: 0.99,
+      nowIso: outsideWindow,
+    });
 
     // Raw events inside + outside window
     const rawStmt = db.prepare(
@@ -67,7 +79,14 @@ describe('brain/weekly-digest', () => {
     );
     rawStmt.run(newId(), 'thr-a', Buffer.from('{}'), inWindow, inWindow, 0);
     rawStmt.run(newId(), 'thr-b', Buffer.from('{}'), inWindow, null, 3);
-    rawStmt.run(newId(), 'thr-out', Buffer.from('{}'), outsideWindow, outsideWindow, 0);
+    rawStmt.run(
+      newId(),
+      'thr-out',
+      Buffer.from('{}'),
+      outsideWindow,
+      outsideWindow,
+      0,
+    );
 
     // KUs — in-window last_accessed_at
     const kuStmt = db.prepare(
@@ -77,7 +96,14 @@ describe('brain/weekly-digest', () => {
     );
     kuStmt.run(newId(), 'hot topic A', inWindow, inWindow, inWindow, 9);
     kuStmt.run(newId(), 'hot topic B', inWindow, inWindow, inWindow, 5);
-    kuStmt.run(newId(), 'old forgotten', outsideWindow, outsideWindow, outsideWindow, 20);
+    kuStmt.run(
+      newId(),
+      'old forgotten',
+      outsideWindow,
+      outsideWindow,
+      outsideWindow,
+      20,
+    );
 
     // Entities
     const entStmt = db.prepare(
@@ -125,7 +151,9 @@ describe('brain/weekly-digest', () => {
       '2026-04-23T00:00:00Z',
     );
     const s = collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' });
-    expect((s.reconcileStats as { sqliteLiveCount: number }).sqliteLiveCount).toBe(42);
+    expect(
+      (s.reconcileStats as { sqliteLiveCount: number }).sqliteLiveCount,
+    ).toBe(42);
   });
 
   it('formats Markdown with all sections', () => {
@@ -136,7 +164,14 @@ describe('brain/weekly-digest', () => {
          (id, text, source_type, account, confidence, valid_from, recorded_at, last_accessed_at, access_count)
        VALUES (?, ?, 'email', 'work', 1.0, ?, ?, ?, ?)`,
     );
-    kuStmt.run(newId(), 'alpha topic', '2026-04-22T10:00:00Z', '2026-04-22T10:00:00Z', '2026-04-22T10:00:00Z', 3);
+    kuStmt.run(
+      newId(),
+      'alpha topic',
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      3,
+    );
     const md = formatWeeklyDigestMarkdown(collectWeeklyDigest({ nowIso: now }));
     expect(md).toMatch(/Brain weekly digest/);
     expect(md).toMatch(/Cost:/);
@@ -233,7 +268,14 @@ describe('brain/weekly-digest', () => {
        VALUES (?, 'email', ?, ?, ?, ?, ?)`,
     );
     rawStmt.run(newId(), 'thr-new', Buffer.from('{}'), inDaily, inDaily, 0);
-    rawStmt.run(newId(), 'thr-old', Buffer.from('{}'), outsideDaily, outsideDaily, 0);
+    rawStmt.run(
+      newId(),
+      'thr-old',
+      Buffer.from('{}'),
+      outsideDaily,
+      outsideDaily,
+      0,
+    );
 
     const entStmt = db.prepare(
       `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
@@ -374,7 +416,14 @@ describe('brain/weekly-digest', () => {
       `INSERT INTO knowledge_units
          (id, text, source_type, account, confidence, valid_from, recorded_at, last_accessed_at, access_count)
        VALUES (?, ?, 'email', 'work', 1.0, ?, ?, ?, ?)`,
-    ).run(newId(), long, '2026-04-22T10:00:00Z', '2026-04-22T10:00:00Z', '2026-04-22T10:00:00Z', 1);
+    ).run(
+      newId(),
+      long,
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      1,
+    );
     const md = formatWeeklyDigestMarkdown(
       collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' }),
     );

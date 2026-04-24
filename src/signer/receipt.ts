@@ -9,8 +9,16 @@ export interface PostReceiptInput {
   outcome: 'signed' | 'failed';
   chatId: string;
   sendText: (chatId: string, text: string, opts?: unknown) => Promise<void>;
-  sendDocument: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
-  sendPhoto?: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
+  sendDocument: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
+  sendPhoto?: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
 }
 
 export async function postReceipt(input: PostReceiptInput): Promise<void> {
@@ -24,24 +32,33 @@ export async function postReceipt(input: PostReceiptInput): Promise<void> {
   const card = renderReceipt({ ceremony, outcome: input.outcome });
   const textOpts =
     card.buttons.length > 0
-      ? { parse_mode: 'Markdown', reply_markup: { inline_keyboard: card.buttons } }
+      ? {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: card.buttons },
+        }
       : { parse_mode: 'Markdown' };
 
   await input.sendText(input.chatId, card.text, textOpts);
 
   if (input.outcome === 'signed' && ceremony.signedPdfPath) {
     await input.sendDocument(input.chatId, ceremony.signedPdfPath, {});
-  } else if (input.outcome === 'failed' && ceremony.failureScreenshotPath && input.sendPhoto) {
+  } else if (
+    input.outcome === 'failed' &&
+    ceremony.failureScreenshotPath &&
+    input.sendPhoto
+  ) {
     await input.sendPhoto(input.chatId, ceremony.failureScreenshotPath, {});
   }
 }
 
 function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'doc';
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'doc'
+  );
 }
 
 function pad2(n: number): string {
@@ -57,7 +74,13 @@ export function archivePathFor(
   const yyyy = String(date.getFullYear());
   const mm = pad2(date.getMonth() + 1);
   const slug = slugify(docTitle ?? 'doc');
-  return path.join(groupRoot, 'signed-docs', yyyy, mm, `${ceremonyId}__${slug}.pdf`);
+  return path.join(
+    groupRoot,
+    'signed-docs',
+    yyyy,
+    mm,
+    `${ceremonyId}__${slug}.pdf`,
+  );
 }
 
 export function failureScreenshotPathFor(
@@ -67,5 +90,11 @@ export function failureScreenshotPathFor(
 ): string {
   const yyyy = String(date.getFullYear());
   const mm = pad2(date.getMonth() + 1);
-  return path.join(groupRoot, 'signed-docs', yyyy, mm, `${ceremonyId}__failure.png`);
+  return path.join(
+    groupRoot,
+    'signed-docs',
+    yyyy,
+    mm,
+    `${ceremonyId}__failure.png`,
+  );
 }

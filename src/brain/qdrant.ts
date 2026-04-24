@@ -97,7 +97,10 @@ export async function ensureBrainCollection(): Promise<void> {
     await c.createCollection(BRAIN_COLLECTION, {
       vectors: { size: EMBEDDING_DIMS, distance: 'Cosine' },
     });
-    logger.info({ collection: BRAIN_COLLECTION }, 'Brain Qdrant collection created');
+    logger.info(
+      { collection: BRAIN_COLLECTION },
+      'Brain Qdrant collection created',
+    );
   } catch (err) {
     logger.warn(
       { err: err instanceof Error ? err.message : String(err) },
@@ -196,20 +199,19 @@ export async function searchSemantic(
     payload?: Record<string, unknown> | null;
   }>;
 
-  return results
-    .map((r) => {
-      const payload = (r.payload ?? {}) as KuPayload;
-      // The Qdrant point id is a UUIDv5 — map back to the logical ULID
-      // carried in payload.ku_id. If ku_id is missing (legacy/bad point),
-      // fall back to the UUID so the caller at least gets a stable string.
-      const logicalId =
-        typeof payload.ku_id === 'string' && payload.ku_id.length > 0
-          ? payload.ku_id
-          : String(r.id);
-      return {
-        id: logicalId,
-        score: r.score,
-        payload,
-      };
-    });
+  return results.map((r) => {
+    const payload = (r.payload ?? {}) as KuPayload;
+    // The Qdrant point id is a UUIDv5 — map back to the logical ULID
+    // carried in payload.ku_id. If ku_id is missing (legacy/bad point),
+    // fall back to the UUID so the caller at least gets a stable string.
+    const logicalId =
+      typeof payload.ku_id === 'string' && payload.ku_id.length > 0
+        ? payload.ku_id
+        : String(r.id);
+    return {
+      id: logicalId,
+      score: r.score,
+      payload,
+    };
+  });
 }

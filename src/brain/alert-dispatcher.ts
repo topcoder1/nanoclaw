@@ -21,11 +21,7 @@
 
 import { logger } from '../logger.js';
 
-import {
-  evaluateAlerts,
-  type Alert,
-  type EvaluateInput,
-} from './alerts.js';
+import { evaluateAlerts, type Alert, type EvaluateInput } from './alerts.js';
 import { getSystemState } from './metrics.js';
 import { getProviderLastOkMs, PROVIDER_LAST_OK_KEY } from './provider-probe.js';
 import type { ReconcileReport } from './reconcile.js';
@@ -83,7 +79,10 @@ export async function dispatchAlertsOnce(
       await deliver(formatAlert(a));
     } catch (err) {
       logger.warn(
-        { err: err instanceof Error ? err.message : String(err), category: a.category },
+        {
+          err: err instanceof Error ? err.message : String(err),
+          category: a.category,
+        },
         'alert delivery failed',
       );
     }

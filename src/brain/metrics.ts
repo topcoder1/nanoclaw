@@ -55,7 +55,9 @@ export function logCost(entry: CostEntry): void {
 export function getDailyCostUsd(day: string): number {
   const db = getBrainDb();
   const row = db
-    .prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log WHERE day = ?`)
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log WHERE day = ?`,
+    )
     .get(day) as { total: number };
   return row.total;
 }
@@ -87,7 +89,11 @@ export function getMonthlyCostUsd(yearMonth: string): number {
 
 // --- system_state key/value ------------------------------------------------
 
-export function setSystemState(key: string, value: string, nowIso?: string): void {
+export function setSystemState(
+  key: string,
+  value: string,
+  nowIso?: string,
+): void {
   const db = getBrainDb();
   const iso = nowIso ?? new Date().toISOString();
   db.prepare(
@@ -96,7 +102,9 @@ export function setSystemState(key: string, value: string, nowIso?: string): voi
   ).run(key, value, iso);
 }
 
-export function getSystemState(key: string): { value: string; updated_at: string } | null {
+export function getSystemState(
+  key: string,
+): { value: string; updated_at: string } | null {
   const db = getBrainDb();
   const row = db
     .prepare(`SELECT value, updated_at FROM system_state WHERE key = ?`)
@@ -181,9 +189,9 @@ export function getBrainCounts(): BrainCounts {
     superseded: number | null;
     needsReview: number | null;
   };
-  const ent = db
-    .prepare(`SELECT COUNT(*) AS total FROM entities`)
-    .get() as { total: number };
+  const ent = db.prepare(`SELECT COUNT(*) AS total FROM entities`).get() as {
+    total: number;
+  };
   const raw = db
     .prepare(
       `SELECT COUNT(*) AS total,

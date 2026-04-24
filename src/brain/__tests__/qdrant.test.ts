@@ -119,16 +119,20 @@ describe('brain/qdrant', () => {
 
   it('searchSemantic always filters by model_version', async () => {
     fake.search.mockResolvedValue([]);
-    await searchSemantic([0.1], { modelVersion: 'nomic-embed-text-v1.5:768' }, 10);
+    await searchSemantic(
+      [0.1],
+      { modelVersion: 'nomic-embed-text-v1.5:768' },
+      10,
+    );
     const args = fake.search.mock.calls[0][1];
     const must = args.filter.must as Array<{
       key: string;
       match: { value: string };
     }>;
     expect(must.some((m) => m.key === 'model_version')).toBe(true);
-    expect(
-      must.find((m) => m.key === 'model_version')!.match.value,
-    ).toBe('nomic-embed-text-v1.5:768');
+    expect(must.find((m) => m.key === 'model_version')!.match.value).toBe(
+      'nomic-embed-text-v1.5:768',
+    );
   });
 
   it('searchSemantic adds account filter when present', async () => {

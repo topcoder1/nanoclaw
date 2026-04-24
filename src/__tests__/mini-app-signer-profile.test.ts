@@ -24,23 +24,23 @@ describe('mini-app /signer/profile', () => {
   });
 
   it('POST creates profile', async () => {
-    const res = await request(app)
-      .post('/signer/profile')
-      .type('form')
-      .send({
-        fullName: 'Alice Example',
-        initials: 'AE',
-        title: 'CEO',
-        address: '1 Market St',
-        phone: '555-0100',
-      });
+    const res = await request(app).post('/signer/profile').type('form').send({
+      fullName: 'Alice Example',
+      initials: 'AE',
+      title: 'CEO',
+      address: '1 Market St',
+      phone: '555-0100',
+    });
     expect(res.status).toBe(302);
     const p = getProfile(db);
     expect(p?.fullName).toBe('Alice Example');
   });
 
   it('POST with missing required fields returns 400', async () => {
-    const res = await request(app).post('/signer/profile').type('form').send({ fullName: 'x' });
+    const res = await request(app)
+      .post('/signer/profile')
+      .type('form')
+      .send({ fullName: 'x' });
     expect(res.status).toBe(400);
   });
 

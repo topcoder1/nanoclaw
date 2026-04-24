@@ -131,7 +131,10 @@ export function confidenceBar(value: number): string {
 /**
  * "2d ago" style age formatter. Matches the existing home page aesthetic.
  */
-export function formatAge(isoOrMs: string | number, nowMs = Date.now()): string {
+export function formatAge(
+  isoOrMs: string | number,
+  nowMs = Date.now(),
+): string {
   const ts = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs);
   if (!Number.isFinite(ts)) return '';
   const mins = Math.floor((nowMs - ts) / 60_000);

@@ -240,7 +240,9 @@ export async function handleBrainStreamCommand(
       );
     }
     if (r.processed_at) {
-      const statusBits = r.process_error ? 'processed (error logged)' : 'processed';
+      const statusBits = r.process_error
+        ? 'processed (error logged)'
+        : 'processed';
       children.push(`→ ${statusBits}`);
     } else {
       children.push('→ pending');

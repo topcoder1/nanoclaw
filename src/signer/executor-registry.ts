@@ -6,7 +6,9 @@ export interface SignExecutorInput {
   ceremony: SignCeremony;
   profile: SignerProfile;
   context: BrowserContext;
-  onFieldInputNeeded: (evt: SignFieldInputNeededEvent['payload']) => Promise<string | null>;
+  onFieldInputNeeded: (
+    evt: SignFieldInputNeededEvent['payload'],
+  ) => Promise<string | null>;
   /** Abort signal — resolved when the ceremony's 90s deadline fires. */
   signal: AbortSignal;
 }

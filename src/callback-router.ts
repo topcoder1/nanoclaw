@@ -101,7 +101,10 @@ export async function handleCallback(
             payload: { ceremonyId, reason },
           });
         } else {
-          logger.warn({ subAction, data: query.data }, 'Unknown sign sub-action');
+          logger.warn(
+            { subAction, data: query.data },
+            'Unknown sign sub-action',
+          );
         }
         break;
       }

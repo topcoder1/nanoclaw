@@ -116,7 +116,10 @@ const isMain =
 
 if (isMain) {
   main().catch((err) => {
-    logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Backfill failed');
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Backfill failed',
+    );
     process.exit(1);
   });
 }

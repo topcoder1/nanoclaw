@@ -251,10 +251,7 @@ export function writeIpcTrigger(
  * Production callers use `connect()` which wires it up through the HTTP
  * stream.
  */
-export function _handleTriagedEmailsForTest(
-  data: string,
-  label: string,
-): void {
+export function _handleTriagedEmailsForTest(data: string, label: string): void {
   handleTriagedEmails(data, label);
 }
 

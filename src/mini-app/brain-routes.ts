@@ -29,7 +29,11 @@ import { recall, type RecallResult } from '../brain/retrieve.js';
 import { logger } from '../logger.js';
 
 import { escapeHtml } from './templates/escape.js';
-import { brainShell, confidenceBar, formatAge } from './templates/brain-layout.js';
+import {
+  brainShell,
+  confidenceBar,
+  formatAge,
+} from './templates/brain-layout.js';
 
 export interface BrainRoutesOptions {
   /**
@@ -91,14 +95,12 @@ function getHomeStats(db: Database.Database, nowMs: number): HomeStats {
        FROM knowledge_units`,
     )
     .get() as { live: number | null; sup: number | null };
-  const ent = db
-    .prepare(`SELECT COUNT(*) AS n FROM entities`)
-    .get() as { n: number };
+  const ent = db.prepare(`SELECT COUNT(*) AS n FROM entities`).get() as {
+    n: number;
+  };
   const sinceIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
   const raw = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM raw_events WHERE received_at >= ?`,
-    )
+    .prepare(`SELECT COUNT(*) AS n FROM raw_events WHERE received_at >= ?`)
     .get(sinceIso) as { n: number };
   const ym = new Date(nowMs).toISOString().slice(0, 7); // YYYY-MM
   const cost = db
@@ -150,9 +152,9 @@ function getStatusFingerprint(db: Database.Database): {
       `SELECT COUNT(*) AS n FROM knowledge_units WHERE superseded_at IS NULL`,
     )
     .get() as { n: number };
-  const ent = db
-    .prepare(`SELECT COUNT(*) AS n FROM entities`)
-    .get() as { n: number };
+  const ent = db.prepare(`SELECT COUNT(*) AS n FROM entities`).get() as {
+    n: number;
+  };
   const review = db
     .prepare(
       `SELECT COUNT(*) AS n FROM knowledge_units
@@ -160,9 +162,7 @@ function getStatusFingerprint(db: Database.Database): {
     )
     .get() as { n: number };
   const recent = db
-    .prepare(
-      `SELECT id FROM raw_events ORDER BY received_at DESC LIMIT 10`,
-    )
+    .prepare(`SELECT id FROM raw_events ORDER BY received_at DESC LIMIT 10`)
     .all() as Array<{ id: string }>;
   return {
     ku: ku.n,
@@ -314,9 +314,7 @@ ${reviewBanner}
     const tabs = ['', 'person', 'company', 'project', 'product', 'topic']
       .map((t) => {
         const label =
-          t === ''
-            ? 'All'
-            : t.charAt(0).toUpperCase() + t.slice(1) + 's';
+          t === '' ? 'All' : t.charAt(0).toUpperCase() + t.slice(1) + 's';
         const href = t ? `/brain/entities?type=${t}` : '/brain/entities';
         const active = t === type ? ' class="active"' : '';
         return `<a href="${href}"${active}>${label}</a>`;
@@ -376,14 +374,21 @@ ${pager}`;
       | undefined;
 
     if (!entity) {
-      res.status(404).type('html').send(
-        brainShell('Not found — Brain', `
+      res
+        .status(404)
+        .type('html')
+        .send(
+          brainShell(
+            'Not found — Brain',
+            `
 <h1>Entity not found</h1>
-<div class="card"><p class="meta">No entity with id <code>${escapeHtml(id)}</code>.</p></div>`, {
-          activeNav: 'entities',
-          reviewCount,
-        }),
-      );
+<div class="card"><p class="meta">No entity with id <code>${escapeHtml(id)}</code>.</p></div>`,
+            {
+              activeNav: 'entities',
+              reviewCount,
+            },
+          ),
+        );
       return;
     }
 
@@ -458,7 +463,8 @@ ${pager}`;
     const relsHtml = rels.length
       ? `<ul>${rels
           .map((r) => {
-            const other = r.direction === 'outgoing' ? r.to_entity_id : r.from_entity_id;
+            const other =
+              r.direction === 'outgoing' ? r.to_entity_id : r.from_entity_id;
             const arrow = r.direction === 'outgoing' ? '→' : '←';
             return `<li>
               ${arrow} <span class="pill">${escapeHtml(r.relationship)}</span>
@@ -472,7 +478,8 @@ ${pager}`;
     const timelineHtml = timeline.length
       ? `<ul>${timeline
           .map((k) => {
-            const snippet = k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
+            const snippet =
+              k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
             const muted = k.superseded_at ? ' style="opacity:0.55"' : '';
             return `<li${muted}>
               <a class="row-link" href="/brain/ku/${escapeHtml(k.id)}">
@@ -556,13 +563,20 @@ ${pager}`;
       | undefined;
 
     if (!row) {
-      res.status(404).type('html').send(
-        brainShell('Not found — Brain', `
+      res
+        .status(404)
+        .type('html')
+        .send(
+          brainShell(
+            'Not found — Brain',
+            `
 <h1>KU not found</h1>
-<div class="card"><p class="meta">No KU with id <code>${escapeHtml(id)}</code>.</p></div>`, {
-          reviewCount,
-        }),
-      );
+<div class="card"><p class="meta">No KU with id <code>${escapeHtml(id)}</code>.</p></div>`,
+            {
+              reviewCount,
+            },
+          ),
+        );
       return;
     }
 
@@ -733,9 +747,8 @@ ${feedbackButtons}
     const toStr = typeof req.query.to === 'string' ? req.query.to : '';
     const rawLimit =
       typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, 50)
-      : 20;
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 20;
 
     const db = getDb();
     const reviewCount = getReviewCount(db);
@@ -795,11 +808,14 @@ ${filtersHtml}
         if (!fromMs && !toMs) return true;
         const ts = Date.parse(r.recorded_at);
         if (!Number.isFinite(ts)) return false;
-        if (fromMs !== null && Number.isFinite(fromMs) && ts < fromMs) return false;
+        if (fromMs !== null && Number.isFinite(fromMs) && ts < fromMs)
+          return false;
         if (toMs !== null && Number.isFinite(toMs) && ts > toMs) return false;
         return true;
       })
-      .filter((r) => (entityLinkedKuIds ? entityLinkedKuIds.has(r.ku_id) : true))
+      .filter((r) =>
+        entityLinkedKuIds ? entityLinkedKuIds.has(r.ku_id) : true,
+      )
       .slice(0, limit);
 
     const resultsHtml = filtered.length
@@ -952,7 +968,12 @@ ${filtersHtml}
     // render snippets inline (same pattern as /brainstream).
     const kusByRef = new Map<
       string,
-      Array<{ id: string; text: string; confidence: number; needs_review: number }>
+      Array<{
+        id: string;
+        text: string;
+        confidence: number;
+        needs_review: number;
+      }>
     >();
     if (events.length > 0) {
       const refs = events.map((e) => e.source_ref);
@@ -1067,7 +1088,8 @@ function renderReviewRow(row: {
   recorded_at: string;
   confidence: number;
 }): string {
-  const snippet = row.text.length > 120 ? row.text.slice(0, 120) + '…' : row.text;
+  const snippet =
+    row.text.length > 120 ? row.text.slice(0, 120) + '…' : row.text;
   return `<li class="review-row" data-ku-id="${escapeHtml(row.id)}">
     <div>
       <a href="/brain/ku/${escapeHtml(row.id)}"><strong>${escapeHtml(snippet)}</strong></a>
@@ -1095,12 +1117,18 @@ function renderTimelineRow(
     processed_at: string | null;
     process_error: string | null;
   },
-  kus: Array<{ id: string; text: string; confidence: number; needs_review: number }>,
+  kus: Array<{
+    id: string;
+    text: string;
+    confidence: number;
+    needs_review: number;
+  }>,
 ): string {
   const kuList = kus.length
     ? `<ul style="margin-top:6px">${kus
         .map((k) => {
-          const snippet = k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
+          const snippet =
+            k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
           return `<li style="padding:4px 0;border:none">
             <a href="/brain/ku/${escapeHtml(k.id)}">${escapeHtml(snippet)}</a>
             <span class="meta">· conf ${k.confidence.toFixed(2)}${k.needs_review ? ' · needs_review' : ''}</span>

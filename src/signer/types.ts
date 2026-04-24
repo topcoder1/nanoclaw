@@ -40,7 +40,12 @@ export interface SignCeremony {
   completedAt: number | null;
 }
 
-export type FieldTag = 'signature' | 'initial' | 'date_signed' | 'text' | 'check';
+export type FieldTag =
+  | 'signature'
+  | 'initial'
+  | 'date_signed'
+  | 'text'
+  | 'check';
 
 export interface ProfileFieldMatch {
   profileKey: 'fullName' | 'initials' | 'title' | 'address' | 'phone';

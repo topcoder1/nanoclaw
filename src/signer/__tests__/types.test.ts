@@ -34,7 +34,13 @@ describe('signer types', () => {
   });
 
   it('FieldTag includes the 5 known tags', () => {
-    const tags: FieldTag[] = ['signature', 'initial', 'date_signed', 'text', 'check'];
+    const tags: FieldTag[] = [
+      'signature',
+      'initial',
+      'date_signed',
+      'text',
+      'check',
+    ];
     expect(tags.length).toBe(5);
   });
 

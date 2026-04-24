@@ -25,7 +25,10 @@ interface FakePoint {
  */
 function makeFakeClient(points: FakePoint[]) {
   const scrolls: Array<{ offset: unknown }> = [];
-  const setCalls: Array<{ points: (string | number)[]; payload: Record<string, unknown> }> = [];
+  const setCalls: Array<{
+    points: (string | number)[];
+    payload: Record<string, unknown>;
+  }> = [];
 
   return {
     scrolls,
@@ -76,7 +79,9 @@ describe('backfillModelVersion', () => {
     expect(result.total).toBe(3);
 
     expect(client.setCalls).toHaveLength(1);
-    expect(client.setCalls[0].payload).toEqual({ model_version: MODEL_VERSION });
+    expect(client.setCalls[0].payload).toEqual({
+      model_version: MODEL_VERSION,
+    });
     expect(client.setCalls[0].points.sort()).toEqual(['a', 'b', 'c']);
   });
 

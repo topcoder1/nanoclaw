@@ -105,7 +105,9 @@ describe('brain/ingest — P1 pipeline integration', () => {
 
     const db = getBrainDb();
     const raw = db
-      .prepare(`SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-pipeline'`)
+      .prepare(
+        `SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-pipeline'`,
+      )
       .get() as { processed_at: string | null; process_error: string | null };
     expect(raw.processed_at).not.toBeNull();
     expect(raw.process_error).toBeNull();
@@ -150,13 +152,17 @@ describe('brain/ingest — P1 pipeline integration', () => {
 
     const db = getBrainDb();
     const raw = db
-      .prepare(`SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-qdrant-fail'`)
+      .prepare(
+        `SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-qdrant-fail'`,
+      )
       .get() as { processed_at: string | null; process_error: string | null };
     expect(raw.processed_at).not.toBeNull();
     // The Qdrant failure is logged warn, not a pipeline error.
     expect(raw.process_error).toBeNull();
 
-    const kus = db.prepare(`SELECT COUNT(*) as n FROM knowledge_units`).get() as { n: number };
+    const kus = db
+      .prepare(`SELECT COUNT(*) as n FROM knowledge_units`)
+      .get() as { n: number };
     expect(kus.n).toBeGreaterThan(0);
   });
 });

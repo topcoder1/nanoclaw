@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../../db.js';
-import { getProfile, upsertProfile, matchProfileFieldByLabel } from '../profile.js';
+import {
+  getProfile,
+  upsertProfile,
+  matchProfileFieldByLabel,
+} from '../profile.js';
 
 describe('signer profile', () => {
   let db: Database.Database;
@@ -61,9 +65,18 @@ describe('signer profile', () => {
       phone: '555-0100',
     });
     const p = getProfile(db)!;
-    expect(matchProfileFieldByLabel(p, 'Job title')).toEqual({ profileKey: 'title', value: 'CEO' });
-    expect(matchProfileFieldByLabel(p, 'Your address')).toEqual({ profileKey: 'address', value: '1 Market St' });
-    expect(matchProfileFieldByLabel(p, 'Phone number')).toEqual({ profileKey: 'phone', value: '555-0100' });
+    expect(matchProfileFieldByLabel(p, 'Job title')).toEqual({
+      profileKey: 'title',
+      value: 'CEO',
+    });
+    expect(matchProfileFieldByLabel(p, 'Your address')).toEqual({
+      profileKey: 'address',
+      value: '1 Market St',
+    });
+    expect(matchProfileFieldByLabel(p, 'Phone number')).toEqual({
+      profileKey: 'phone',
+      value: '555-0100',
+    });
     expect(matchProfileFieldByLabel(p, 'Favorite color')).toBeNull();
   });
 

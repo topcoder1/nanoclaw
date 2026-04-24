@@ -95,7 +95,10 @@ function markProcessed(
   ).run(new Date().toISOString(), sourceType, sourceRef);
 }
 
-function flushRawEvents(db: Database.Database, batch: RawEventRow[]): {
+function flushRawEvents(
+  db: Database.Database,
+  batch: RawEventRow[],
+): {
   inserted: string[];
 } {
   const stmt = db.prepare(
@@ -132,7 +135,10 @@ async function runExtractionPipeline(
     .filter(Boolean)
     .join('\n');
   if (!text.trim()) {
-    logger.debug({ threadId: email.thread_id }, 'brain ingest: empty text — skipping');
+    logger.debug(
+      { threadId: email.thread_id },
+      'brain ingest: empty text — skipping',
+    );
     return;
   }
 
@@ -173,13 +179,12 @@ async function runExtractionPipeline(
 
   // Step 4: insert KU + ku_entities rows in a single transaction.
   const nowIso = new Date().toISOString();
-  const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> = claims.map(
-    (c, i) => ({
+  const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> =
+    claims.map((c, i) => ({
       id: newId(),
       claim: c,
       entities: entitiesPerClaim[i],
-    }),
-  );
+    }));
 
   const insertKu = db.prepare(
     `INSERT INTO knowledge_units

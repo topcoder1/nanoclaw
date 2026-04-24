@@ -42,7 +42,15 @@ export interface Claim {
 }
 
 export interface EntityMention {
-  kind: 'email' | 'domain' | 'phone' | 'url' | 'hubspot_deal' | 'gong_call' | 'name' | 'other';
+  kind:
+    | 'email'
+    | 'domain'
+    | 'phone'
+    | 'url'
+    | 'hubspot_deal'
+    | 'gong_call'
+    | 'name'
+    | 'other';
   value: string;
 }
 
@@ -64,7 +72,8 @@ export interface ExtractInput {
 const URL_RE = /\bhttps?:\/\/[^\s<>]+/gi;
 const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g;
 const PHONE_RE = /\+?\d[\d\s().-]{7,}\d/g;
-const MONEY_RE = /\$\s?\d{1,3}(?:[,\d]{0,})(?:\.\d{1,2})?(?:[KMB])?\b|\b\d+\s?(?:USD|EUR|GBP)\b/gi;
+const MONEY_RE =
+  /\$\s?\d{1,3}(?:[,\d]{0,})(?:\.\d{1,2})?(?:[KMB])?\b|\b\d+\s?(?:USD|EUR|GBP)\b/gi;
 const DATE_RE =
   /\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,\s+\d{4})?)\b/gi;
 const HUBSPOT_DEAL_RE = /\bdeal_\d+\b/gi;
@@ -72,13 +81,69 @@ const GONG_CALL_RE = /\bcall_\d+\b/gi;
 
 // Stopwords for topic_key normalization (~50 common English words).
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'of', 'on', 'in', 'at', 'to',
-  'for', 'with', 'by', 'from', 'as', 'is', 'was', 'were', 'be', 'been',
-  'being', 'are', 'am', 'it', 'its', 'this', 'that', 'these', 'those',
-  'i', 'you', 'he', 'she', 'we', 'they', 'my', 'your', 'our', 'their',
-  'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
-  'can', 'could', 'may', 'might', 'must', 'about', 'into', 'than', 'then',
-  'so', 'also', 'there', 'here',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'if',
+  'of',
+  'on',
+  'in',
+  'at',
+  'to',
+  'for',
+  'with',
+  'by',
+  'from',
+  'as',
+  'is',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'are',
+  'am',
+  'it',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'i',
+  'you',
+  'he',
+  'she',
+  'we',
+  'they',
+  'my',
+  'your',
+  'our',
+  'their',
+  'has',
+  'have',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'should',
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  'about',
+  'into',
+  'than',
+  'then',
+  'so',
+  'also',
+  'there',
+  'here',
 ]);
 
 // --- Normalization + topic key --------------------------------------------
@@ -208,9 +273,7 @@ function writeCost(
  * extraction module has no hard dependency on a network call.
  */
 export interface LlmCaller {
-  (
-    prompt: string,
-  ): Promise<{
+  (prompt: string): Promise<{
     claims: Array<{
       text: string;
       topic_seed: string;
@@ -315,12 +378,7 @@ export async function extractLLM(
     const prompt = buildPrompt(input);
     const response = await caller(prompt);
     const cost = costForUsage(response.inputTokens, response.outputTokens);
-    writeCost(
-      db,
-      day,
-      response.inputTokens + response.outputTokens,
-      cost,
-    );
+    writeCost(db, day, response.inputTokens + response.outputTokens, cost);
     return response.claims.map<Claim>((raw) => {
       const mentions: EntityMention[] = (raw.entities_mentioned ?? []).map(
         (m) => ({

@@ -81,10 +81,12 @@ describe('brain ingest → raw_events', () => {
 
     const db = getBrainDb();
     const rows = db
-      .prepare(
-        `SELECT source_type, source_ref, processed_at FROM raw_events`,
-      )
-      .all() as { source_type: string; source_ref: string; processed_at: string | null }[];
+      .prepare(`SELECT source_type, source_ref, processed_at FROM raw_events`)
+      .all() as {
+      source_type: string;
+      source_ref: string;
+      processed_at: string | null;
+    }[];
     expect(rows).toHaveLength(1);
     expect(rows[0].source_type).toBe('email');
     expect(rows[0].source_ref).toBe('thread-A');
@@ -100,9 +102,7 @@ describe('brain ingest → raw_events', () => {
 
     const db = getBrainDb();
     const count = db
-      .prepare(
-        `SELECT COUNT(*) as n FROM raw_events WHERE source_ref = ?`,
-      )
+      .prepare(`SELECT COUNT(*) as n FROM raw_events WHERE source_ref = ?`)
       .get('thread-B') as { n: number };
     expect(count.n).toBe(1);
   });
@@ -145,9 +145,9 @@ describe('brain ingest → raw_events', () => {
     await flushQueue();
 
     const db = getBrainDb();
-    const count = db
-      .prepare(`SELECT COUNT(*) as n FROM raw_events`)
-      .get() as { n: number };
+    const count = db.prepare(`SELECT COUNT(*) as n FROM raw_events`).get() as {
+      n: number;
+    };
     expect(count.n).toBe(0);
   });
 });

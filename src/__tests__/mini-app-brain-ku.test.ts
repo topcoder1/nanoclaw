@@ -111,11 +111,7 @@ describe('Brain miniapp — /brain/ku/:id', () => {
         `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
          VALUES ('E_acme', 'company', ?, ?, ?)`,
       )
-      .run(
-        JSON.stringify({ name: 'Acme Corp' }),
-        '2026-04-01',
-        '2026-04-01',
-      );
+      .run(JSON.stringify({ name: 'Acme Corp' }), '2026-04-01', '2026-04-01');
     brainDb
       .prepare(
         `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('K1', 'E_acme', 'subject')`,
@@ -168,7 +164,9 @@ describe('Brain miniapp — /brain/ku/:id', () => {
   it('bumps access_count + last_accessed_at on view', async () => {
     seedFullKu(brainDb, 'K_seen');
     const before = brainDb
-      .prepare(`SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'K_seen'`)
+      .prepare(
+        `SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'K_seen'`,
+      )
       .get() as { access_count: number; last_accessed_at: string | null };
     expect(before.access_count).toBe(0);
     expect(before.last_accessed_at).toBeNull();
@@ -178,7 +176,9 @@ describe('Brain miniapp — /brain/ku/:id', () => {
     await new Promise((r) => setTimeout(r, 120));
 
     const after = brainDb
-      .prepare(`SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'K_seen'`)
+      .prepare(
+        `SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'K_seen'`,
+      )
       .get() as { access_count: number; last_accessed_at: string | null };
     expect(after.access_count).toBe(1);
     expect(after.last_accessed_at).not.toBeNull();
@@ -190,7 +190,9 @@ describe('Brain miniapp — /brain/ku/:id', () => {
       source_ref: 'thread-abcd1234',
     });
     const res = await request(app).get('/brain/ku/K_email');
-    expect(res.text).toContain('https://mail.google.com/mail/u/0/#inbox/thread-abcd1234');
+    expect(res.text).toContain(
+      'https://mail.google.com/mail/u/0/#inbox/thread-abcd1234',
+    );
   });
 
   it('non-email source does not render a source deep link', async () => {

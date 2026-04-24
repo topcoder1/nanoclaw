@@ -173,7 +173,9 @@ export async function migrateKnowledgeFacts(
                NULL, ?, 0)`,
     );
 
-    const pending: Array<[string, string, string, string, string, string, string | null, string]> = [];
+    const pending: Array<
+      [string, string, string, string, string, string, string | null, string]
+    > = [];
     for (const r of rows) {
       if (existingIds.has(r.rowid)) {
         report.alreadyMigrated++;
@@ -302,7 +304,10 @@ export async function migrateKnowledgeFacts(
         } catch (err) {
           report.qdrantFailed++;
           logger.warn(
-            { err: err instanceof Error ? err.message : String(err), kuId: ku.kuId },
+            {
+              err: err instanceof Error ? err.message : String(err),
+              kuId: ku.kuId,
+            },
             'Qdrant upsert failed during migration',
           );
         }
@@ -323,7 +328,9 @@ export async function migrateKnowledgeFacts(
     }
 
     if (total > 0) {
-      const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker());
+      const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () =>
+        worker(),
+      );
       await Promise.all(workers);
     }
 
@@ -338,11 +345,26 @@ export async function migrateKnowledgeFacts(
       const legacyTables: Array<{
         table: 'tracked_items' | 'commitments' | 'acted_emails';
         srcType: 'tracked_item' | 'commitment' | 'acted_email';
-        reportField: 'trackedItemsLinked' | 'commitmentsLinked' | 'actedEmailsLinked';
+        reportField:
+          | 'trackedItemsLinked'
+          | 'commitmentsLinked'
+          | 'actedEmailsLinked';
       }> = [
-        { table: 'tracked_items', srcType: 'tracked_item', reportField: 'trackedItemsLinked' },
-        { table: 'commitments', srcType: 'commitment', reportField: 'commitmentsLinked' },
-        { table: 'acted_emails', srcType: 'acted_email', reportField: 'actedEmailsLinked' },
+        {
+          table: 'tracked_items',
+          srcType: 'tracked_item',
+          reportField: 'trackedItemsLinked',
+        },
+        {
+          table: 'commitments',
+          srcType: 'commitment',
+          reportField: 'commitmentsLinked',
+        },
+        {
+          table: 'acted_emails',
+          srcType: 'acted_email',
+          reportField: 'actedEmailsLinked',
+        },
       ];
       const nowIso = new Date().toISOString();
       const insertRaw = brain.prepare(
@@ -358,29 +380,41 @@ export async function migrateKnowledgeFacts(
           legacy.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get();
           exists = true;
         } catch {
-          logger.info({ table }, 'migrateKnowledgeFacts: legacy table missing — skipped');
+          logger.info(
+            { table },
+            'migrateKnowledgeFacts: legacy table missing — skipped',
+          );
           continue;
         }
         if (!exists) continue;
 
-        const rows = legacy
-          .prepare(`SELECT * FROM ${table}`)
-          .all() as Array<Record<string, unknown>>;
+        const rows = legacy.prepare(`SELECT * FROM ${table}`).all() as Array<
+          Record<string, unknown>
+        >;
 
-        const txn = brain.transaction((batch: Array<Record<string, unknown>>) => {
-          for (const row of batch) {
-            const sourceRef = String(
-              (row as { id?: unknown; uuid?: unknown; thread_id?: unknown }).id ??
-                (row as { uuid?: unknown }).uuid ??
-                (row as { thread_id?: unknown }).thread_id ??
-                '',
-            );
-            if (!sourceRef) continue;
-            const payload = Buffer.from(JSON.stringify(row), 'utf8');
-            const result = insertRaw.run(newId(), srcType, sourceRef, payload, nowIso);
-            if (result.changes > 0) report[reportField]++;
-          }
-        });
+        const txn = brain.transaction(
+          (batch: Array<Record<string, unknown>>) => {
+            for (const row of batch) {
+              const sourceRef = String(
+                (row as { id?: unknown; uuid?: unknown; thread_id?: unknown })
+                  .id ??
+                  (row as { uuid?: unknown }).uuid ??
+                  (row as { thread_id?: unknown }).thread_id ??
+                  '',
+              );
+              if (!sourceRef) continue;
+              const payload = Buffer.from(JSON.stringify(row), 'utf8');
+              const result = insertRaw.run(
+                newId(),
+                srcType,
+                sourceRef,
+                payload,
+                nowIso,
+              );
+              if (result.changes > 0) report[reportField]++;
+            }
+          },
+        );
         txn(rows);
         logger.info(
           { table, srcType, rows: rows.length, linked: report[reportField] },

@@ -36,7 +36,7 @@ describe('signer DB migration', () => {
     const row = db
       .prepare("SELECT sql FROM sqlite_master WHERE name = 'sign_ceremonies'")
       .get() as { sql: string };
-    expect(row.sql).toContain("state IN (");
+    expect(row.sql).toContain('state IN (');
     expect(row.sql).toContain('signed');
     expect(row.sql).toContain('completed_at');
   });
@@ -48,7 +48,15 @@ describe('signer DB migration', () => {
           `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
            VALUES (?, ?, ?, ?, 'signed', ?, ?, ?)`,
         )
-        .run('c1', 'e1', 'docusign', 'https://docusign.net/x', Date.now(), Date.now(), Date.now()),
+        .run(
+          'c1',
+          'e1',
+          'docusign',
+          'https://docusign.net/x',
+          Date.now(),
+          Date.now(),
+          Date.now(),
+        ),
     ).toThrow(/CHECK constraint failed/);
   });
 
@@ -59,7 +67,15 @@ describe('signer DB migration', () => {
           `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
            VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
         )
-        .run('c2', 'e2', 'docusign', 'https://docusign.net/x', Date.now(), Date.now(), Date.now()),
+        .run(
+          'c2',
+          'e2',
+          'docusign',
+          'https://docusign.net/x',
+          Date.now(),
+          Date.now(),
+          Date.now(),
+        ),
     ).toThrow(/CHECK constraint failed/);
   });
 
@@ -70,7 +86,15 @@ describe('signer DB migration', () => {
           `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, signed_pdf_path, created_at, updated_at)
            VALUES (?, ?, ?, ?, 'signed', ?, ?, ?)`,
         )
-        .run('c3', 'e3', 'docusign', 'https://docusign.net/x', '/tmp/x.pdf', Date.now(), Date.now()),
+        .run(
+          'c3',
+          'e3',
+          'docusign',
+          'https://docusign.net/x',
+          '/tmp/x.pdf',
+          Date.now(),
+          Date.now(),
+        ),
     ).toThrow(/CHECK constraint failed/);
   });
 
@@ -81,7 +105,15 @@ describe('signer DB migration', () => {
           `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, created_at, updated_at, completed_at)
            VALUES (?, ?, ?, ?, 'detected', ?, ?, ?)`,
         )
-        .run('c4', 'e4', 'docusign', 'https://docusign.net/x', Date.now(), Date.now(), Date.now()),
+        .run(
+          'c4',
+          'e4',
+          'docusign',
+          'https://docusign.net/x',
+          Date.now(),
+          Date.now(),
+          Date.now(),
+        ),
     ).toThrow(/CHECK constraint failed/);
   });
 
@@ -106,7 +138,16 @@ describe('signer DB migration', () => {
     db.prepare(
       `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, state, failure_reason, created_at, updated_at, completed_at)
        VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?)`,
-    ).run('c6a', 'email-y', 'docusign', 'https://docusign.net/y', 'timeout', now, now, now);
+    ).run(
+      'c6a',
+      'email-y',
+      'docusign',
+      'https://docusign.net/y',
+      'timeout',
+      now,
+      now,
+      now,
+    );
     expect(() =>
       db
         .prepare(

@@ -1,7 +1,16 @@
 import type Database from 'better-sqlite3';
-import type { SignCeremony, SignCeremonyState, RiskFlag, SignVendor } from './types.js';
+import type {
+  SignCeremony,
+  SignCeremonyState,
+  RiskFlag,
+  SignVendor,
+} from './types.js';
 
-const TERMINAL_STATES: ReadonlySet<SignCeremonyState> = new Set(['signed', 'failed', 'cancelled']);
+const TERMINAL_STATES: ReadonlySet<SignCeremonyState> = new Set([
+  'signed',
+  'failed',
+  'cancelled',
+]);
 
 export interface CreateCeremonyInput {
   id: string;
@@ -37,7 +46,9 @@ function rowToCeremony(r: Row): SignCeremony {
     docTitle: r.doc_title,
     state: r.state,
     summaryText: r.summary_text,
-    riskFlags: r.risk_flags_json ? (JSON.parse(r.risk_flags_json) as RiskFlag[]) : [],
+    riskFlags: r.risk_flags_json
+      ? (JSON.parse(r.risk_flags_json) as RiskFlag[])
+      : [],
     signedPdfPath: r.signed_pdf_path,
     failureReason: r.failure_reason,
     failureScreenshotPath: r.failure_screenshot_path,
@@ -47,23 +58,44 @@ function rowToCeremony(r: Row): SignCeremony {
   };
 }
 
-export function createCeremony(db: Database.Database, input: CreateCeremonyInput): SignCeremony {
+export function createCeremony(
+  db: Database.Database,
+  input: CreateCeremonyInput,
+): SignCeremony {
   const now = Date.now();
   db.prepare(
     `INSERT INTO sign_ceremonies (id, email_id, vendor, sign_url, doc_title, state, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'detected', ?, ?)`,
-  ).run(input.id, input.emailId, input.vendor, input.signUrl, input.docTitle ?? null, now, now);
+  ).run(
+    input.id,
+    input.emailId,
+    input.vendor,
+    input.signUrl,
+    input.docTitle ?? null,
+    now,
+    now,
+  );
   return getCeremony(db, input.id)!;
 }
 
-export function getCeremony(db: Database.Database, id: string): SignCeremony | null {
-  const row = db.prepare('SELECT * FROM sign_ceremonies WHERE id = ?').get(id) as Row | undefined;
+export function getCeremony(
+  db: Database.Database,
+  id: string,
+): SignCeremony | null {
+  const row = db
+    .prepare('SELECT * FROM sign_ceremonies WHERE id = ?')
+    .get(id) as Row | undefined;
   return row ? rowToCeremony(row) : null;
 }
 
-export function listByEmail(db: Database.Database, emailId: string): SignCeremony[] {
+export function listByEmail(
+  db: Database.Database,
+  emailId: string,
+): SignCeremony[] {
   const rows = db
-    .prepare('SELECT * FROM sign_ceremonies WHERE email_id = ? ORDER BY created_at DESC, rowid DESC')
+    .prepare(
+      'SELECT * FROM sign_ceremonies WHERE email_id = ? ORDER BY created_at DESC, rowid DESC',
+    )
     .all(emailId) as Row[];
   return rows.map(rowToCeremony);
 }
@@ -103,7 +135,11 @@ export function updateSummary(
   ).run(summary.join('\n'), JSON.stringify(riskFlags), Date.now(), id);
 }
 
-export function updateSignedPdf(db: Database.Database, id: string, path: string): void {
+export function updateSignedPdf(
+  db: Database.Database,
+  id: string,
+  path: string,
+): void {
   db.prepare(
     `UPDATE sign_ceremonies SET signed_pdf_path = ?, updated_at = ? WHERE id = ?`,
   ).run(path, Date.now(), id);

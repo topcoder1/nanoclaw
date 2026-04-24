@@ -39,13 +39,17 @@ vi.mock('../qdrant.js', () => ({
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import { migrateKnowledgeFacts } from '../migrate-knowledge-facts.js';
 
-function seedLegacyDb(rows: Array<Partial<{
-  text: string;
-  domain: string;
-  group_id: string;
-  source: string;
-  created_at: string;
-}>>): string {
+function seedLegacyDb(
+  rows: Array<
+    Partial<{
+      text: string;
+      domain: string;
+      group_id: string;
+      source: string;
+      created_at: string;
+    }>
+  >,
+): string {
   const p = path.join(tmpDir, 'messages.db');
   const db = new Database(p);
   db.exec(
@@ -154,7 +158,11 @@ describe('brain/migrate-knowledge-facts', () => {
 
   it('is idempotent on re-run (legacy rowid dedup)', async () => {
     seedLegacyDb([
-      { text: 'first fact', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
+      {
+        text: 'first fact',
+        source: 'manual',
+        created_at: '2026-04-01T10:00:00Z',
+      },
     ]);
     const r1 = await migrateKnowledgeFacts();
     expect(r1.inserted).toBe(1);
@@ -174,7 +182,11 @@ describe('brain/migrate-knowledge-facts', () => {
     seedLegacyDb([
       { text: '', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
       { text: '   ', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
-      { text: 'real fact', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
+      {
+        text: 'real fact',
+        source: 'manual',
+        created_at: '2026-04-01T10:00:00Z',
+      },
     ]);
     const report = await migrateKnowledgeFacts();
     expect(report.legacyRowsTotal).toBe(3);
@@ -224,10 +236,14 @@ describe('brain/migrate-knowledge-facts', () => {
        CREATE TABLE acted_emails (thread_id TEXT PRIMARY KEY, action TEXT);`,
     );
     legacy
-      .prepare(`INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`)
+      .prepare(
+        `INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`,
+      )
       .run(1, 'renewal', '2026-04-20T10:00:00Z');
     legacy
-      .prepare(`INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`)
+      .prepare(
+        `INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`,
+      )
       .run(2, 'followup', '2026-04-21T10:00:00Z');
     legacy
       .prepare(`INSERT INTO commitments (uuid, owner) VALUES (?, ?)`)
@@ -264,7 +280,9 @@ describe('brain/migrate-knowledge-facts', () => {
     expect(r2.actedEmailsLinked).toBe(0);
 
     const totalRaw = (
-      brain.prepare(`SELECT COUNT(*) AS n FROM raw_events`).get() as { n: number }
+      brain.prepare(`SELECT COUNT(*) AS n FROM raw_events`).get() as {
+        n: number;
+      }
     ).n;
     expect(totalRaw).toBe(5);
   });
@@ -273,7 +291,11 @@ describe('brain/migrate-knowledge-facts', () => {
     // Seed only knowledge_facts — none of tracked_items, commitments,
     // acted_emails. Second pass should log + continue, not throw.
     seedLegacyDb([
-      { text: 'fact only', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
+      {
+        text: 'fact only',
+        source: 'manual',
+        created_at: '2026-04-01T10:00:00Z',
+      },
     ]);
     const r = await migrateKnowledgeFacts();
     expect(r.inserted).toBe(1);

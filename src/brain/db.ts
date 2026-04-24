@@ -91,7 +91,9 @@ export function getBrainDb(): Database.Database {
 }
 
 /** @internal — for tests only. Opens a fresh DB at the given path (or :memory:). */
-export function _openBrainDbForTest(dbPath: string = ':memory:'): Database.Database {
+export function _openBrainDbForTest(
+  dbPath: string = ':memory:',
+): Database.Database {
   const fresh = new Database(dbPath);
   applySchema(fresh);
   return fresh;

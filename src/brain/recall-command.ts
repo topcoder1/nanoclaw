@@ -62,7 +62,9 @@ export async function handleRecallCommand(
     return `No matches for *${escapeMarkdown(question)}*.`;
   }
 
-  const lines: string[] = [`🧠 Top ${results.length} match(es) for *${escapeMarkdown(question)}*:`];
+  const lines: string[] = [
+    `🧠 Top ${results.length} match(es) for *${escapeMarkdown(question)}*:`,
+  ];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     const date = r.valid_from ? r.valid_from.slice(0, 10) : '—';

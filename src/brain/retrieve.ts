@@ -152,9 +152,7 @@ function ftsSearchTopN(
   if (opts.scope) {
     // Simple P1: scope is JSON array — check substring match. For strict
     // containment, P2 can parse JSON. Good enough for single-tag queries.
-    filters.push(
-      `(ku.scope IS NOT NULL AND ku.scope LIKE '%"' || ? || '"%')`,
-    );
+    filters.push(`(ku.scope IS NOT NULL AND ku.scope LIKE '%"' || ? || '"%')`);
     params.push(opts.scope);
   }
   filters.push('ku.superseded_at IS NULL');
@@ -340,7 +338,10 @@ export async function recall(
       .enqueue({ id: hit.ku_id, ts: nowIso })
       .catch((err) => {
         logger.warn(
-          { err: err instanceof Error ? err.message : String(err), id: hit.ku_id },
+          {
+            err: err instanceof Error ? err.message : String(err),
+            id: hit.ku_id,
+          },
           'recall: access bump failed',
         );
       });

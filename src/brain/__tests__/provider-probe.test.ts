@@ -20,9 +20,9 @@ vi.mock('../../config.js', () => ({
   },
 }));
 
-const embedMock = vi.fn<
-  (text: string, mode: string) => Promise<number[]>
->(async () => new Array(768).fill(0.1));
+const embedMock = vi.fn<(text: string, mode: string) => Promise<number[]>>(
+  async () => new Array(768).fill(0.1),
+);
 vi.mock('../embed.js', () => ({
   embedText: (text: string, mode: string) => embedMock(text, mode),
   getEmbeddingModelVersion: () => 'nomic-embed-text-v1.5:768',

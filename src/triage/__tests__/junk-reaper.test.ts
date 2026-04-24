@@ -64,13 +64,16 @@ function makeGmailOps(accounts: string[], opts: MockGmailOpts = {}) {
 
   return {
     accounts,
-    listMessagesByLabel: vi.fn(async (account: string, label: string, max: number) => {
-      if (opts.listImpl) return opts.listImpl(account, label, max);
-      return listings[account] ?? [];
-    }),
+    listMessagesByLabel: vi.fn(
+      async (account: string, label: string, max: number) => {
+        if (opts.listImpl) return opts.listImpl(account, label, max);
+        return listings[account] ?? [];
+      },
+    ),
     getMessageHeaders: vi.fn(
       async (account: string, messageId: string, headerNames: string[]) => {
-        if (opts.headerImpl) return opts.headerImpl(account, messageId, headerNames);
+        if (opts.headerImpl)
+          return opts.headerImpl(account, messageId, headerNames);
         return headers[messageId] ?? {};
       },
     ),
@@ -109,7 +112,9 @@ describe('junk-reaper', () => {
       },
     });
 
-    const fetchMock = vi.fn(async () => ({ status: 200 })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+    })) as unknown as typeof fetch;
 
     const result = await reapOnce({
       db,
@@ -126,10 +131,14 @@ describe('junk-reaper', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     expect(gmailOps.archiveThread).toHaveBeenCalledWith('personal', 'thread1');
-    expect(gmailOps.modifyMessageLabels).toHaveBeenCalledWith('personal', 'msg1', {
-      add: [AUTO_ARCHIVED_LABEL],
-      remove: [ARCHIVE_CANDIDATE_LABEL, 'INBOX'],
-    });
+    expect(gmailOps.modifyMessageLabels).toHaveBeenCalledWith(
+      'personal',
+      'msg1',
+      {
+        add: [AUTO_ARCHIVED_LABEL],
+        remove: [ARCHIVE_CANDIDATE_LABEL, 'INBOX'],
+      },
+    );
 
     const tracker = new ArchiveTracker(db);
     const row = tracker.getByEmailId('msg1');
@@ -194,7 +203,9 @@ describe('junk-reaper', () => {
         },
       },
     });
-    const fetchMock = vi.fn(async () => ({ status: 500 })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({
+      status: 500,
+    })) as unknown as typeof fetch;
 
     const result = await reapOnce({ db, gmailOps, fetch: fetchMock });
 
@@ -311,7 +322,9 @@ describe('junk-reaper', () => {
         },
       },
     });
-    const fetchMock = vi.fn(async () => ({ status: 200 })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+    })) as unknown as typeof fetch;
 
     const result = await reapOnce({ db, gmailOps, fetch: fetchMock });
 
@@ -322,10 +335,14 @@ describe('junk-reaper', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(gmailOps.sendEmail).not.toHaveBeenCalled();
     expect(gmailOps.archiveThread).toHaveBeenCalledWith('personal', 'threadB1');
-    expect(gmailOps.modifyMessageLabels).toHaveBeenCalledWith('personal', 'msgB1', {
-      add: [AUTO_ARCHIVED_LABEL],
-      remove: [ARCHIVE_CANDIDATE_LABEL, 'INBOX'],
-    });
+    expect(gmailOps.modifyMessageLabels).toHaveBeenCalledWith(
+      'personal',
+      'msgB1',
+      {
+        add: [AUTO_ARCHIVED_LABEL],
+        remove: [ARCHIVE_CANDIDATE_LABEL, 'INBOX'],
+      },
+    );
 
     const tracker = new ArchiveTracker(db);
     const row = tracker.getByEmailId('msgB1');
@@ -345,7 +362,9 @@ describe('junk-reaper', () => {
         },
       },
     });
-    const fetchMock = vi.fn(async () => ({ status: 200 })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+    })) as unknown as typeof fetch;
 
     const result = await reapOnce({ db, gmailOps, fetch: fetchMock });
 
@@ -370,7 +389,9 @@ describe('junk-reaper', () => {
         },
       },
     });
-    const fetchMock = vi.fn(async () => ({ status: 200 })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+    })) as unknown as typeof fetch;
 
     const result = await reapOnce({
       db,
@@ -389,7 +410,9 @@ describe('junk-reaper', () => {
     const patterns = ['*@github.com'];
     expect(isBlocklisted('GitHub <noreply@github.com>', patterns)).toBe(true);
     expect(isBlocklisted('noreply@github.com', patterns)).toBe(true);
-    expect(isBlocklisted('"Bracketed Name" <noreply@github.com>', patterns)).toBe(true);
+    expect(
+      isBlocklisted('"Bracketed Name" <noreply@github.com>', patterns),
+    ).toBe(true);
   });
 
   it('isBlocklisted returns true on unparseable input (safe default)', () => {

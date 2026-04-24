@@ -177,10 +177,7 @@ describe('brain/retrieve — end-to-end', () => {
     ]);
     // Rerank ranks K1 above K2 by returning larger score for K1.
     rerankMock.rerank.mockImplementation(
-      async (
-        _q: string,
-        cands: Array<{ id: string; text: string }>,
-      ) => {
+      async (_q: string, cands: Array<{ id: string; text: string }>) => {
         return cands
           .map((c) => ({
             id: c.id,
@@ -229,7 +226,9 @@ describe('brain/retrieve — end-to-end', () => {
     // Drain the access queue so the UPDATE has been flushed.
     await _shutdownAccessQueue();
     const row = db
-      .prepare(`SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'A'`)
+      .prepare(
+        `SELECT access_count, last_accessed_at FROM knowledge_units WHERE id = 'A'`,
+      )
       .get() as { access_count: number; last_accessed_at: string | null };
     expect(row.access_count).toBe(1);
     expect(row.last_accessed_at).not.toBeNull();

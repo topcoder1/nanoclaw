@@ -30,7 +30,9 @@ import { newId } from '../ulid.js';
  * Mock Qdrant scroll — we only need `scroll()` to satisfy the reconcile
  * surface. Points are the fixture, paged in a single call.
  */
-function makeFakeClient(points: Array<{ id: string; payload: Record<string, unknown> }>) {
+function makeFakeClient(
+  points: Array<{ id: string; payload: Record<string, unknown> }>,
+) {
   return {
     async scroll(_name: string, _opts: unknown): Promise<unknown> {
       return { points, next_page_offset: null };

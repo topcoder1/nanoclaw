@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { renderCeremonyCard, renderDoubleConfirmCard, renderReceipt } from '../card-renderer.js';
+import {
+  renderCeremonyCard,
+  renderDoubleConfirmCard,
+  renderReceipt,
+} from '../card-renderer.js';
 import type { SignCeremony, RiskFlag } from '../types.js';
 
 function makeCeremony(overrides: Partial<SignCeremony> = {}): SignCeremony {
@@ -39,8 +43,16 @@ describe('card-renderer', () => {
 
   it('renders warning header when high-severity flags present', () => {
     const flags: RiskFlag[] = [
-      { category: 'auto_renewal', severity: 'high', evidence: 'auto-renews yearly' },
-      { category: 'non_compete', severity: 'high', evidence: '2 year non-compete' },
+      {
+        category: 'auto_renewal',
+        severity: 'high',
+        evidence: 'auto-renews yearly',
+      },
+      {
+        category: 'non_compete',
+        severity: 'high',
+        evidence: '2 year non-compete',
+      },
     ];
     const card = renderCeremonyCard(makeCeremony({ riskFlags: flags }));
     expect(card.text).toContain('⚠️ 2 risks flagged');
@@ -49,7 +61,9 @@ describe('card-renderer', () => {
   });
 
   it('renders double-confirm card after first tap', () => {
-    const card = renderDoubleConfirmCard(makeCeremony({ state: 'approval_requested' }));
+    const card = renderDoubleConfirmCard(
+      makeCeremony({ state: 'approval_requested' }),
+    );
     expect(card.text).toContain('Tap again to confirm');
     expect(card.buttons).toEqual([
       [
@@ -80,7 +94,12 @@ describe('card-renderer', () => {
     expect(r.text).toMatch(/❌ Sign failed/);
     expect(r.text).toContain('layout_changed');
     expect(r.buttons).toEqual([
-      [{ text: '🖥 Open in browser', url: 'https://na3.docusign.net/Signing/abc' }],
+      [
+        {
+          text: '🖥 Open in browser',
+          url: 'https://na3.docusign.net/Signing/abc',
+        },
+      ],
     ]);
   });
 });

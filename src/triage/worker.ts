@@ -198,13 +198,11 @@ export async function triageEmail(
         // callback-based Sign button. Falls back to the direct signUrl
         // below when the flag is off or no ceremony was created.
         let signerCeremonyId: string | undefined;
-        const { isSignerAutoSignEnabled } = await import(
-          '../signer/feature-flag.js'
-        );
+        const { isSignerAutoSignEnabled } =
+          await import('../signer/feature-flag.js');
         if (isSignerAutoSignEnabled() && detected) {
-          const { onSignInviteDetected } = await import(
-            '../signer/triage-hook.js'
-          );
+          const { onSignInviteDetected } =
+            await import('../signer/triage-hook.js');
           const { eventBus } = await import('../event-bus.js');
           const id = await onSignInviteDetected({
             db: getDb(),

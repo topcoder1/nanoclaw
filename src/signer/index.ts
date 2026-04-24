@@ -17,9 +17,21 @@ export interface StartSignerInput {
   connectBrowser: () => Promise<Browser>;
   fetchDocText: (signUrl: string) => Promise<string>;
   llm: LlmFn;
-  sendText: (chatId: string, text: string, opts?: unknown) => Promise<{ message_id: number } | void>;
-  sendDocument: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
-  sendPhoto: (chatId: string, filePath: string, opts?: unknown) => Promise<void>;
+  sendText: (
+    chatId: string,
+    text: string,
+    opts?: unknown,
+  ) => Promise<{ message_id: number } | void>;
+  sendDocument: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
+  sendPhoto: (
+    chatId: string,
+    filePath: string,
+    opts?: unknown,
+  ) => Promise<void>;
 }
 
 export function startSigner(deps: StartSignerInput): () => void {
@@ -56,7 +68,10 @@ export async function fetchDocTextViaExecutor(opts: {
   const context = await opts.browser.newContext();
   try {
     const page = await context.newPage();
-    await page.goto(opts.signUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+    await page.goto(opts.signUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 20_000,
+    });
     return await executor.extractDocText(page);
   } finally {
     await context.close();

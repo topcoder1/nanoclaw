@@ -59,9 +59,7 @@ describe('classifyFromSSE — SuperPilot upstream fields', () => {
     expect(results).toHaveLength(1);
 
     const row = getDb()
-      .prepare(
-        `SELECT superpilot_label FROM tracked_items WHERE thread_id = ?`,
-      )
+      .prepare(`SELECT superpilot_label FROM tracked_items WHERE thread_id = ?`)
       .get('thread-et-1') as { superpilot_label: string | null };
     expect(row.superpilot_label).toBe('transactions');
   });
@@ -80,9 +78,7 @@ describe('classifyFromSSE — SuperPilot upstream fields', () => {
     classifyFromSSE(emails);
 
     const row = getDb()
-      .prepare(
-        `SELECT superpilot_label FROM tracked_items WHERE thread_id = ?`,
-      )
+      .prepare(`SELECT superpilot_label FROM tracked_items WHERE thread_id = ?`)
       .get('thread-both') as { superpilot_label: string | null };
     expect(row.superpilot_label).toBe('needs-attention');
   });

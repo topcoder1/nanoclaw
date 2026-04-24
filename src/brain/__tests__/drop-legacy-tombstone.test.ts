@@ -72,8 +72,7 @@ describe('brain/drop-legacy-tombstone', () => {
   it('reports due when the tombstone is ≥ 30 days old', () => {
     const setAt = Date.parse('2026-04-01T00:00:00Z');
     ensureLegacyCutoverTombstone(new Date(setAt).toISOString());
-    const thirtyDaysLater =
-      setAt + LEGACY_CUTOVER_DAYS * 24 * 60 * 60 * 1000;
+    const thirtyDaysLater = setAt + LEGACY_CUTOVER_DAYS * 24 * 60 * 60 * 1000;
     expect(isLegacyCutoverDue(thirtyDaysLater)).toBe(true);
   });
 

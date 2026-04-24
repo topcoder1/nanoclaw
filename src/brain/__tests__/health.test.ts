@@ -26,7 +26,11 @@ import {
   handleBrainHealthCommand,
   type BrainHealthReport,
 } from '../health.js';
-import { logCost, _resetLatencyBuffer, recordRetrievalLatencyMs } from '../metrics.js';
+import {
+  logCost,
+  _resetLatencyBuffer,
+  recordRetrievalLatencyMs,
+} from '../metrics.js';
 import { ensureLegacyCutoverTombstone } from '../drop-legacy-tombstone.js';
 import { newId } from '../ulid.js';
 
@@ -62,7 +66,13 @@ describe('brain/health', () => {
     );
     for (let i = 0; i < 5; i++) stmt.run(newId(), now, now);
 
-    logCost({ provider: 'anthropic', operation: 'extract', units: 1, costUsd: 0.05, nowIso: now });
+    logCost({
+      provider: 'anthropic',
+      operation: 'extract',
+      units: 1,
+      costUsd: 0.05,
+      nowIso: now,
+    });
     for (let i = 0; i < 20; i++) recordRetrievalLatencyMs(i + 1);
     ensureLegacyCutoverTombstone(now);
 
@@ -105,7 +115,11 @@ describe('brain/health', () => {
         monthlyBudgetUtilization: 0.1,
       },
       latency: { count: 20, p50: 10, p95: 19, p99: 20 },
-      reconcile: { lastRunAt: '2026-04-23T00:00:00Z', lastStats: null, driftThreshold: 0.01 },
+      reconcile: {
+        lastRunAt: '2026-04-23T00:00:00Z',
+        lastStats: null,
+        driftThreshold: 0.01,
+      },
       legacy: { cutoverAt: '2026-04-23T00:00:00Z', cutoverDue: false },
       reEvalTriggers: [
         {
@@ -131,12 +145,22 @@ describe('brain/health', () => {
     const fake = (): BrainHealthReport => ({
       generatedAt: 'x',
       counts: {
-        kuTotal: 0, kuLive: 0, kuSuperseded: 0, kuNeedsReview: 0,
-        entityTotal: 0, rawEventsTotal: 0, rawEventsUnprocessed: 0, deadLetterCandidates: 0,
+        kuTotal: 0,
+        kuLive: 0,
+        kuSuperseded: 0,
+        kuNeedsReview: 0,
+        entityTotal: 0,
+        rawEventsTotal: 0,
+        rawEventsUnprocessed: 0,
+        deadLetterCandidates: 0,
       },
       cost: {
-        todayUsd: 0, rolling7dAvgUsd: 0, todayRatioOfAvg: 0,
-        monthToDateUsd: 12, monthlyBudgetUsd: 10, monthlyBudgetUtilization: 1.2,
+        todayUsd: 0,
+        rolling7dAvgUsd: 0,
+        todayRatioOfAvg: 0,
+        monthToDateUsd: 12,
+        monthlyBudgetUsd: 10,
+        monthlyBudgetUtilization: 1.2,
       },
       latency: { count: 0, p50: 0, p95: 0, p99: 0 },
       reconcile: { lastRunAt: null, lastStats: null, driftThreshold: 0.01 },

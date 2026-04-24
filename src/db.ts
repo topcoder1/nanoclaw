@@ -864,9 +864,7 @@ function createSchema(database: Database.Database): void {
   // without re-classifying. Placed after the table-rebuild blocks above so
   // the columns survive any future CHECK-constraint rebuilds.
   if (!trackedNames.has('suggested_action')) {
-    database.exec(
-      `ALTER TABLE tracked_items ADD COLUMN suggested_action TEXT`,
-    );
+    database.exec(`ALTER TABLE tracked_items ADD COLUMN suggested_action TEXT`);
   }
   if (!trackedNames.has('needs_reply')) {
     database.exec(`ALTER TABLE tracked_items ADD COLUMN needs_reply INTEGER`);

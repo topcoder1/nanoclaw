@@ -30,9 +30,8 @@ vi.mock('../logger.js', () => ({
 // SAME DB (recall uses the singleton, not the injected `brainDb` opt).
 let tmpDir: string;
 vi.mock('../config.js', async () => {
-  const actual = await vi.importActual<typeof import('../config.js')>(
-    '../config.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('../config.js')>('../config.js');
   return {
     ...actual,
     get STORE_DIR() {
@@ -60,8 +59,9 @@ const { qdrantMock, rerankMock } = vi.hoisted(() => ({
     _setQdrantClientForTest: () => {},
   },
   rerankMock: {
-    rerank: vi.fn(async (_q: string, cands: Array<{ id: string; text: string }>) =>
-      cands.map((c) => ({ id: c.id, text: c.text, score: 0.5 })),
+    rerank: vi.fn(
+      async (_q: string, cands: Array<{ id: string; text: string }>) =>
+        cands.map((c) => ({ id: c.id, text: c.text, score: 0.5 })),
     ),
     _resetRerankPipeline: () => {},
   },
@@ -161,11 +161,12 @@ describe('Brain miniapp — /brain/search', () => {
 
   it('empty query does NOT invoke recall (embedText is not called)', async () => {
     const embed = await import('../brain/embed.js');
-    const calls = (embed.embedText as ReturnType<typeof vi.fn>).mock.calls.length;
+    const calls = (embed.embedText as ReturnType<typeof vi.fn>).mock.calls
+      .length;
     await request(app).get('/brain/search?q=');
-    expect((embed.embedText as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
-      calls,
-    );
+    expect(
+      (embed.embedText as ReturnType<typeof vi.fn>).mock.calls.length,
+    ).toBe(calls);
   });
 
   it('user input is escaped — <script> in q does not leak', async () => {
@@ -194,7 +195,9 @@ describe('Brain miniapp — /brain/search', () => {
   });
 
   it('empty result renders "No results." message', async () => {
-    const res = await request(app).get('/brain/search?q=nothingmatchesthisquery');
+    const res = await request(app).get(
+      '/brain/search?q=nothingmatchesthisquery',
+    );
     expect(res.text).toContain('No results.');
   });
 });

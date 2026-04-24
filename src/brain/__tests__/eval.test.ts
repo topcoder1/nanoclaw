@@ -61,9 +61,9 @@ describe('brain/eval — scoreOneQuery', () => {
     expect(
       scoreOneQuery(['x', 'y', 'a'], new Set(['a'])).reciprocalRank,
     ).toBeCloseTo(1 / 3, 6);
-    expect(
-      scoreOneQuery(['a', 'y', 'z'], new Set(['a'])).reciprocalRank,
-    ).toBe(1);
+    expect(scoreOneQuery(['a', 'y', 'z'], new Set(['a'])).reciprocalRank).toBe(
+      1,
+    );
     expect(scoreOneQuery(['x', 'y'], new Set(['a'])).reciprocalRank).toBe(0);
   });
 
@@ -76,7 +76,10 @@ describe('brain/eval — scoreOneQuery', () => {
 describe('brain/eval — runEval aggregation', () => {
   it('macro-averages precision/recall/MRR over queries', async () => {
     const queries = [
-      { queryId: 'q1', retrievedKuIds: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] },
+      {
+        queryId: 'q1',
+        retrievedKuIds: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'],
+      },
       { queryId: 'q2', retrievedKuIds: ['z', 'y', 'x'] },
     ];
     const expected = new Map<string, Set<string>>([

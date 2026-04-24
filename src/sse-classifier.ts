@@ -91,8 +91,7 @@ export function classifyFromSSE(
     // Effective label: explicit superpilot_label wins, otherwise fall back
     // to upstream email_type. SuperPilot currently only ships email_type;
     // superpilot_label is retained for forward compat / testing.
-    const effectiveLabel =
-      email.superpilot_label ?? email.email_type ?? null;
+    const effectiveLabel = email.superpilot_label ?? email.email_type ?? null;
 
     const result = classify({
       source: 'gmail',

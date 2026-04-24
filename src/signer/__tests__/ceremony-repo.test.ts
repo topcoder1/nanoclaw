@@ -37,25 +37,42 @@ describe('ceremony-repo', () => {
   });
 
   it('transitionState succeeds when current state matches', () => {
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x' });
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+    });
     const ok = transitionState(db, 'c1', 'detected', 'summarized');
     expect(ok).toBe(true);
     expect(getCeremony(db, 'c1')!.state).toBe('summarized');
   });
 
   it('transitionState fails silently (returns false) when state does not match', () => {
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x' });
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+    });
     const ok = transitionState(db, 'c1', 'approved', 'signing');
     expect(ok).toBe(false);
     expect(getCeremony(db, 'c1')!.state).toBe('detected');
   });
 
   it('transitionState to signed requires updateSignedPdf first', () => {
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x' });
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+    });
     transitionState(db, 'c1', 'detected', 'summarized');
     transitionState(db, 'c1', 'summarized', 'approved');
     transitionState(db, 'c1', 'approved', 'signing');
-    expect(() => transitionState(db, 'c1', 'signing', 'signed')).toThrow(/CHECK constraint failed/);
+    expect(() => transitionState(db, 'c1', 'signing', 'signed')).toThrow(
+      /CHECK constraint failed/,
+    );
     updateSignedPdf(db, 'c1', '/tmp/signed.pdf');
     const ok = transitionState(db, 'c1', 'signing', 'signed');
     expect(ok).toBe(true);
@@ -66,7 +83,12 @@ describe('ceremony-repo', () => {
   });
 
   it('updateFailure sets reason + screenshot + transitions to failed', () => {
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x' });
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+    });
     transitionState(db, 'c1', 'detected', 'summarized');
     transitionState(db, 'c1', 'summarized', 'approved');
     transitionState(db, 'c1', 'approved', 'signing');
@@ -79,22 +101,50 @@ describe('ceremony-repo', () => {
   });
 
   it('updateSummary stores summary + flags as JSON', () => {
-    createCeremony(db, { id: 'c1', emailId: 'e1', vendor: 'docusign', signUrl: 'https://docusign.net/x' });
-    updateSummary(db, 'c1', ['line 1', 'line 2'], [
-      { category: 'auto_renewal', severity: 'high', evidence: 'Auto-renews yearly' },
-    ]);
+    createCeremony(db, {
+      id: 'c1',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'https://docusign.net/x',
+    });
+    updateSummary(
+      db,
+      'c1',
+      ['line 1', 'line 2'],
+      [
+        {
+          category: 'auto_renewal',
+          severity: 'high',
+          evidence: 'Auto-renews yearly',
+        },
+      ],
+    );
     const c = getCeremony(db, 'c1')!;
     expect(c.summaryText).toBe('line 1\nline 2');
     expect(c.riskFlags).toEqual([
-      { category: 'auto_renewal', severity: 'high', evidence: 'Auto-renews yearly' },
+      {
+        category: 'auto_renewal',
+        severity: 'high',
+        evidence: 'Auto-renews yearly',
+      },
     ]);
   });
 
   it('listByEmail returns all ceremonies ordered by created_at desc', () => {
-    createCeremony(db, { id: 'a', emailId: 'e1', vendor: 'docusign', signUrl: 'x' });
+    createCeremony(db, {
+      id: 'a',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'x',
+    });
     transitionState(db, 'a', 'detected', 'summarized');
     transitionState(db, 'a', 'summarized', 'cancelled');
-    createCeremony(db, { id: 'b', emailId: 'e1', vendor: 'docusign', signUrl: 'x' });
+    createCeremony(db, {
+      id: 'b',
+      emailId: 'e1',
+      vendor: 'docusign',
+      signUrl: 'x',
+    });
     const list = listByEmail(db, 'e1');
     expect(list.map((c) => c.id)).toEqual(['b', 'a']);
   });

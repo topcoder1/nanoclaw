@@ -40,8 +40,14 @@ describe('signer end-to-end integration', () => {
     server = http.createServer((req, res) => {
       const url = req.url || '/';
       const name = url === '/' ? '/signing.html' : url;
-      if (name === '/signing.html') res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-signing-page.html')));
-      else if (name === '/completion.html') res.end(fs.readFileSync(path.join(FIXTURES, 'docusign-completion-page.html')));
+      if (name === '/signing.html')
+        res.end(
+          fs.readFileSync(path.join(FIXTURES, 'docusign-signing-page.html')),
+        );
+      else if (name === '/completion.html')
+        res.end(
+          fs.readFileSync(path.join(FIXTURES, 'docusign-completion-page.html')),
+        );
       else if (name === '/signed.pdf') {
         res.setHeader('Content-Type', 'application/pdf');
         res.end(fs.readFileSync(path.join(FIXTURES, 'sample-signed.pdf')));
@@ -79,7 +85,8 @@ describe('signer end-to-end integration', () => {
     const telegramDocuments: Array<{ chatId: string; path: string }> = [];
 
     const llm = async () => ({ summary: ['Doc: NDA'], riskFlags: [] });
-    const fetchDocText = async () => 'CONSULTING AGREEMENT between Acme and Alice';
+    const fetchDocText = async () =>
+      'CONSULTING AGREEMENT between Acme and Alice';
 
     startSummarizerWiring({ db, bus, fetchDocText, llm });
 

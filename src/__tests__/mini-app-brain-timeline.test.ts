@@ -97,13 +97,7 @@ describe('Brain miniapp — /brain/timeline', () => {
       '2026-04-01T00:00:00Z',
       { processed_at: '2026-04-01T00:00:01Z' },
     );
-    seedRaw(
-      brainDb,
-      'r_newer',
-      'gong',
-      'call-NEWER',
-      '2026-04-02T00:00:00Z',
-    );
+    seedRaw(brainDb, 'r_newer', 'gong', 'call-NEWER', '2026-04-02T00:00:00Z');
     const res = await request(app).get('/brain/timeline');
     const idxNewer = res.text.indexOf('call-NEWER');
     const idxOlder = res.text.indexOf('thread-OLDER');
@@ -117,18 +111,8 @@ describe('Brain miniapp — /brain/timeline', () => {
 
   it('correlates KUs to raw events by source_ref with clickable snippets', async () => {
     seedRaw(brainDb, 'r1', 'email', 'thread-A', '2026-04-01T00:00:00Z');
-    seedKu(
-      brainDb,
-      'K_ext_1',
-      'extracted fact one about Acme',
-      'thread-A',
-    );
-    seedKu(
-      brainDb,
-      'K_ext_2',
-      'extracted fact two about pricing',
-      'thread-A',
-    );
+    seedKu(brainDb, 'K_ext_1', 'extracted fact one about Acme', 'thread-A');
+    seedKu(brainDb, 'K_ext_2', 'extracted fact two about pricing', 'thread-A');
     const res = await request(app).get('/brain/timeline');
     expect(res.text).toContain('extracted fact one about Acme');
     expect(res.text).toContain('extracted fact two about pricing');

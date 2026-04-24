@@ -57,9 +57,7 @@ export async function reconcileQdrant(
   const ranAt = opts.nowIso ?? new Date().toISOString();
   const db = getBrainDb();
   const liveRows = db
-    .prepare(
-      `SELECT id FROM knowledge_units WHERE superseded_at IS NULL`,
-    )
+    .prepare(`SELECT id FROM knowledge_units WHERE superseded_at IS NULL`)
     .all() as { id: string }[];
   const liveIds = new Set(liveRows.map((r) => r.id));
   const sqliteLiveCount = liveIds.size;
@@ -106,7 +104,10 @@ export async function reconcileQdrant(
         with_vector: false,
         offset,
       })) as {
-        points: Array<{ id: string | number; payload?: Record<string, unknown> | null }>;
+        points: Array<{
+          id: string | number;
+          payload?: Record<string, unknown> | null;
+        }>;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         next_page_offset?: any;
       };
@@ -151,16 +152,12 @@ export async function reconcileQdrant(
     }
   }
 
-  const totalDrift = report.missingInQdrant.length + report.orphanInQdrant.length;
-  report.driftRatio =
-    sqliteLiveCount === 0 ? 0 : totalDrift / sqliteLiveCount;
+  const totalDrift =
+    report.missingInQdrant.length + report.orphanInQdrant.length;
+  report.driftRatio = sqliteLiveCount === 0 ? 0 : totalDrift / sqliteLiveCount;
 
   setSystemState('last_qdrant_reconcile', ranAt, ranAt);
-  setSystemState(
-    'last_qdrant_reconcile_stats',
-    JSON.stringify(report),
-    ranAt,
-  );
+  setSystemState('last_qdrant_reconcile_stats', JSON.stringify(report), ranAt);
   // Also persist under the alert-dispatcher key so the scheduled
   // dispatcher picks up drift without needing in-memory state.
   setSystemState('last_reconcile_report', JSON.stringify(report), ranAt);
@@ -173,7 +170,9 @@ export async function reconcileQdrant(
  * shutdown. No-op if QDRANT_URL is not set (scheduler still runs but each
  * iteration logs the drift between SQLite and a missing Qdrant).
  */
-export function startReconcileSchedule(intervalMs: number = 24 * 60 * 60 * 1000): () => void {
+export function startReconcileSchedule(
+  intervalMs: number = 24 * 60 * 60 * 1000,
+): () => void {
   const run = async (): Promise<void> => {
     try {
       await reconcileQdrant();
@@ -191,4 +190,3 @@ export function startReconcileSchedule(intervalMs: number = 24 * 60 * 60 * 1000)
   }, intervalMs);
   return () => clearInterval(handle);
 }
-

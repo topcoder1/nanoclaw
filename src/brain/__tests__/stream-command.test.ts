@@ -89,7 +89,11 @@ describe('brain/stream-command', () => {
       .run(id, type, JSON.stringify({ name }), createdAt, createdAt);
   }
 
-  function linkKuEntity(kuId: string, entityId: string, role = 'subject'): void {
+  function linkKuEntity(
+    kuId: string,
+    entityId: string,
+    role = 'subject',
+  ): void {
     getBrainDb()
       .prepare(
         `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, ?)`,
@@ -114,7 +118,12 @@ describe('brain/stream-command', () => {
     // 2 KUs — one linked to raw2 (via source_ref), one standalone
     const ku1 = newId();
     const ku2 = newId();
-    insertKu(ku1, 'Alice said renewal in Q4', 'thr-middle', '2026-04-23T12:05:00Z');
+    insertKu(
+      ku1,
+      'Alice said renewal in Q4',
+      'thr-middle',
+      '2026-04-23T12:05:00Z',
+    );
     insertKu(ku2, 'standalone insight', null, '2026-04-23T13:00:00Z', {
       confidence: 0.75,
       needs_review: 1,
@@ -174,7 +183,9 @@ describe('brain/stream-command', () => {
     for (let i = 0; i < 60; i++) {
       // space them out across the 24h window, all in the past
       const minutesAgo = i + 1;
-      const ts = new Date(FIXED_NOW.getTime() - minutesAgo * 60 * 1000).toISOString();
+      const ts = new Date(
+        FIXED_NOW.getTime() - minutesAgo * 60 * 1000,
+      ).toISOString();
       insert.run(newId(), `thr-${i}`, Buffer.from('{}'), ts, ts);
     }
     const reply = await handleBrainStreamCommand('200', { nowFn });
@@ -193,7 +204,9 @@ describe('brain/stream-command', () => {
     );
     for (let i = 0; i < 30; i++) {
       const minutesAgo = i + 1;
-      const ts = new Date(FIXED_NOW.getTime() - minutesAgo * 60 * 1000).toISOString();
+      const ts = new Date(
+        FIXED_NOW.getTime() - minutesAgo * 60 * 1000,
+      ).toISOString();
       insert.run(newId(), `thr-${i}`, Buffer.from('{}'), ts, ts);
     }
     for (const arg of ['0', '-5', 'xyz']) {
@@ -220,7 +233,9 @@ describe('brain/stream-command', () => {
 
   it('excludes rows older than 24h', async () => {
     // 30h ago — outside window
-    const old = new Date(FIXED_NOW.getTime() - 30 * 60 * 60 * 1000).toISOString();
+    const old = new Date(
+      FIXED_NOW.getTime() - 30 * 60 * 60 * 1000,
+    ).toISOString();
     insertRaw(newId(), 'thr-way-old', old);
     const reply = await handleBrainStreamCommand('', { nowFn });
     expect(reply).toBe('No ingestion activity in last 24h.');

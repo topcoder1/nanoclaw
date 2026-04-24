@@ -17,8 +17,14 @@ function abortRace<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
     const onAbort = () => reject(new Error('aborted'));
     signal.addEventListener('abort', onAbort, { once: true });
     p.then(
-      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
-      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      },
     );
   });
 }
@@ -151,7 +157,9 @@ export const docusignExecutor: SignExecutor = {
     page.setDefaultTimeout(15_000);
 
     try {
-      const gotoP = page.goto(ceremony.signUrl, { waitUntil: 'domcontentloaded' });
+      const gotoP = page.goto(ceremony.signUrl, {
+        waitUntil: 'domcontentloaded',
+      });
       gotoP.catch(() => undefined); // suppress unhandled rejection if abortRace wins
       await abortRace(gotoP, signal);
       const err = await detectErrorState(page);

@@ -24,11 +24,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import {
-  backupBrainDb,
-  backupQdrant,
-  pruneOldBackups,
-} from '../backup.js';
+import { backupBrainDb, backupQdrant, pruneOldBackups } from '../backup.js';
 import { newId } from '../ulid.js';
 
 describe('brain/backup', () => {
