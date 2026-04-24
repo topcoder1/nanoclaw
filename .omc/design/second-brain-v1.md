@@ -154,12 +154,27 @@ Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watch
 
 Both writes piggyback on the existing `knowledge_units` table — no schema change. The `--all` mode silently skips repos with zero notes so it doesn't create noise.
 
-### v3+ — expression layer
+### v3 — agent turn auto-recall (shipped 2026-04-24)
 
-- Agent turn prelude: auto-`recall()` relevant KUs before responding, so the agent answers from memory without `/recall`.
+`src/brain/auto-recall.ts` — called from `runAgent()` in `index.ts` immediately before the `runContainerAgent` invocation. For every user-initiated turn:
+
+1. Query `recall(userPrompt, { limit: 5, caller: 'agent-auto' })`.
+2. Keep hits with `finalScore ≥ 0.25`.
+3. Format into a `<brain_context>` block (typed tags: ✉️ email / 📄 repo / 📝 note).
+4. Prepend the block to the prompt, cap total injected chars at ~2200 so the agent's context window isn't crowded out.
+5. Skip short prompts (< 20 chars) and system-generated triggers (Email Intelligence, scheduled tasks, webhooks) — those already carry their own context.
+6. Never throw — any retrieval failure returns the original prompt and logs a warning.
+
+Gated via `BRAIN_AUTO_RECALL` env var (default: on; set to `0`/`false` to disable). Every call is tagged `caller: 'agent-auto'` in `ku_queries`, visible in the miniapp Queries tab for audit.
+
+Net effect: the agent can now answer "what did Ryo say?" or "what's our Orphan VPN status?" without the user having to type `/recall` first — the relevant KUs are already in context. Closes the loop between the ingestion/storage layer and the expression surface.
+
+### Future work (not yet scoped)
+
 - `generate_reply` grounding extended to brain.db, not just SP KB.
 - More inputs: Slack, voice memos, PDFs, web reads (Readwise-style?), meeting transcripts.
 - Editor integration (VS Code command palette: "brain: what do I know about this symbol?").
+- Per-query toggle in the miniapp Queries tab to disable auto-recall for specific patterns (noise control).
 
 ## Open questions
 

@@ -98,6 +98,7 @@ import {
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
 import { startAlertsSchedule } from './brain/alert-dispatcher.js';
+import { maybeInjectBrainContext } from './brain/auto-recall.js';
 import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
@@ -736,7 +737,13 @@ async function runAgent(
 
   try {
     const rulesBlock = buildRulesBlock(prompt, group.folder);
-    const enrichedPrompt = rulesBlock ? `${prompt}\n\n${rulesBlock}` : prompt;
+    // v3: auto-recall brain context for user-initiated turns. Skips short
+    // prompts and system-generated triggers (email intelligence, task spawns).
+    // Toggleable via BRAIN_AUTO_RECALL env var; default on. Never throws.
+    const brainEnriched = await maybeInjectBrainContext(prompt);
+    const enrichedPrompt = rulesBlock
+      ? `${brainEnriched}\n\n${rulesBlock}`
+      : brainEnriched;
 
     // Resolve LLM provider/model for this group
     const resolved = resolveModel({ llm: group.containerConfig?.llm });
