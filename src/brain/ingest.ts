@@ -40,7 +40,10 @@ import {
 import { upsertKu } from './qdrant.js';
 import { AsyncWriteQueue } from './queue.js';
 import { _shutdownAccessQueue } from './retrieve.js';
+import { shouldSkipBrainExtraction } from './transactional-filter.js';
 import { newId } from './ulid.js';
+
+import { getDb as getNanoclawDb } from '../db.js';
 
 // --- Raw event capture (P0, preserved) ------------------------------------
 
@@ -144,6 +147,28 @@ async function runExtractionPipeline(
     logger.debug(
       { threadId: email.thread_id },
       'brain ingest: empty text — skipping',
+    );
+    return;
+  }
+
+  // Skip transactional / already-classified-as-digest emails before paying
+  // for the LLM tier. `getNanoclawDb` is only available once the main
+  // process has initialised it; if not, fall back to heuristic-only.
+  let nanoclawDb: Database.Database | null = null;
+  try {
+    nanoclawDb = getNanoclawDb();
+  } catch {
+    nanoclawDb = null;
+  }
+  const skipReason = shouldSkipBrainExtraction(nanoclawDb, {
+    thread_id: email.thread_id,
+    sender: email.sender,
+    subject: email.subject,
+  });
+  if (skipReason) {
+    logger.debug(
+      { threadId: email.thread_id, reason: skipReason, sender: email.sender },
+      'brain ingest: transactional/digest — skipping extraction',
     );
     return;
   }

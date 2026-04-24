@@ -714,10 +714,14 @@ ${pager}`;
   <button class="feedback-btn${isImportant ? ' active' : ''}" id="btn-important" data-on="${isImportant ? '1' : '0'}">
     ⭐ ${isImportant ? 'Important' : 'Mark important'}
   </button>
-  ${needsReview ? '<button class="feedback-btn approve" id="btn-approve">🟢 Approve</button>' : ''}
-  <button class="feedback-btn reject" id="btn-reject"${isSuperseded ? ' disabled' : ''}>${isSuperseded ? '🔴 Rejected' : '🔴 Reject'}</button>
+  ${needsReview ? '<button class="feedback-btn approve" id="btn-approve" title="Promote: confidence → 1.0, clear review flag. KU was already retrievable.">🟢 Approve</button>' : ''}
+  <button class="feedback-btn reject" id="btn-reject"${isSuperseded ? ' disabled' : ''} title="Soft-delete (superseded_at). Hides this KU from agent retrieval.">${isSuperseded ? '🔴 Rejected' : '🔴 Reject'}</button>
   <span id="feedback-msg" class="meta" style="margin-left:10px"></span>
-</div>`;
+</div>
+<p class="meta" style="margin-top:8px;font-size:12px">
+  <strong>Approve</strong> = promote (confidence → 1.0, clears review flag). KU is <em>already</em> retrievable by the agent.
+  <strong>Reject</strong> = soft-delete. Hides this KU from agent retrieval.
+</p>`;
 
     const body = `
 <h1>${escapeHtml((row.text.split('\n')[0] || row.id).slice(0, 120))}</h1>
@@ -929,6 +933,11 @@ ${filtersHtml}
 
     const body = `
 <h1>Review queue (${rows.length})</h1>
+<div class="card" style="background:#f0f6ff;border-left:3px solid #0366d6">
+  <p style="margin:0 0 6px"><strong>What am I reviewing?</strong> KUs extracted at medium confidence (0.4–0.7). They are <em>already</em> in the brain and retrievable by the agent — review is promotion, not gating.</p>
+  <p style="margin:0"><strong>🟢 Approve:</strong> raise confidence to 1.0, remove from this queue. KU stays retrievable.<br>
+  <strong>🔴 Reject:</strong> soft-delete (sets <code>superseded_at</code>). Hides the KU from agent retrieval — this is the one that changes what the agent sees.</p>
+</div>
 <div class="card">${listHtml}</div>
 <script>
 (function(){
@@ -1166,8 +1175,8 @@ function renderReviewRow(row: {
       <span>· ${formatAge(row.recorded_at)}</span>
     </div>
     <div style="margin-top:6px">
-      <button class="feedback-btn approve btn-approve">🟢 Approve</button>
-      <button class="feedback-btn reject btn-reject">🔴 Reject</button>
+      <button class="feedback-btn approve btn-approve" title="Promote: confidence → 1.0, clear review flag. KU was already retrievable.">🟢 Approve</button>
+      <button class="feedback-btn reject btn-reject" title="Soft-delete (superseded_at). Hides this KU from agent retrieval.">🔴 Reject</button>
       <span class="msg meta" style="margin-left:10px"></span>
     </div>
   </li>`;
