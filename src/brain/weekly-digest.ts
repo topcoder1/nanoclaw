@@ -20,6 +20,7 @@
  */
 
 import { getBrainDb } from './db.js';
+import { escapeMarkdown } from './markdown.js';
 import {
   getBrainCounts,
   getMonthlyCostUsd,
@@ -182,7 +183,9 @@ export function formatWeeklyDigestMarkdown(
     for (let i = 0; i < s.topRetrievedKus.length; i++) {
       const k = s.topRetrievedKus[i];
       const snippet = k.text.length > 120 ? k.text.slice(0, 119) + '…' : k.text;
-      lines.push(`  ${i + 1}. [${k.access_count}×] ${snippet}`);
+      // escape: KU text is user-generated and may contain *, _, `, [
+      // that would otherwise break the surrounding Markdown.
+      lines.push(`  ${i + 1}. [${k.access_count}×] ${escapeMarkdown(snippet)}`);
     }
   } else {
     lines.push(`\n*Top retrieved KUs:* none this week`);

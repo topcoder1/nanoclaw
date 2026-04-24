@@ -189,6 +189,36 @@ describe('brain/weekly-digest', () => {
     expect(deliveries.length).toBe(1);
   });
 
+  it('escapes Markdown special chars in user-derived KU text', () => {
+    const db = getBrainDb();
+    const nasty = 'pricing *very* [urgent]_';
+    db.prepare(
+      `INSERT INTO knowledge_units
+         (id, text, source_type, account, confidence, valid_from, recorded_at, last_accessed_at, access_count)
+       VALUES (?, ?, 'email', 'work', 1.0, ?, ?, ?, ?)`,
+    ).run(
+      newId(),
+      nasty,
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      '2026-04-22T10:00:00Z',
+      7,
+    );
+    const md = formatWeeklyDigestMarkdown(
+      collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' }),
+    );
+    // Raw special chars that would have broken the surrounding markdown
+    // are gone inside the KU line:
+    const topKuLine = md.split('\n').find((line) => line.includes('pricing'));
+    expect(topKuLine).toBeDefined();
+    expect(topKuLine).toContain('\\*very\\*');
+    // Escape covers the formatting triggers _ * ` [ — closing ] is inert.
+    expect(topKuLine).toContain('\\[urgent]');
+    expect(topKuLine).toContain('\\_');
+    // And raw unescaped forms must not appear in that line.
+    expect(topKuLine).not.toMatch(/[^\\]\*very\*/);
+  });
+
   it('truncates long KU text at 120 chars in the formatted output', () => {
     const db = getBrainDb();
     const long = 'x'.repeat(500);

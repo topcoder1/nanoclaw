@@ -27,6 +27,7 @@ import {
   getLegacyCutoverAt,
   isLegacyCutoverDue,
 } from './drop-legacy-tombstone.js';
+import { escapeMarkdown } from './markdown.js';
 import {
   COST_SPIKE_MULTIPLIER,
   DRIFT_THRESHOLD,
@@ -201,7 +202,10 @@ export function handleBrainHealthCommand(
   } else {
     lines.push(`\n*Re-eval triggers fired:* ${firing.length}`);
     for (const t of firing) {
-      lines.push(`  • \`${t.id}\` — ${t.description}`);
+      // description is currently a hardcoded string per trigger, but
+      // escape defensively in case a future trigger interpolates user
+      // data (e.g. entity names) into it.
+      lines.push(`  • \`${t.id}\` — ${escapeMarkdown(t.description)}`);
     }
   }
   return lines.join('\n');

@@ -9,6 +9,7 @@
 
 import { logger } from '../logger.js';
 
+import { escapeMarkdown } from './markdown.js';
 import { recall, type RecallResult } from './retrieve.js';
 
 export type RecallFn = typeof recall;
@@ -78,11 +79,6 @@ export async function handleRecallCommand(
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + '…';
-}
-
-/** Escape Telegram Markdown V1 special chars. */
-function escapeMarkdown(s: string): string {
-  return s.replace(/([_*`\[])/g, '\\$1');
 }
 
 /**
