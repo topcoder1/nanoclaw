@@ -132,6 +132,8 @@ ${body}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    var desktop = tg.platform === 'tdesktop' || tg.platform === 'macos' || tg.platform === 'web';
+    if (desktop && typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
     var initData = tg.initData || '';
     if (initData) {
       var origFetch = window.fetch.bind(window);
