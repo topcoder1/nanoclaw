@@ -854,7 +854,11 @@ ${filtersHtml}
     // a bit more than `limit` so post-filters (source/from/to) have room.
     let results: RecallResult[] = [];
     try {
-      results = await recall(q, { account, limit: Math.max(limit, 50) });
+      results = await recall(q, {
+        account,
+        limit: Math.max(limit, 50),
+        caller: 'miniapp-search',
+      });
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), q },
@@ -1150,6 +1154,239 @@ ${pager}
     res.type('html').send(
       brainShell('Timeline — Brain', body, {
         activeNav: 'timeline',
+        reviewCount,
+      }),
+    );
+  });
+
+  // --- GET /brain/queries — retrieval audit log -------------------------
+  // One row per recall() call, showing top-3 hits inline. Click a row to
+  // see the full result set + scoring breakdown at /brain/queries/:id.
+  router.get('/queries', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const limit = Math.min(
+      200,
+      Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50),
+    );
+    const callerFilter =
+      typeof req.query.caller === 'string' && req.query.caller
+        ? String(req.query.caller)
+        : null;
+
+    const whereParts: string[] = [];
+    const whereParams: unknown[] = [];
+    if (callerFilter) {
+      whereParts.push('caller = ?');
+      whereParams.push(callerFilter);
+    }
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const rows = db
+      .prepare(
+        `SELECT id, query_text, caller, account, result_count, duration_ms, recorded_at
+           FROM ku_queries
+           ${whereSql}
+           ORDER BY recorded_at DESC
+           LIMIT ?`,
+      )
+      .all(...whereParams, limit) as Array<{
+      id: string;
+      query_text: string;
+      caller: string | null;
+      account: string | null;
+      result_count: number;
+      duration_ms: number | null;
+      recorded_at: string;
+    }>;
+
+    const totalRow = db
+      .prepare(`SELECT COUNT(*) AS n FROM ku_queries ${whereSql}`)
+      .get(...whereParams) as { n: number };
+
+    const now = Date.now();
+    const rowsHtml = rows.length
+      ? rows
+          .map((r) => {
+            const durStr =
+              r.duration_ms != null ? `${r.duration_ms}ms` : '—';
+            const callerPill = r.caller
+              ? `<span class="pill">${escapeHtml(r.caller)}</span>`
+              : '';
+            const acctPill = r.account
+              ? `<span class="pill">${escapeHtml(r.account)}</span>`
+              : '';
+            return `<li>
+              <a class="row-link" href="/brain/queries/${escapeHtml(r.id)}">
+                <div><strong>${escapeHtml(r.query_text)}</strong></div>
+                <div class="meta">
+                  ${callerPill}${acctPill}
+                  <span>${r.result_count} hit${r.result_count === 1 ? '' : 's'}</span>
+                  · ${escapeHtml(durStr)}
+                  · ${formatAge(r.recorded_at, now)}
+                </div>
+              </a>
+            </li>`;
+          })
+          .join('')
+      : '<p class="empty">No queries recorded yet.</p>';
+
+    const filterBar = callerFilter
+      ? `<p class="meta">Filtered by caller <code>${escapeHtml(callerFilter)}</code> · <a href="/brain/queries">clear</a></p>`
+      : '';
+
+    const body = `
+<h1>Retrieval log <span class="meta" style="font-weight:400">(${totalRow.n} total)</span></h1>
+${filterBar}
+<div class="card">
+  <ul>${rowsHtml}</ul>
+</div>
+<aside class="kb-help">
+  <h3>What this shows</h3>
+  <ul>
+    <li>Every <code>recall()</code> call — whether from the agent, the <code>/recall</code> chat command, or this miniapp's search — writes one row here.</li>
+    <li>Click a row to see the full top-N, each KU's final score, and the rank/recency/access/important components that produced it.</li>
+    <li>This is <strong>post-hoc</strong> audit: what the agent <em>saw</em>. It does not tell you which parts of a reply were grounded in which KU.</li>
+  </ul>
+</aside>`;
+    res.type('html').send(
+      brainShell('Queries — Brain', body, {
+        activeNav: 'queries',
+        reviewCount,
+      }),
+    );
+  });
+
+  // --- GET /brain/queries/:id — single query detail ---------------------
+  router.get('/queries/:id', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const id = String(req.params.id);
+    const q = db
+      .prepare(
+        `SELECT id, query_text, caller, account, scope, result_count, duration_ms, recorded_at
+           FROM ku_queries WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          id: string;
+          query_text: string;
+          caller: string | null;
+          account: string | null;
+          scope: string | null;
+          result_count: number;
+          duration_ms: number | null;
+          recorded_at: string;
+        }
+      | undefined;
+    if (!q) {
+      res.status(404).type('html').send(
+        brainShell(
+          'Query not found — Brain',
+          `<h1>Query not found</h1><p><a href="/brain/queries">← back to queries</a></p>`,
+          { activeNav: 'queries', reviewCount },
+        ),
+      );
+      return;
+    }
+
+    const hits = db
+      .prepare(
+        `SELECT r.rank, r.final_score, r.rank_score, r.recency_score,
+                r.access_score, r.important_score,
+                ku.id AS ku_id, ku.text AS ku_text, ku.source_type, ku.account,
+                ku.superseded_at, ku.needs_review, ku.important
+           FROM ku_retrievals r
+           LEFT JOIN knowledge_units ku ON ku.id = r.ku_id
+           WHERE r.query_id = ?
+           ORDER BY r.rank`,
+      )
+      .all(id) as Array<{
+      rank: number;
+      final_score: number;
+      rank_score: number | null;
+      recency_score: number | null;
+      access_score: number | null;
+      important_score: number | null;
+      ku_id: string;
+      ku_text: string | null;
+      source_type: string | null;
+      account: string | null;
+      superseded_at: string | null;
+      needs_review: number | null;
+      important: number | null;
+    }>;
+
+    const hitsHtml = hits.length
+      ? hits
+          .map((h) => {
+            const title = h.ku_text
+              ? escapeHtml(h.ku_text.split('\n')[0].slice(0, 120))
+              : `<em>${escapeHtml(h.ku_id)} (deleted)</em>`;
+            const pills = [
+              h.source_type
+                ? `<span class="pill source">${escapeHtml(h.source_type)}</span>`
+                : '',
+              h.account
+                ? `<span class="pill">${escapeHtml(h.account)}</span>`
+                : '',
+              h.superseded_at ? '<span class="pill">superseded</span>' : '',
+              h.needs_review === 1 ? '<span class="pill">needs_review</span>' : '',
+              h.important === 1 ? '<span class="pill">⭐</span>' : '',
+            ]
+              .filter(Boolean)
+              .join('');
+            const scoreBreakdown = [
+              h.rank_score != null ? `rank ${h.rank_score.toFixed(3)}` : null,
+              h.recency_score != null
+                ? `recency ${h.recency_score.toFixed(3)}`
+                : null,
+              h.access_score != null ? `access ${h.access_score.toFixed(3)}` : null,
+              h.important_score != null && h.important_score > 0
+                ? `important ${h.important_score.toFixed(3)}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            const href = h.ku_text
+              ? `/brain/ku/${escapeHtml(h.ku_id)}`
+              : null;
+            const inner = `
+              <div><strong>#${h.rank + 1}.</strong> ${title}</div>
+              <div class="meta">
+                ${pills}
+                ${confidenceBar(Math.max(0, Math.min(1, h.final_score)))}
+                <span>final ${h.final_score.toFixed(3)}</span>
+                ${scoreBreakdown ? `· ${scoreBreakdown}` : ''}
+              </div>`;
+            return href
+              ? `<li><a class="row-link" href="${href}">${inner}</a></li>`
+              : `<li>${inner}</li>`;
+          })
+          .join('')
+      : '<p class="empty">No hits — this query returned nothing.</p>';
+
+    const durStr = q.duration_ms != null ? `${q.duration_ms}ms` : '—';
+    const body = `
+<p class="meta"><a href="/brain/queries">← queries</a></p>
+<h1>${escapeHtml(q.query_text)}</h1>
+<div class="card">
+  <p class="meta">
+    ${q.caller ? `<span class="pill">${escapeHtml(q.caller)}</span>` : ''}
+    ${q.account ? `<span class="pill">${escapeHtml(q.account)}</span>` : ''}
+    ${q.scope ? `<span class="pill">scope: ${escapeHtml(q.scope)}</span>` : ''}
+    <span>${q.result_count} hit${q.result_count === 1 ? '' : 's'}</span>
+    · ${escapeHtml(durStr)}
+    · recorded ${escapeHtml(q.recorded_at)}
+  </p>
+</div>
+<h2>Results</h2>
+<div class="card">
+  <ul>${hitsHtml}</ul>
+</div>`;
+    res.type('html').send(
+      brainShell(`Query · ${q.query_text.slice(0, 40)}`, body, {
+        activeNav: 'queries',
         reviewCount,
       }),
     );

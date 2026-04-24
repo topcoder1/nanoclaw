@@ -19,7 +19,13 @@ export interface BrainShellOptions {
   /**
    * Which nav link to highlight. If omitted, no link is marked active.
    */
-  activeNav?: 'home' | 'search' | 'entities' | 'review' | 'timeline';
+  activeNav?:
+    | 'home'
+    | 'search'
+    | 'entities'
+    | 'review'
+    | 'timeline'
+    | 'queries';
   /**
    * Count for the "Review" badge in the nav (queue depth). Hidden when 0
    * to keep the nav quiet once the queue is drained.
@@ -103,6 +109,7 @@ function renderNav(opts: BrainShellOptions): string {
   ${link('entities', '/brain/entities', 'Entities')}
   ${link('review', '/brain/review', 'Review', reviewSuffix)}
   ${link('timeline', '/brain/timeline', 'Timeline')}
+  ${link('queries', '/brain/queries', 'Queries')}
   <button id="fs-toggle" type="button" hidden>⛶ Fullscreen</button>
 </nav>`;
 }

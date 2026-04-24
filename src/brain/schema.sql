@@ -141,6 +141,40 @@ CREATE TABLE IF NOT EXISTS cost_log (
 CREATE INDEX IF NOT EXISTS idx_cost_day ON cost_log(day, provider);
 
 -- -------------------------------------------------------------------------
+-- 5.6 Retrieval log — per-query audit of what the agent saw
+-- -------------------------------------------------------------------------
+-- Each recall() call writes one ku_queries row (the query envelope) plus
+-- one ku_retrievals row per KU returned in the final top-N. Purely
+-- observational: no back-pressure on retrieval.
+
+CREATE TABLE IF NOT EXISTS ku_queries (
+  id            TEXT PRIMARY KEY,      -- ULID
+  query_text    TEXT NOT NULL,
+  caller        TEXT,                  -- 'agent'|'recall-command'|'miniapp-search'|...
+  account       TEXT,                  -- 'personal'|'work'|NULL (no filter)
+  scope         TEXT,                  -- scope filter if any
+  result_count  INTEGER NOT NULL,
+  duration_ms   INTEGER,
+  recorded_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ku_queries_recorded ON ku_queries(recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ku_queries_caller   ON ku_queries(caller, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS ku_retrievals (
+  query_id         TEXT NOT NULL REFERENCES ku_queries(id) ON DELETE CASCADE,
+  ku_id            TEXT NOT NULL,
+  rank             INTEGER NOT NULL,   -- 0-indexed position in final top-N
+  final_score      REAL NOT NULL,
+  rank_score       REAL,
+  recency_score    REAL,
+  access_score     REAL,
+  important_score  REAL,
+  PRIMARY KEY (query_id, ku_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ku_retrievals_ku    ON ku_retrievals(ku_id);
+CREATE INDEX IF NOT EXISTS idx_ku_retrievals_query ON ku_retrievals(query_id, rank);
+
+-- -------------------------------------------------------------------------
 -- 5.5 FTS5 index over knowledge_units.text
 -- -------------------------------------------------------------------------
 

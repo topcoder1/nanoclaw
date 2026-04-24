@@ -49,7 +49,7 @@ export async function handleRecallCommand(
 
   let results: RecallResult[];
   try {
-    results = await fn(question, { limit, account });
+    results = await fn(question, { limit, account, caller: 'recall-command' });
   } catch (err) {
     logger.warn(
       { err: err instanceof Error ? err.message : String(err) },

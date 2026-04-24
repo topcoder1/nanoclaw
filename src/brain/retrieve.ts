@@ -30,6 +30,7 @@ import {
 import { AsyncWriteQueue } from './queue.js';
 import { searchSemantic, type BrainSearchHit } from './qdrant.js';
 import { rerank, type RerankResult } from './rerank.js';
+import { newId } from './ulid.js';
 
 // --- Types -----------------------------------------------------------------
 
@@ -40,6 +41,12 @@ export interface RecallOptions {
   halfLifeDays?: number;
   /** Override "now" for determinism in tests. Epoch ms. */
   nowMs?: number;
+  /**
+   * Identifier for who invoked recall(). Written to `ku_queries.caller` so
+   * the /brain/queries audit page can group by origin. Typical values:
+   * 'agent', 'recall-command', 'miniapp-search'. Omit in tests.
+   */
+  caller?: string;
 }
 
 export interface RecallResult {
@@ -231,6 +238,69 @@ export async function _shutdownAccessQueue(): Promise<void> {
 
 // --- Main entry point ------------------------------------------------------
 
+/**
+ * Append one `ku_queries` row + one `ku_retrievals` row per returned hit.
+ * Best-effort: a failure here does NOT fail the recall — we log and move on.
+ * Synchronous (small writes, batched inside a single transaction).
+ */
+function logRetrieval(
+  db: Database.Database,
+  envelope: {
+    id: string;
+    query_text: string;
+    caller: string | null;
+    account: string | null;
+    scope: string | null;
+    result_count: number;
+    duration_ms: number;
+    recorded_at: string;
+  },
+  hits: RecallResult[],
+): void {
+  try {
+    const insQ = db.prepare(
+      `INSERT INTO ku_queries
+         (id, query_text, caller, account, scope, result_count, duration_ms, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insR = db.prepare(
+      `INSERT INTO ku_retrievals
+         (query_id, ku_id, rank, final_score, rank_score, recency_score, access_score, important_score)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    db.transaction(() => {
+      insQ.run(
+        envelope.id,
+        envelope.query_text,
+        envelope.caller,
+        envelope.account,
+        envelope.scope,
+        envelope.result_count,
+        envelope.duration_ms,
+        envelope.recorded_at,
+      );
+      for (let i = 0; i < hits.length; i++) {
+        const h = hits[i];
+        insR.run(
+          envelope.id,
+          h.ku_id,
+          i,
+          h.finalScore,
+          h.rankScore,
+          h.recencyScore,
+          h.accessScore,
+          h.importantScore,
+        );
+      }
+    })();
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'recall: retrieval log write failed (non-fatal)',
+    );
+  }
+}
+
 export async function recall(
   query: string,
   opts: RecallOptions = {},
@@ -240,6 +310,8 @@ export async function recall(
   const halfLifeMs = (opts.halfLifeDays ?? 180) * 24 * 60 * 60 * 1000;
   const nowMs = opts.nowMs ?? Date.now();
   const modelVersion = getEmbeddingModelVersion();
+  const startMs = Date.now();
+  const queryId = newId();
 
   // Stage 1: parallel FTS + Qdrant.
   const ftsRows = ftsSearchTopN(db, query, 100, {
@@ -270,7 +342,23 @@ export async function recall(
 
   // Stage 2: RRF merge top 50.
   const fused = rrf([ftsIds, qdrantIds]).slice(0, 50);
-  if (fused.length === 0) return [];
+  if (fused.length === 0) {
+    logRetrieval(
+      db,
+      {
+        id: queryId,
+        query_text: query,
+        caller: opts.caller ?? null,
+        account: opts.account ?? null,
+        scope: opts.scope ?? null,
+        result_count: 0,
+        duration_ms: Date.now() - startMs,
+        recorded_at: new Date().toISOString(),
+      },
+      [],
+    );
+    return [];
+  }
 
   // Load KU rows for everyone we're considering.
   const rowMap = loadKuRows(
@@ -346,6 +434,22 @@ export async function recall(
         );
       });
   }
+
+  // Stage 6: append to the retrieval audit log.
+  logRetrieval(
+    db,
+    {
+      id: queryId,
+      query_text: query,
+      caller: opts.caller ?? null,
+      account: opts.account ?? null,
+      scope: opts.scope ?? null,
+      result_count: top.length,
+      duration_ms: Date.now() - startMs,
+      recorded_at: nowIso,
+    },
+    top,
+  );
 
   return top;
 }
