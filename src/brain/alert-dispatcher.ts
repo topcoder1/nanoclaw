@@ -31,7 +31,6 @@ import { getProviderLastOkMs, PROVIDER_LAST_OK_KEY } from './provider-probe.js';
 import type { ReconcileReport } from './reconcile.js';
 
 export const DEFAULT_ALERT_INTERVAL_MS = 5 * 60 * 1000;
-export const LAST_BACKUP_FAILED_KEY = 'last_backup_failed_at';
 export const LAST_RECONCILE_REPORT_KEY = 'last_reconcile_report';
 
 export type AlertDeliver = (markdown: string) => void | Promise<void>;

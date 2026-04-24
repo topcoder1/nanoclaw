@@ -88,11 +88,47 @@ describe('brain/alerts', () => {
     expect(fired.map((a) => a.category)).not.toContain('qdrant_drift');
   });
 
-  it('fires provider_down when last-ok > 15 min stale', () => {
+  it('fires provider_unreachable when last-ok > 15 min stale', () => {
     const lastOk = '2026-04-23T10:00:00Z';
     const now = '2026-04-23T10:16:00Z';
     const fired = evaluateAlerts({ nowIso: now, lastProviderOkIso: lastOk });
-    expect(fired.map((a) => a.category)).toContain('provider_down');
+    expect(fired.map((a) => a.category)).toContain('provider_unreachable');
+  });
+
+  it('fires legacy_drop_reminder once, then stays silent for 7 days', () => {
+    // Seed the legacy-cutover tombstone > 30 days ago.
+    const old = new Date(Date.UTC(2026, 0, 1)).toISOString();
+    const now1 = '2026-04-23T10:00:00Z';
+    // setSystemState under the cutover key via metrics module mirrors
+    // drop-legacy-tombstone.ts's ensureLegacyCutoverTombstone.
+    // Import at runtime to avoid a circular reference.
+    return import('../metrics.js').then(({ setSystemState: sss }) => {
+      sss('legacy_cutover_at', old, old);
+      const f1 = evaluateAlerts({ nowIso: now1 });
+      expect(f1.map((a) => a.category)).toContain('legacy_drop_reminder');
+      // One hour later, before the 7-day window: no refire.
+      const f2 = evaluateAlerts({ nowIso: '2026-04-23T11:30:00Z' });
+      expect(f2.map((a) => a.category)).not.toContain('legacy_drop_reminder');
+      // Eight days later: refires.
+      const f3 = evaluateAlerts({ nowIso: '2026-05-01T11:30:00Z' });
+      expect(f3.map((a) => a.category)).toContain('legacy_drop_reminder');
+    });
+  });
+
+  it('fires backup_failed when last_backup_failed_at is within the last 24h', async () => {
+    const { setSystemState: sss } = await import('../metrics.js');
+    const recent = '2026-04-23T05:00:00Z';
+    sss('last_backup_failed_at', recent, recent);
+    const fired = evaluateAlerts({ nowIso: '2026-04-23T10:00:00Z' });
+    expect(fired.map((a) => a.category)).toContain('backup_failed');
+  });
+
+  it('does NOT fire backup_failed when failure was > 24h ago', async () => {
+    const { setSystemState: sss } = await import('../metrics.js');
+    const old = '2026-04-20T05:00:00Z';
+    sss('last_backup_failed_at', old, old);
+    const fired = evaluateAlerts({ nowIso: '2026-04-23T10:00:00Z' });
+    expect(fired.map((a) => a.category)).not.toContain('backup_failed');
   });
 
   it('throttles — second call within an hour returns no alerts', () => {

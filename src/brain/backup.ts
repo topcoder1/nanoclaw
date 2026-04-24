@@ -21,11 +21,10 @@ import path from 'path';
 import { QDRANT_URL, STORE_DIR } from '../config.js';
 import { logger } from '../logger.js';
 
+import { LAST_BACKUP_FAILED_KEY } from './alerts.js';
 import { getBrainDb } from './db.js';
 import { setSystemState } from './metrics.js';
 import { BRAIN_COLLECTION } from './qdrant.js';
-
-export const LAST_BACKUP_FAILED_KEY = 'last_backup_failed_at';
 
 // Directories are functions (not constants) so tests that mock STORE_DIR
 // via a getter see the active value at call time rather than at module

@@ -2,13 +2,17 @@
  * Alert dispatcher (design §9 thresholds).
  *
  * Thresholds (all configurable via constants — change requires redeploy):
- *   - provider unreachable > 15 min            → alert 'provider_down'
+ *   - provider unreachable > 15 min            → alert 'provider_unreachable'
  *   - cost today > 2× rolling 7-day avg        → alert 'cost_spike'
  *   - Qdrant ↔ SQLite drift > 1%               → alert 'qdrant_drift'
  *   - monthly spend > $10                      → alert 'monthly_budget'
+ *   - legacy cutover window elapsed, no        → alert 'legacy_drop_reminder'
+ *     reminder in last 7 days
+ *   - backup failed in last 24h                → alert 'backup_failed'
  *
  * Alerts are throttled to one per category per hour via `system_state`
- * key `alert:<category>` storing the last-fired ISO timestamp.
+ * key `alert:<category>` storing the last-fired ISO timestamp (exception:
+ * legacy_drop_reminder uses its own 7-day cadence).
  *
  * The actual notification mechanism (Telegram) is injected — this module
  * only decides whether and when to fire.
@@ -16,6 +20,7 @@
 
 import { logger } from '../logger.js';
 
+import { isLegacyCutoverDue } from './drop-legacy-tombstone.js';
 import {
   getDailyCostUsd,
   getMonthlyCostUsd,
@@ -26,10 +31,12 @@ import {
 import type { ReconcileReport } from './reconcile.js';
 
 export type AlertCategory =
-  | 'provider_down'
+  | 'provider_unreachable'
   | 'cost_spike'
   | 'qdrant_drift'
-  | 'monthly_budget';
+  | 'monthly_budget'
+  | 'legacy_drop_reminder'
+  | 'backup_failed';
 
 export interface Alert {
   category: AlertCategory;
@@ -43,6 +50,14 @@ export const COST_SPIKE_MULTIPLIER = 2;
 export const DRIFT_THRESHOLD = 0.01; // 1 %
 export const MONTHLY_BUDGET_USD = 10;
 export const PROVIDER_DOWN_THRESHOLD_MS = 15 * 60 * 1000;
+export const BACKUP_FAILED_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+export const LEGACY_DROP_REMINDER_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// system_state tombstone for the legacy-drop weekly reminder. Stored
+// separately from the per-category throttle so the 7-day cadence is
+// obvious to anyone grep'ing system_state.
+export const LEGACY_DROP_REMINDER_KEY = 'legacy_drop_reminded_at';
+export const LAST_BACKUP_FAILED_KEY = 'last_backup_failed_at';
 
 function canFire(category: AlertCategory, nowMs: number): boolean {
   const row = getSystemState(`alert:${category}`);
@@ -125,21 +140,61 @@ export function evaluateAlerts(input: EvaluateInput = {}): Alert[] {
     markFired('qdrant_drift', nowIso);
   }
 
-  // --- Provider down ---
+  // --- Provider unreachable ---
   if (input.lastProviderOkIso) {
     const lastOkMs = Date.parse(input.lastProviderOkIso);
     if (
       !Number.isNaN(lastOkMs) &&
       nowMs - lastOkMs > PROVIDER_DOWN_THRESHOLD_MS &&
-      canFire('provider_down', nowMs)
+      canFire('provider_unreachable', nowMs)
     ) {
       fired.push({
-        category: 'provider_down',
+        category: 'provider_unreachable',
         severity: 'critical',
         firedAt: nowIso,
         message: `Embedding provider unreachable for > 15 min (last OK ${input.lastProviderOkIso})`,
       });
-      markFired('provider_down', nowIso);
+      markFired('provider_unreachable', nowIso);
+    }
+  }
+
+  // --- Legacy drop reminder (design §4 Phase C) ---
+  // Separate 7-day cadence — not the 1-hour throttle — so the reminder
+  // arrives once a week until the operator runs drop-legacy.ts.
+  if (isLegacyCutoverDue(nowMs)) {
+    const row = getSystemState(LEGACY_DROP_REMINDER_KEY);
+    const lastMs = row ? Date.parse(row.value) : NaN;
+    const overdue =
+      !row || Number.isNaN(lastMs) ||
+      nowMs - lastMs >= LEGACY_DROP_REMINDER_INTERVAL_MS;
+    if (overdue) {
+      fired.push({
+        category: 'legacy_drop_reminder',
+        severity: 'warn',
+        firedAt: nowIso,
+        message:
+          'Legacy cutover window elapsed — run `scripts/drop-legacy.ts --confirm` to retire messages.db.',
+      });
+      setSystemState(LEGACY_DROP_REMINDER_KEY, nowIso, nowIso);
+    }
+  }
+
+  // --- Backup failed (last 24h) ---
+  const backupRow = getSystemState(LAST_BACKUP_FAILED_KEY);
+  if (backupRow) {
+    const failedMs = Date.parse(backupRow.value);
+    if (
+      !Number.isNaN(failedMs) &&
+      nowMs - failedMs <= BACKUP_FAILED_LOOKBACK_MS &&
+      canFire('backup_failed', nowMs)
+    ) {
+      fired.push({
+        category: 'backup_failed',
+        severity: 'warn',
+        firedAt: nowIso,
+        message: `Nightly backup failed at ${backupRow.value} — check logs and rerun scripts/brain-p2-smoke.ts:backup step.`,
+      });
+      markFired('backup_failed', nowIso);
     }
   }
 
