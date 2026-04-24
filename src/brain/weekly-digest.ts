@@ -1,16 +1,20 @@
 /**
- * Brain weekly digest (design §9 — "Weekly digest includes: cost YTD,
+ * Brain digest (design §9 — "Weekly digest includes: cost YTD,
  * ingestion volume, top-retrieved KUs, new entities, any drift alerts.").
  *
- * Composes a Markdown report covering a week-long window. Self-contained —
- * pulls everything from `brain.db`. Never calls out to external services.
+ * Composes a Markdown report covering a configurable window. Self-contained
+ * — pulls everything from `brain.db`. Never calls out to external services.
  *
- * Triggered by `scripts/brain-weekly-digest.ts` (manual) or
- * `startWeeklyDigestSchedule()` (cron: Sunday 09:00 local).
+ * Triggered by `scripts/brain-weekly-digest.ts` /
+ * `scripts/brain-daily-digest.ts` (manual) or `startDigestSchedule(cadence)`
+ * (cron: Sunday 09:00 local for weekly, every day 09:00 local for daily).
+ *
+ * During the 30-day measurement phase we can flip to daily via the
+ * `BRAIN_DIGEST_CADENCE=daily` env var (see `src/config.ts`).
  *
  * Sections (in order):
- *   1. Cost       — week / MTD / 7-day avg
- *   2. Ingestion  — raw_events this week, processed ratio
+ *   1. Cost       — window / MTD / 7-day avg
+ *   2. Ingestion  — raw_events in window, processed ratio
  *   3. Top-retrieved KUs — by access_count bumped in window
  *   4. New entities
  *   5. Drift / alerts — last reconcile report
@@ -29,16 +33,24 @@ import {
 } from './metrics.js';
 import { getBrainHealthReport } from './health.js';
 
+/** Digest window cadence. Weekly (7d) is the default; daily (24h) is used
+ *  during the 30-day measurement phase. */
+export type DigestCadence = 'weekly' | 'daily';
+
 export interface WeeklyDigestInput {
   /** End of window (exclusive). Defaults to now. */
   nowIso?: string;
-  /** Override window length in days. Defaults to 7. */
+  /** Override window length in days. Defaults to cadence default
+   *  (7 for weekly, 1 for daily). */
   windowDays?: number;
+  /** Cadence (defaults to 'weekly' for backward compatibility). */
+  cadence?: DigestCadence;
 }
 
 export interface WeeklyDigestSummary {
   windowStartIso: string;
   windowEndIso: string;
+  cadence: DigestCadence;
   costWeekUsd: number;
   costMonthUsd: number;
   rolling7dAvgUsd: number;
@@ -57,17 +69,22 @@ function windowStart(nowIso: string, days: number): string {
   return new Date(t).toISOString();
 }
 
+function defaultWindowDays(cadence: DigestCadence): number {
+  return cadence === 'daily' ? 1 : 7;
+}
+
 export function collectWeeklyDigest(
   input: WeeklyDigestInput = {},
 ): WeeklyDigestSummary {
   const nowIso = input.nowIso ?? new Date().toISOString();
-  const days = input.windowDays ?? 7;
+  const cadence: DigestCadence = input.cadence ?? 'weekly';
+  const days = input.windowDays ?? defaultWindowDays(cadence);
   const startIso = windowStart(nowIso, days);
   const db = getBrainDb();
   const today = nowIso.slice(0, 10);
   const yearMonth = nowIso.slice(0, 7);
 
-  // Cost for the week: sum rows with day between startIso.slice(0,10) and today
+  // Cost for the window: sum rows with day between startIso.slice(0,10) and today
   const costWeek = (
     db
       .prepare(
@@ -137,6 +154,7 @@ export function collectWeeklyDigest(
   return {
     windowStartIso: startIso,
     windowEndIso: nowIso,
+    cadence,
     costWeekUsd: costWeek,
     costMonthUsd: costMonth,
     rolling7dAvgUsd: rolling,
@@ -162,10 +180,14 @@ export function formatWeeklyDigestMarkdown(
   const lines: string[] = [];
   const startDay = s.windowStartIso.slice(0, 10);
   const endDay = s.windowEndIso.slice(0, 10);
-  lines.push(`📰 *Brain weekly digest* — ${startDay} → ${endDay}`);
+  const isDaily = s.cadence === 'daily';
+  const title = isDaily ? 'Brain daily digest' : 'Brain weekly digest';
+  const windowLabel = isDaily ? 'last 24h' : 'last 7d';
+  const costLabel = isDaily ? '24h' : 'week';
+  lines.push(`📰 *${title}* — ${startDay} → ${endDay}`);
 
   lines.push(
-    `\n*Cost:* week $${s.costWeekUsd.toFixed(4)}  ` +
+    `\n*Cost:* ${costLabel} $${s.costWeekUsd.toFixed(4)}  ` +
       `7d-avg $${s.rolling7dAvgUsd.toFixed(4)}  MTD $${s.costMonthUsd.toFixed(2)}`,
   );
 
@@ -174,12 +196,12 @@ export function formatWeeklyDigestMarkdown(
       ? 100
       : (s.processedRawEvents / s.ingestedRawEvents) * 100;
   lines.push(
-    `\n*Ingestion:* ${s.ingestedRawEvents} raw events  ` +
+    `\n*Ingestion (${windowLabel}):* ${s.ingestedRawEvents} raw events  ` +
       `(${s.processedRawEvents} processed, ${ingestPct.toFixed(1)}%)`,
   );
 
   if (s.topRetrievedKus.length > 0) {
-    lines.push(`\n*Top retrieved KUs:*`);
+    lines.push(`\n*Top retrieved KUs (${windowLabel}):*`);
     for (let i = 0; i < s.topRetrievedKus.length; i++) {
       const k = s.topRetrievedKus[i];
       const snippet = k.text.length > 120 ? k.text.slice(0, 119) + '…' : k.text;
@@ -188,10 +210,13 @@ export function formatWeeklyDigestMarkdown(
       lines.push(`  ${i + 1}. [${k.access_count}×] ${escapeMarkdown(snippet)}`);
     }
   } else {
-    lines.push(`\n*Top retrieved KUs:* none this week`);
+    const emptyLabel = isDaily
+      ? `\n*Top retrieved KUs:* none in last 24h`
+      : `\n*Top retrieved KUs:* none this week`;
+    lines.push(emptyLabel);
   }
 
-  lines.push(`\n*New entities:* ${s.newEntityCount}`);
+  lines.push(`\n*New entities (${windowLabel}):* ${s.newEntityCount}`);
 
   if (s.reconcileStats) {
     const st = s.reconcileStats as {
@@ -214,9 +239,10 @@ export function formatWeeklyDigestMarkdown(
   }
 
   if (s.staleUnprocessedCount > 0) {
-    lines.push(
-      `\n⚠️ *Missed:* ${s.staleUnprocessedCount} raw_events still unprocessed after 24h`,
-    );
+    const missedHeader = isDaily
+      ? `\n⚠️ *Yesterday's low-access KUs — review?* ${s.staleUnprocessedCount} raw_events still unprocessed after 24h`
+      : `\n⚠️ *Missed:* ${s.staleUnprocessedCount} raw_events still unprocessed after 24h`;
+    lines.push(missedHeader);
   }
   if (s.deadLetterCount > 0) {
     lines.push(`\n⚠️ *Dead-letter:* ${s.deadLetterCount} raw_events hit retry ≥ 3`);
@@ -238,21 +264,19 @@ export interface WeeklyDigestScheduleOptions {
 }
 
 /**
- * Start a simple schedule for the weekly digest. Checks every hour; fires
- * whenever the current time is Sunday 09:00-11:59 local AND we haven't
- * fired in the last 23h (tracked in system_state so a restart inside the
- * window still delivers).
+ * Start a schedule for the digest. Checks every hour; fires whenever the
+ * current time matches the cadence window AND we haven't fired inside the
+ * debounce window (tracked in system_state so a restart inside the window
+ * still delivers).
  *
- * The window was widened from the original single 09:xx hour because a
- * process restart between 09:00 and 10:00 on Sunday could silently skip
- * the whole week's digest. 09:00-11:59 gives three chances and the 23h
- * debounce prevents duplicates.
+ *   - `weekly`: Sunday 09:00–11:59 local, 23h debounce, `last_weekly_digest`.
+ *   - `daily` : every day 09:00–11:59 local, 22h debounce, `last_daily_digest`.
  *
- * Runs one check at startup (unawaited) so a fresh boot inside the
- * window delivers immediately rather than waiting for the first hourly
- * tick.
+ * The on-startup fire (HIGH-1 fix) is preserved: a fresh boot inside the
+ * window delivers immediately rather than waiting for the first hourly tick.
  */
-export function startWeeklyDigestSchedule(
+export function startDigestSchedule(
+  cadence: DigestCadence,
   deliver: (markdown: string) => void | Promise<void>,
   opts: WeeklyDigestScheduleOptions | number = {},
 ): () => void {
@@ -260,23 +284,28 @@ export function startWeeklyDigestSchedule(
     typeof opts === 'number' ? { checkIntervalMs: opts } : opts;
   const checkIntervalMs = options.checkIntervalMs ?? 60 * 60 * 1000;
   const nowFn = options.nowFn ?? (() => new Date());
+  const stateKey =
+    cadence === 'daily' ? 'last_daily_digest' : 'last_weekly_digest';
+  // Debounce: just under the cadence period so we fire once per cycle even
+  // if the check window is 3h wide.
+  const debounceMs =
+    cadence === 'daily' ? 22 * 60 * 60 * 1000 : 23 * 60 * 60 * 1000;
   const run = (): void => {
     const now = nowFn();
-    const isSunday = now.getDay() === 0;
     const inWindow = now.getHours() >= 9 && now.getHours() < 12;
-    if (!isSunday || !inWindow) return;
-    const last = getSystemState('last_weekly_digest');
+    if (!inWindow) return;
+    if (cadence === 'weekly' && now.getDay() !== 0) return;
+    const last = getSystemState(stateKey);
     if (last) {
       const lastMs = Date.parse(last.value);
-      if (
-        !Number.isNaN(lastMs) &&
-        now.getTime() - lastMs < 23 * 60 * 60 * 1000
-      ) {
+      if (!Number.isNaN(lastMs) && now.getTime() - lastMs < debounceMs) {
         return;
       }
     }
     try {
-      const md = formatWeeklyDigestMarkdown();
+      const md = formatWeeklyDigestMarkdown(
+        collectWeeklyDigest({ cadence, nowIso: now.toISOString() }),
+      );
       void Promise.resolve(deliver(md)).catch(() => undefined);
       // Record delivery time via setSystemState.
       const db = getBrainDb();
@@ -284,7 +313,7 @@ export function startWeeklyDigestSchedule(
       db.prepare(
         `INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      ).run('last_weekly_digest', iso, iso);
+      ).run(stateKey, iso, iso);
     } catch {
       // deliver() or format failure shouldn't stop the scheduler.
     }
@@ -292,4 +321,15 @@ export function startWeeklyDigestSchedule(
   run();
   const handle = setInterval(run, checkIntervalMs);
   return () => clearInterval(handle);
+}
+
+/**
+ * Backward-compatible wrapper — identical to the pre-cadence API so existing
+ * call sites keep working. New code should call `startDigestSchedule(cadence, …)`.
+ */
+export function startWeeklyDigestSchedule(
+  deliver: (markdown: string) => void | Promise<void>,
+  opts: WeeklyDigestScheduleOptions | number = {},
+): () => void {
+  return startDigestSchedule('weekly', deliver, opts);
 }

@@ -6,6 +6,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  BRAIN_DIGEST_CADENCE,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -105,8 +106,9 @@ import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
 import { startReconcileSchedule } from './brain/reconcile.js';
 import {
+  collectWeeklyDigest,
   formatWeeklyDigestMarkdown,
-  startWeeklyDigestSchedule,
+  startDigestSchedule,
 } from './brain/weekly-digest.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
@@ -1321,13 +1323,23 @@ async function main(): Promise<void> {
     }
   };
 
-  const stopDigestSched = startWeeklyDigestSchedule((md) => {
-    const delivered = deliverBrainMessage('weekly-digest');
+  const stopDigestSched = startDigestSchedule(BRAIN_DIGEST_CADENCE, (md) => {
+    const delivered = deliverBrainMessage(
+      `${BRAIN_DIGEST_CADENCE}-digest`,
+    );
     if (md) {
       delivered(md);
     } else {
       // Safety: log a fallback preview using the formatter.
-      logger.info({ digest: formatWeeklyDigestMarkdown() }, 'weekly digest (no channel)');
+      logger.info(
+        {
+          digest: formatWeeklyDigestMarkdown(
+            collectWeeklyDigest({ cadence: BRAIN_DIGEST_CADENCE }),
+          ),
+          cadence: BRAIN_DIGEST_CADENCE,
+        },
+        'brain digest (no channel)',
+      );
     }
   });
 

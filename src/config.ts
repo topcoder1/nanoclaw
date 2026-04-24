@@ -18,6 +18,7 @@ const envConfig = readEnvFile([
   'WEBHOOK_PORT',
   'WEBHOOK_SECRET',
   'QDRANT_URL',
+  'BRAIN_DIGEST_CADENCE',
 ]);
 
 export const ASSISTANT_NAME =
@@ -171,6 +172,23 @@ export const WEBHOOK_SECRET =
   process.env.WEBHOOK_SECRET || envConfig.WEBHOOK_SECRET || '';
 
 export const QDRANT_URL = process.env.QDRANT_URL || envConfig.QDRANT_URL || '';
+
+/**
+ * Brain digest cadence. Default `'weekly'` (Sunday 09:00 local). Set to
+ * `'daily'` during the 30-day measurement phase so the ops team gets one
+ * digest every morning. Any unrecognized value silently falls back to
+ * `'weekly'` so a typo in the plist can't disable the digest entirely.
+ */
+export const BRAIN_DIGEST_CADENCE: 'weekly' | 'daily' = (() => {
+  const raw = (
+    process.env.BRAIN_DIGEST_CADENCE ||
+    envConfig.BRAIN_DIGEST_CADENCE ||
+    'weekly'
+  )
+    .trim()
+    .toLowerCase();
+  return raw === 'daily' ? 'daily' : 'weekly';
+})();
 
 // Telegram Mini App: public HTTPS URL that Telegram can open.
 // Must point to the Mini App Express server (default local port 3847).
