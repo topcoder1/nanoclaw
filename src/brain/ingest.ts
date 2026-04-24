@@ -22,6 +22,7 @@ import type { EmailReceivedEvent } from '../events.js';
 import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
+import { ensureLegacyCutoverTombstone } from './drop-legacy-tombstone.js';
 import { embedText } from './embed.js';
 import {
   _shutdownEntityQueue,
@@ -250,6 +251,9 @@ async function runExtractionPipeline(
 export function startBrainIngest(): void {
   if (unsubscribe) return;
   const db = getBrainDb();
+  // One-time: stamp the legacy-cutover tombstone so the 30-day drop reminder
+  // has a start date. Idempotent — subsequent calls reuse the existing row.
+  ensureLegacyCutoverTombstone();
 
   queue = new AsyncWriteQueue<RawEventRow>(async (batch) => {
     const { inserted } = flushRawEvents(db, batch);

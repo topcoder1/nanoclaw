@@ -1,12 +1,31 @@
 /**
- * Knowledge Store — Cross-group queryable memory using SQLite FTS5.
+ * ============================================================================
+ * DEPRECATED — legacy knowledge store (P2).
+ * ============================================================================
  *
- * Stores facts that persist across sessions and groups, enabling the agent
- * to learn and recall information over time. Uses FTS5 full-text search
- * for efficient querying.
+ * This module owns the legacy `knowledge_facts` FTS5 table in
+ * `store/messages.db` and the legacy Qdrant collection `nanoclaw_knowledge`
+ * (1536d, OpenAI-backed). Both have been superseded by the augmented brain:
  *
- * Future upgrade path: replace SQLite FTS5 with Mem0 + Qdrant for
- * semantic vector search.
+ *   - Reads → `src/brain/retrieve.ts` (recall with FTS5 + Qdrant + rerank)
+ *   - Writes → `src/brain/ingest.ts` (raw_events → KU pipeline)
+ *   - Migration → `src/brain/migrate-knowledge-facts.ts`
+ *
+ * The legacy table is kept read-only through the 30-day cutover window so
+ * the old path does not disappear before `brain.db` is proven in prod. See
+ * `.omc/design/brain-architecture-v2.md` §4 Phase C.
+ *
+ * NEW CODE MUST NOT CALL `storeFact*` — use `ingestEmail()` or the appropriate
+ * brain ingestion hook instead. Calls to `storeFactWithVector` now emit a
+ * deprecation warning so any remaining callers are visible in the logs.
+ *
+ * Removal plan:
+ *   - P2 (now):  mark deprecated, emit warnings, migration available.
+ *   - +30 days:  run `scripts/drop-legacy.ts --confirm` to drop the legacy
+ *                collection and table. A tombstone (`system_state` key
+ *                `legacy_cutover_at`, set once on brain init) drives the
+ *                Telegram reminder.
+ * ============================================================================
  */
 
 import { QdrantClient } from '@qdrant/js-client-rest';
@@ -232,9 +251,21 @@ export async function ensureQdrantCollection(): Promise<void> {
   }
 }
 
+// Limit the deprecation warning to one log per process so busy code paths
+// don't drown the rest of the log output. Still makes remaining callers
+// unambiguous via the first warning.
+let warnedDeprecated = false;
+
 export async function storeFactWithVector(
   input: StoreFactInput,
 ): Promise<void> {
+  if (!warnedDeprecated) {
+    warnedDeprecated = true;
+    logger.warn(
+      { source: input.source },
+      'storeFactWithVector is DEPRECATED — use src/brain/ingest.ts. See src/memory/knowledge-store.ts header for migration.',
+    );
+  }
   storeFact(input);
 
   const client = getQdrant();
