@@ -724,6 +724,10 @@ def cmd_sync(argv: list[str]) -> int:
                    help="Sync every tracked repo (the default when --repo is omitted)")
     p.add_argument("--dry-run", action="store_true",
                    help="Walk + count, but do not write")
+    p.add_argument("--no-embed", action="store_true",
+                   help="Skip the Nomic embedding step after SQL insert. "
+                        "Use for a fast FTS-only sync; semantic search over "
+                        "new KUs will be unavailable until a later run.")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Debug info on stderr")
     args = p.parse_args(argv)
@@ -787,6 +791,41 @@ def cmd_sync(argv: list[str]) -> int:
           file=sys.stderr)
     if args.dry_run:
         print("(dry-run — no writes committed)", file=sys.stderr)
+        return 0
+
+    # Nomic embedding — a separate subprocess because the model is in the Node
+    # side of the codebase (src/brain/embed.ts) and reimplementing it in Python
+    # would mean duplicating the Transformers stack. Skippable for fast iteration.
+    if args.no_embed or total_indexed == 0:
+        if args.no_embed:
+            print("(--no-embed: skipped Nomic embedding — run "
+                  "`npx tsx scripts/brain-embed-repos.ts` later)",
+                  file=sys.stderr)
+        return 0
+
+    embed_script = NANOCLAW_DIR / "scripts" / "brain-embed-repos.ts"
+    if not embed_script.exists():
+        print(f"warning: {embed_script} not found — SQL-only sync complete; "
+              f"semantic search unavailable for new KUs", file=sys.stderr)
+        return 0
+
+    print("\nEmbedding new repo KUs (skips rows already in Qdrant)...",
+          file=sys.stderr)
+    try:
+        result = subprocess.run(
+            ["npx", "tsx", str(embed_script)],
+            cwd=str(NANOCLAW_DIR),
+        )
+    except FileNotFoundError:
+        print("warning: `npx` not on PATH — skipped embedding step. Install "
+              "Node/npm to enable semantic search over repo KUs.",
+              file=sys.stderr)
+        return 0
+    if result.returncode != 0:
+        print(f"warning: embedding step exited {result.returncode} — "
+              f"FTS-only retrieval will still work; run "
+              f"`npx tsx scripts/brain-embed-repos.ts` manually to retry",
+              file=sys.stderr)
     return 0
 
 

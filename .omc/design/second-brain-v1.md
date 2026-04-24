@@ -104,14 +104,25 @@ Deliberate v1.0 non-features:
 - No embeddings (semantic search stays email-only until v1.1).
 - No `git_sha` provenance (metadata stores mtime + file_size; that's enough to start).
 
-### v1.1 — semantic + code files (planned)
+### v1.1a — Nomic embeddings for repo KUs (shipped 2026-04-24)
 
-Two upgrades that matter most once v1.0 is in use:
+`scripts/brain-embed-repos.ts` — Node subprocess that finds repo KUs without a Qdrant point and embeds them with the same Nomic 768-d model email ingest uses. Idempotent (Qdrant `retrieve` pass dedupes), runnable standalone or auto-chained off `claw sync` (disable with `--no-embed`).
 
-1. **Embed repo KUs with the same Nomic 768-d model used for emails.** Adds ~5ms per file; initial 1,136-file sync → ~6s. Unlocks semantic queries like "where is auth handled" matching files that don't contain "auth" literally.
-2. **Index source code files.** Opt-in per repo (`scope: docs+code` in repos.yaml). Chunk by symbol boundaries for `.ts` / `.py` / `.go`; fall back to 4KB rolling windows. Adds potentially 5–50× more KUs — worth it only if v1.0's doc-only coverage proves too narrow.
+- Embedding throughput in practice: ~1 doc/s steady state (dominated by Nomic inference on CPU). Initial 1,136-file full run ≈ 15–20 min.
+- Writes into the same `ku_nomic-embed-text-v1.5_768` collection as email KUs — unified semantic index.
+- **Miniapp `/brain/search` and future `recall()` callers automatically pick up repo content via hybrid FTS+semantic+rerank** without any retrieval-side changes.
 
-### v1.2 — fswatch daemon (planned)
+Deliberately NOT in v1.1a: CLI-side semantic (the `claw know` command remains FTS-only for now — v1.1b adds a localhost `/api/brain/recall` endpoint to close that loop).
+
+### v1.1b — semantic in `claw know` (planned)
+
+Add `GET /api/brain/recall?q=…&limit=…` to the nanoclaw miniapp server, service-token authed. `claw know` swaps its direct SQLite FTS5 query for an HTTP call, inheriting the full hybrid pipeline. Scope: ~50 LoC on the nanoclaw side + ~30 in the CLI. Defer until v1.1a's quality is visibly better than FTS-only in `recall()` callers.
+
+### v1.2 — code file indexing (planned)
+
+Opt-in per repo (`scope: docs+code` in repos.yaml). Chunk by symbol boundaries for `.ts` / `.py` / `.go`; fall back to 4KB rolling windows. Adds potentially 5–50× more KUs — worth it only if v1.0 + v1.1's doc-only coverage proves too narrow.
+
+### v1.3 — fswatch daemon (planned)
 
 Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watching paths from `~/.claw/repos.yaml` via `fswatch`. Debounces changes, re-indexes modified files only. Deferred until (a) v1.0 + v1.1 retrieval is felt-to-be-useful and (b) manual `claw sync` + nightly cron becomes annoying. Likely trigger: team grows beyond one person, or you want "saved a file → searchable within 30s" latency.
 
@@ -160,6 +171,7 @@ Two additions, both writes:
 - **2026-04-24**: `~/.claw/repos.yaml` is the canonical repo inventory for the indexer. 31 tracked to start.
 - **2026-04-24**: v1.0 repo indexer shipped — 1,136 markdown/README files across 32 repos, ~5s initial sync, upserts by deterministic id, FTS-only retrieval for now.
 - **2026-04-24**: `claw sync` is Python (not Node) so it has zero subprocess startup cost and can write to brain.db directly. Schema compatibility risk: if nanoclaw adds a NOT NULL column to `knowledge_units`, the sync will fail loudly until the column gets a DEFAULT or we add it to the Python INSERT.
+- **2026-04-24**: v1.1a embeddings shipped — `scripts/brain-embed-repos.ts` auto-chains off `claw sync` (skippable with `--no-embed`). Repo KUs now feed the same Qdrant collection as email KUs, so miniapp search + future `recall()` callers get hybrid retrieval over the whole corpus. CLI stays FTS-only pending v1.1b HTTP wrapper.
 
 ## What this doc is NOT yet
 
