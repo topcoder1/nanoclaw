@@ -114,9 +114,15 @@ Deliberate v1.0 non-features:
 
 Deliberately NOT in v1.1a: CLI-side semantic (the `claw know` command remains FTS-only for now — v1.1b adds a localhost `/api/brain/recall` endpoint to close that loop).
 
-### v1.1b — semantic in `claw know` (planned)
+### v1.1b — semantic in `claw know` (shipped 2026-04-24)
 
-Add `GET /api/brain/recall?q=…&limit=…` to the nanoclaw miniapp server, service-token authed. `claw know` swaps its direct SQLite FTS5 query for an HTTP call, inheriting the full hybrid pipeline. Scope: ~50 LoC on the nanoclaw side + ~30 in the CLI. Defer until v1.1a's quality is visibly better than FTS-only in `recall()` callers.
+`GET /api/brain/recall?q=&limit=&account=` added to `createBrainApiRoutes`. Accepts the `x-service-token` header for authn (extended `createTelegramAuthMiddleware` to bypass initData verification when a valid service token is present). `claw know` now tries the miniapp's HTTP endpoint first and falls back to direct SQLite FTS5 if the miniapp is down (or `--no-http-recall` is passed).
+
+Effect: `claw know "orphan vpn"` used to return 1 false-positive from an email; it now returns the actual `wxa_vpn:docs/superpowers/runs/...` files at the top. `claw know "where is authentication handled in the frontend"` surfaces `inbox_superpilot:docs/designs/authenticated-crawl-ux.md` — a semantic match FTS5 would miss.
+
+### v1.1c — truncate oversize files before embedding (shipped 2026-04-24)
+
+The initial v1.1a embedding run dropped 103/1131 files on Nomic's 8192-token context limit. Fix: cap input at a 28KB soft limit before `embedText()`; on fail, retry once at 12KB. Truncation is recorded in the Qdrant payload (`truncated_to_bytes`) so we can audit later. v1.2's code indexer will replace this with symbol-boundary chunking.
 
 ### v1.2 — code file indexing (planned)
 

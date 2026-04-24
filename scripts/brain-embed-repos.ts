@@ -156,9 +156,24 @@ async function main(): Promise<void> {
   let done = 0;
   let failed = 0;
 
+  // Nomic's context window is 8192 tokens ≈ ~32KB of typical prose; to stay
+  // comfortably under we cap raw input at 28KB before embedding. If the full
+  // embed still fails (rare), we retry once at a tighter 12KB cap — empirically
+  // enough to ship something for files that trip the tokenizer on unusual
+  // whitespace/unicode. Either truncation is a v1.1 compromise: v1.2's code
+  // indexer will chunk by symbol boundaries and drop the cap.
+  const SOFT_CAP_BYTES = 28 * 1024;
+  const HARD_CAP_BYTES = 12 * 1024;
+  let truncated = 0;
+
   for (const row of work) {
+    let text = row.text;
+    if (text.length > SOFT_CAP_BYTES) {
+      text = text.slice(0, SOFT_CAP_BYTES);
+      truncated++;
+    }
     try {
-      const vec = await embedText(row.text, 'document');
+      const vec = await embedText(text, 'document');
       await upsertKu({
         kuId: row.id,
         vector: vec,
@@ -179,17 +194,42 @@ async function main(): Promise<void> {
         console.log(`  ${done}/${work.length}  (${elapsed}s)`);
       }
     } catch (err) {
-      failed++;
-      console.warn(
-        `  ✗ ${row.source_ref ?? row.id} — ${(err as Error).message}`,
-      );
+      // Retry once at the hard cap — covers the ~10% of failures caused by
+      // token-dense content (code blocks, base64, minified JSON in docs) that
+      // slips through the soft cap.
+      try {
+        const retryText = text.slice(0, HARD_CAP_BYTES);
+        const vec = await embedText(retryText, 'document');
+        await upsertKu({
+          kuId: row.id,
+          vector: vec,
+          payload: {
+            account: row.account,
+            scope: null,
+            model_version: modelVersion,
+            valid_from: row.valid_from,
+            recorded_at: row.recorded_at,
+            source_type: 'repo',
+            topic_key: row.topic_key ?? null,
+            source_ref: row.source_ref ?? null,
+            truncated_to_bytes: HARD_CAP_BYTES,
+          },
+        });
+        done++;
+        truncated++;
+      } catch (err2) {
+        failed++;
+        console.warn(
+          `  ✗ ${row.source_ref ?? row.id} — ${(err2 as Error).message}`,
+        );
+      }
     }
   }
 
   const totalS = ((Date.now() - startMs) / 1000).toFixed(1);
   console.log(
-    `Done: ${done} embedded, ${failed} failed, ${totalS}s total ` +
-      `(${(done / parseFloat(totalS || '1')).toFixed(1)} docs/s)`,
+    `Done: ${done} embedded, ${failed} failed, ${truncated} truncated, ` +
+      `${totalS}s total (${(done / parseFloat(totalS || '1')).toFixed(1)} docs/s)`,
   );
 }
 

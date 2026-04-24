@@ -21,6 +21,8 @@
 import crypto from 'crypto';
 import type express from 'express';
 
+import { readEnvValue } from '../env.js';
+
 export interface TelegramUser {
   id: number;
   first_name?: string;
@@ -209,6 +211,29 @@ export function createTelegramAuthMiddleware(
   const maxAgeSec = opts.maxAgeSec ?? DEFAULT_INITDATA_MAX_AGE_SEC;
   const nowFn = opts.nowFn ?? (() => Date.now());
   return (req, res, next) => {
+    // Service-token bypass. Any request carrying a valid `x-service-token`
+    // matching NANOCLAW_SERVICE_TOKEN skips Telegram initData verification
+    // entirely. This is how the local `claw know` CLI (and any future
+    // first-party tooling) authenticates against /api/brain/* without
+    // faking Telegram initData.
+    const serviceToken = req.header('x-service-token');
+    if (serviceToken) {
+      // nanoclaw's launchd plist does not inject .env into process.env — the
+      // token has to be read via readEnvValue (env.ts) which falls back to
+      // reading .env directly. Do the lookup per request so a token rotation
+      // doesn't require a process restart.
+      const raw = readEnvValue('NANOCLAW_SERVICE_TOKEN') ?? '';
+      const expected = raw
+        .split(',')
+        .map((t) => t.split('@')[0].trim())
+        .filter(Boolean);
+      if (expected.includes(serviceToken)) {
+        req.telegramUser = null;
+        next();
+        return;
+      }
+    }
+
     const headerVal = req.header('x-telegram-init-data');
     const queryVal =
       typeof req.query.tgWebAppData === 'string'

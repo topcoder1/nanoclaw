@@ -299,7 +299,9 @@ def run_container(runtime: str, image: str, payload: dict,
 # ── `claw know` — brain + SP KB search ────────────────────────────────────
 
 _BRAIN_DB_PATH = NANOCLAW_DIR / "store" / "brain.db"
-_KNOW_ENV_KEYS = ("NANOCLAW_SERVICE_TOKEN", "SUPERPILOT_API_URL")
+_KNOW_ENV_KEYS = ("NANOCLAW_SERVICE_TOKEN", "SUPERPILOT_API_URL",
+                  "NANOCLAW_MINIAPP_URL")
+_DEFAULT_MINIAPP_URL = "http://127.0.0.1:3847"
 
 
 def _read_know_env(env_file: Path) -> dict:
@@ -333,6 +335,57 @@ def _normalize_bm25(bm25: float) -> float:
     Collapse to [0, 1] larger-better for merging with SP scores.
     Heuristic: score = 1 / (1 + |bm25|); good separation in the common range."""
     return 1.0 / (1.0 + abs(bm25))
+
+
+def _query_brain_http(query: str, limit: int, miniapp_url: str,
+                      token: str | None, timeout: float = 3.0
+                      ) -> list[dict] | None:
+    """Try the nanoclaw miniapp's /api/brain/recall endpoint (full hybrid
+    FTS + semantic + rerank pipeline). Returns None on any failure so the
+    caller can fall through to direct SQLite FTS5."""
+    base = miniapp_url.rstrip("/")
+    params = {"q": query, "limit": str(limit)}
+    url = f"{base}/api/brain/recall?{urllib.parse.urlencode(params)}"
+    headers = {"accept": "application/json"}
+    if token:
+        headers["x-service-token"] = token
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        dbg(f"/api/brain/recall unavailable: {e} — falling back to SQLite FTS")
+        return None
+    out = []
+    for r in body.get("results", []):
+        src_type = r.get("source_type")
+        src_ref = r.get("source_ref")
+        text = r.get("text") or ""
+        # Same title rule as the SQLite branch: repo KUs show path, else
+        # the first line of the claim text.
+        if src_type == "repo" and src_ref:
+            title = src_ref
+        else:
+            title = text.split("\n", 1)[0][:140]
+        out.append({
+            "source": "brain",
+            "id": r.get("ku_id"),
+            "title": title,
+            # Full hybrid pipeline emits finalScore in [0,1] — we use it directly
+            # instead of the BM25 normalization trick the SQLite path needs.
+            "score": float(r.get("finalScore") or 0.0),
+            "meta": {
+                "source_type": src_type,
+                "source_ref": src_ref,
+                "account": r.get("account"),
+                "rankScore": r.get("rankScore"),
+                "recencyScore": r.get("recencyScore"),
+                "accessScore": r.get("accessScore"),
+                "importantScore": r.get("importantScore"),
+                "retrieval": "hybrid",
+            },
+        })
+    return out
 
 
 def _query_brain(query: str, limit: int, project: str | None) -> list[dict]:
@@ -456,6 +509,10 @@ def cmd_know(argv: list[str]) -> int:
                    help="Skip local brain.db lookup")
     p.add_argument("--project", help="Filter brain hits by project tag "
                                      "(e.g. --project attaxion)")
+    p.add_argument("--no-http-recall", action="store_true",
+                   help="Skip the nanoclaw miniapp's /api/brain/recall "
+                        "endpoint and use direct SQLite FTS5 only. Useful "
+                        "when debugging or when the miniapp is down.")
     p.add_argument("--tags", help="Pass through to SP KB as comma-separated tags")
     p.add_argument("--json", action="store_true",
                    help="Emit raw merged JSON instead of a formatted list")
@@ -472,7 +529,27 @@ def cmd_know(argv: list[str]) -> int:
 
     hits: list[dict] = []
     if not args.kb_only:
-        hits.extend(_query_brain(query, args.limit, args.project))
+        env = _read_know_env(ENV_FILE)
+        miniapp_url = env.get("NANOCLAW_MINIAPP_URL", _DEFAULT_MINIAPP_URL)
+        svc_token = env.get("NANOCLAW_SERVICE_TOKEN", "").split(",")[0].split("@")[0]
+        # Prefer the miniapp's full hybrid pipeline. Fall back to direct
+        # SQLite FTS5 if the miniapp is down (keeps the CLI useful
+        # when nanoclaw isn't running).
+        http_hits = None
+        if not args.no_http_recall:
+            http_hits = _query_brain_http(
+                query, args.limit, miniapp_url, svc_token or None,
+            )
+        if http_hits is not None:
+            # Project filter is client-side when using HTTP (server doesn't
+            # accept a --project arg yet; easy to add later if needed).
+            if args.project:
+                http_hits = [h for h in http_hits
+                             if f'"project:{args.project}"' in
+                             json.dumps(h.get("meta") or {})]
+            hits.extend(http_hits)
+        else:
+            hits.extend(_query_brain(query, args.limit, args.project))
 
     if not args.brain_only:
         env = _read_know_env(ENV_FILE)

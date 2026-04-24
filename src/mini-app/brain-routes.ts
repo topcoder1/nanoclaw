@@ -1180,7 +1180,9 @@ ${pager}
       whereParts.push('caller = ?');
       whereParams.push(callerFilter);
     }
-    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const whereSql = whereParts.length
+      ? `WHERE ${whereParts.join(' AND ')}`
+      : '';
 
     const rows = db
       .prepare(
@@ -1208,8 +1210,7 @@ ${pager}
     const rowsHtml = rows.length
       ? rows
           .map((r) => {
-            const durStr =
-              r.duration_ms != null ? `${r.duration_ms}ms` : '—';
+            const durStr = r.duration_ms != null ? `${r.duration_ms}ms` : '—';
             const callerPill = r.caller
               ? `<span class="pill">${escapeHtml(r.caller)}</span>`
               : '';
@@ -1280,13 +1281,16 @@ ${filterBar}
         }
       | undefined;
     if (!q) {
-      res.status(404).type('html').send(
-        brainShell(
-          'Query not found — Brain',
-          `<h1>Query not found</h1><p><a href="/brain/queries">← back to queries</a></p>`,
-          { activeNav: 'queries', reviewCount },
-        ),
-      );
+      res
+        .status(404)
+        .type('html')
+        .send(
+          brainShell(
+            'Query not found — Brain',
+            `<h1>Query not found</h1><p><a href="/brain/queries">← back to queries</a></p>`,
+            { activeNav: 'queries', reviewCount },
+          ),
+        );
       return;
     }
 
@@ -1331,7 +1335,9 @@ ${filterBar}
                 ? `<span class="pill">${escapeHtml(h.account)}</span>`
                 : '',
               h.superseded_at ? '<span class="pill">superseded</span>' : '',
-              h.needs_review === 1 ? '<span class="pill">needs_review</span>' : '',
+              h.needs_review === 1
+                ? '<span class="pill">needs_review</span>'
+                : '',
               h.important === 1 ? '<span class="pill">⭐</span>' : '',
             ]
               .filter(Boolean)
@@ -1341,16 +1347,16 @@ ${filterBar}
               h.recency_score != null
                 ? `recency ${h.recency_score.toFixed(3)}`
                 : null,
-              h.access_score != null ? `access ${h.access_score.toFixed(3)}` : null,
+              h.access_score != null
+                ? `access ${h.access_score.toFixed(3)}`
+                : null,
               h.important_score != null && h.important_score > 0
                 ? `important ${h.important_score.toFixed(3)}`
                 : null,
             ]
               .filter(Boolean)
               .join(' · ');
-            const href = h.ku_text
-              ? `/brain/ku/${escapeHtml(h.ku_id)}`
-              : null;
+            const href = h.ku_text ? `/brain/ku/${escapeHtml(h.ku_id)}` : null;
             const inner = `
               <div><strong>#${h.rank + 1}.</strong> ${title}</div>
               <div class="meta">
@@ -1584,6 +1590,66 @@ export function createBrainApiRoutes(
   router.get('/status', (_req, res) => {
     const db = getDb();
     res.json(getStatusFingerprint(db));
+  });
+
+  // GET /api/brain/recall — full hybrid retrieval (FTS + Qdrant + rerank +
+  // recency/access/important blending). Exposed so the `claw know` CLI can
+  // inherit the same pipeline that powers /brain/search + /recall chat cmd
+  // + future agent auto-recall. Auth: localhost or x-service-token matching
+  // NANOCLAW_SERVICE_TOKEN (defense-in-depth if TELEGRAM_INITDATA_REQUIRED
+  // ever gets flipped on).
+  router.get('/recall', async (req, res) => {
+    const ip = req.ip ?? req.socket.remoteAddress ?? '';
+    const isLocal =
+      ip === '127.0.0.1' ||
+      ip === '::1' ||
+      ip === '::ffff:127.0.0.1' ||
+      ip === '';
+    const suppliedToken = req.header('x-service-token') ?? '';
+    const { readEnvValue } = await import('../env.js');
+    const expectedTokens = (readEnvValue('NANOCLAW_SERVICE_TOKEN') ?? '')
+      .split(',')
+      .map((t) => t.split('@')[0].trim())
+      .filter(Boolean);
+    const tokenOk =
+      suppliedToken.length > 0 && expectedTokens.includes(suppliedToken);
+    if (!isLocal && !tokenOk) {
+      res.status(401).json({ error: 'recall: localhost or service token required' });
+      return;
+    }
+
+    const q =
+      typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q) {
+      res.status(400).json({ error: 'missing query parameter `q`' });
+      return;
+    }
+    const limitRaw = parseInt(String(req.query.limit ?? '10'), 10);
+    const limit = Number.isFinite(limitRaw)
+      ? Math.min(50, Math.max(1, limitRaw))
+      : 10;
+    const accountRaw = typeof req.query.account === 'string'
+      ? req.query.account
+      : undefined;
+    const account: 'personal' | 'work' | undefined =
+      accountRaw === 'personal' || accountRaw === 'work'
+        ? accountRaw
+        : undefined;
+
+    try {
+      const results = await recall(q, {
+        limit,
+        account,
+        caller: tokenOk ? 'cli-claw-know' : 'localhost-recall',
+      });
+      res.json({ query: q, count: results.length, results });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), q },
+        '/api/brain/recall failed',
+      );
+      res.status(500).json({ error: 'recall failed' });
+    }
   });
 
   // POST /api/brain/ku/:id/important — toggle the important flag.
