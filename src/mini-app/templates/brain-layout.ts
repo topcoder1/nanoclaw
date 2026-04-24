@@ -76,6 +76,9 @@ h2{font-size:15px;margin:24px 0 8px;color:#444}
 .kb-help li{padding:3px 0;border:none}
 .kb-help strong{color:#111}
 .kb-help code{font-size:12px;background:#e1e8ef;padding:1px 4px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#fs-toggle{margin-left:auto;background:transparent;border:1px solid #d0d7de;color:#555;padding:3px 10px;border-radius:12px;font-size:12px;cursor:pointer;font-family:inherit}
+#fs-toggle:hover{background:#f6f8fa}
+#fs-toggle[hidden]{display:none}
 `;
 
 /**
@@ -100,6 +103,7 @@ function renderNav(opts: BrainShellOptions): string {
   ${link('entities', '/brain/entities', 'Entities')}
   ${link('review', '/brain/review', 'Review', reviewSuffix)}
   ${link('timeline', '/brain/timeline', 'Timeline')}
+  <button id="fs-toggle" type="button" hidden>⛶ Fullscreen</button>
 </nav>`;
 }
 
@@ -138,6 +142,27 @@ ${body}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    // Desktop-only fullscreen toggle. Auto-fire on open so the default
+    // Telegram Desktop panel (which is too small for this app) gets the
+    // big view; the nav button lets the user drop back to compact.
+    var desktop = tg.platform === 'tdesktop' || tg.platform === 'macos' || tg.platform === 'web';
+    var fsBtn = document.getElementById('fs-toggle');
+    if (desktop && fsBtn && typeof tg.requestFullscreen === 'function') {
+      fsBtn.hidden = false;
+      var syncLabel = function(){
+        fsBtn.textContent = tg.isFullscreen ? '⛶ Exit' : '⛶ Fullscreen';
+      };
+      fsBtn.addEventListener('click', function(){
+        if (tg.isFullscreen) tg.exitFullscreen();
+        else tg.requestFullscreen();
+      });
+      if (typeof tg.onEvent === 'function') {
+        tg.onEvent('fullscreenChanged', syncLabel);
+        tg.onEvent('fullscreenFailed', syncLabel);
+      }
+      tg.requestFullscreen();
+      syncLabel();
+    }
     var initData = tg.initData || '';
     if (initData) {
       var origFetch = window.fetch.bind(window);

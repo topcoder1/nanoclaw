@@ -245,6 +245,9 @@ li a{color:#0366d6;text-decoration:none}
 .top-nav h1{margin:0}
 .top-nav .brain-link{background:#0366d6;color:#fff!important;padding:8px 14px;border-radius:14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
 .top-nav .brain-link:hover{background:#1976d2}
+.top-nav #fs-toggle{background:transparent;border:1px solid #d0d7de;color:#555;padding:6px 12px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit}
+.top-nav #fs-toggle:hover{background:#f6f8fa}
+.top-nav #fs-toggle[hidden]{display:none}
 </style></head><body>
 <script>
 // Telegram WebApp: request full viewport + disable vertical swipes so the
@@ -257,10 +260,25 @@ li a{color:#0366d6;text-decoration:none}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    var desktop = tg.platform === 'tdesktop' || tg.platform === 'macos' || tg.platform === 'web';
+    var fsBtn = document.getElementById('fs-toggle');
+    if (desktop && fsBtn && typeof tg.requestFullscreen === 'function') {
+      fsBtn.hidden = false;
+      var syncLabel = function(){ fsBtn.textContent = tg.isFullscreen ? '⛶ Exit' : '⛶ Fullscreen'; };
+      fsBtn.addEventListener('click', function(){
+        if (tg.isFullscreen) tg.exitFullscreen(); else tg.requestFullscreen();
+      });
+      if (typeof tg.onEvent === 'function') {
+        tg.onEvent('fullscreenChanged', syncLabel);
+        tg.onEvent('fullscreenFailed', syncLabel);
+      }
+      tg.requestFullscreen();
+      syncLabel();
+    }
   } catch(_) { /* non-Telegram context */ }
 })();
 </script>
-<div class="top-nav"><h1>nanoclaw</h1><a class="brain-link" href="/brain">🧠 Brain</a></div>
+<div class="top-nav"><h1>nanoclaw</h1><button id="fs-toggle" type="button" hidden>⛶ Fullscreen</button><a class="brain-link" href="/brain">🧠 Brain</a></div>
 <h2>📥 Attention (${attention.length})</h2>
 ${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul id="attention">${attention.map(attentionRow).join('')}</ul>`}
 <h2>🗂 Archive queue (${archive.length}) ${archive.length > 0 ? '<span class="tools" id="sel-all">Select all</span> <span class="tools" id="sel-none">Clear</span>' : ''}</h2>
