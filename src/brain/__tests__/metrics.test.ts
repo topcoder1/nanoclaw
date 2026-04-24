@@ -168,5 +168,24 @@ describe('brain/metrics', () => {
       expect(c.rawEventsUnprocessed).toBe(1);
       expect(c.deadLetterCandidates).toBe(1);
     });
+
+    it('excludes superseded rows from needsReview count', () => {
+      const db = getBrainDb();
+      const now = '2026-04-23T10:00:00Z';
+      const insertKu = db.prepare(
+        `INSERT INTO knowledge_units
+           (id, text, source_type, account, confidence, valid_from, recorded_at,
+            superseded_at, needs_review)
+         VALUES (?, ?, 'email', 'work', 1.0, ?, ?, ?, ?)`,
+      );
+      // Live KU that still needs review → should count.
+      insertKu.run(newId(), 'pending', now, now, null, 1);
+      // Superseded KU that was flagged before being replaced →
+      // must NOT count (reviewing it is a no-op now).
+      insertKu.run(newId(), 'was-review-now-replaced', now, now, now, 1);
+
+      const c = getBrainCounts();
+      expect(c.kuNeedsReview).toBe(1);
+    });
   });
 });

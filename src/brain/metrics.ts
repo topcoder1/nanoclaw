@@ -172,7 +172,7 @@ export function getBrainCounts(): BrainCounts {
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END) AS live,
               SUM(CASE WHEN superseded_at IS NOT NULL THEN 1 ELSE 0 END) AS superseded,
-              SUM(CASE WHEN needs_review = 1 THEN 1 ELSE 0 END) AS needsReview
+              SUM(CASE WHEN needs_review = 1 AND superseded_at IS NULL THEN 1 ELSE 0 END) AS needsReview
          FROM knowledge_units`,
     )
     .get() as {
