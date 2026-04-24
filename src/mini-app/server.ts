@@ -204,6 +204,7 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     res.type('html').send(`<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nanoclaw</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 body{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:16px 16px 80px;background:#f4f6f8;color:#111}
 h1{font-size:18px;margin:0 0 16px}
@@ -230,6 +231,21 @@ li a{color:#0366d6;text-decoration:none}
 .top-nav .brain-link{background:#0366d6;color:#fff!important;padding:8px 14px;border-radius:14px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
 .top-nav .brain-link:hover{background:#1976d2}
 </style></head><body>
+<script>
+// Telegram WebApp: request full viewport + disable vertical swipes so the
+// sheet doesn't collapse when scrolling long lists. Safe no-op outside
+// Telegram (tg is undefined).
+(function(){
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    tg.ready();
+    tg.expand();
+    if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
+  } catch(_) { /* non-Telegram context */ }
+})();
+</script>
 <div class="top-nav"><h1>nanoclaw</h1><a class="brain-link" href="/brain">🧠 Brain</a></div>
 <h2>📥 Attention (${attention.length})</h2>
 ${attention.length === 0 ? '<div class="empty">Inbox is clear.</div>' : `<ul id="attention">${attention.map(attentionRow).join('')}</ul>`}
