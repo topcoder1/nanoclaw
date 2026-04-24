@@ -89,7 +89,10 @@ CREATE INDEX IF NOT EXISTS idx_ku_topic        ON knowledge_units(topic_key) WHE
 CREATE INDEX IF NOT EXISTS idx_ku_superseded   ON knowledge_units(superseded_at) WHERE superseded_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ku_recorded     ON knowledge_units(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_ku_needs_review ON knowledge_units(needs_review) WHERE needs_review = 1;
-CREATE INDEX IF NOT EXISTS idx_ku_important    ON knowledge_units(important) WHERE important = 1;
+-- idx_ku_important is created in applyColumnMigrations (src/brain/db.ts)
+-- because the `important` column is added via ALTER TABLE for pre-existing
+-- brain.db files. Declaring the index here would fail on those DBs since
+-- schema.sql runs BEFORE the ALTER TABLE.
 
 CREATE TABLE IF NOT EXISTS ku_entities (
   ku_id      TEXT NOT NULL REFERENCES knowledge_units(id),
