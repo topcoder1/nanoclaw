@@ -77,9 +77,27 @@ interface HomeStats {
   kuLive: number;
   kuSuperseded: number;
   entityTotal: number;
-  rawLast24h: number;
+  /**
+   * raw_events with source_type='email' received in the last 24h — i.e.
+   * live SSE-driven ingestion. Distinct from migrated-in backfill rows
+   * so the dashboard reflects real inbound activity.
+   */
+  rawFreshLast24h: number;
+  /**
+   * Total raw_events from migration backfill sources (tracked_item,
+   * commitment, acted_email, auto_capture). No time filter — these are
+   * one-shot backfills. Shown so the count isn't hidden, but labelled.
+   */
+  rawMigrated: number;
   costMtdUsd: number;
 }
+
+const MIGRATED_SOURCE_TYPES = [
+  'tracked_item',
+  'commitment',
+  'acted_email',
+  'auto_capture',
+] as const;
 
 /**
  * Aggregate the small set of numbers shown on `/brain`. Each query is
@@ -99,9 +117,19 @@ function getHomeStats(db: Database.Database, nowMs: number): HomeStats {
     n: number;
   };
   const sinceIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
-  const raw = db
-    .prepare(`SELECT COUNT(*) AS n FROM raw_events WHERE received_at >= ?`)
+  const fresh = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM raw_events
+        WHERE source_type = 'email' AND received_at >= ?`,
+    )
     .get(sinceIso) as { n: number };
+  const migratedPlaceholders = MIGRATED_SOURCE_TYPES.map(() => '?').join(',');
+  const migrated = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM raw_events
+        WHERE source_type IN (${migratedPlaceholders})`,
+    )
+    .get(...MIGRATED_SOURCE_TYPES) as { n: number };
   const ym = new Date(nowMs).toISOString().slice(0, 7); // YYYY-MM
   const cost = db
     .prepare(
@@ -113,7 +141,8 @@ function getHomeStats(db: Database.Database, nowMs: number): HomeStats {
     kuLive: ku.live ?? 0,
     kuSuperseded: ku.sup ?? 0,
     entityTotal: ent.n,
-    rawLast24h: raw.n,
+    rawFreshLast24h: fresh.n,
+    rawMigrated: migrated.n,
     costMtdUsd: cost.total,
   };
 }
@@ -221,7 +250,8 @@ ${reviewBanner}
     ${stats.kuLive} KU${stats.kuLive === 1 ? '' : 's'} live ·
     ${stats.kuSuperseded} superseded ·
     ${stats.entityTotal} entit${stats.entityTotal === 1 ? 'y' : 'ies'} ·
-    ${stats.rawLast24h} raw event${stats.rawLast24h === 1 ? '' : 's'} in last 24h ·
+    ${stats.rawFreshLast24h} fresh (24h) ·
+    ${stats.rawMigrated} migrated ·
     $${escapeHtml(costStr)} MTD
   </p>
 </div>

@@ -108,7 +108,7 @@ describe('Brain miniapp — skeleton', () => {
     expect(res.text).toContain('name="q"');
   });
 
-  it('home page renders stats: KU live, superseded, entities, raw 24h, cost', async () => {
+  it('home page renders stats: KU live, superseded, entities, fresh/migrated, cost', async () => {
     const nowIso = new Date().toISOString();
     brainDb
       .prepare(
@@ -145,8 +145,36 @@ describe('Brain miniapp — skeleton', () => {
     expect(res.text).toContain('2 KUs live');
     expect(res.text).toContain('1 superseded');
     expect(res.text).toContain('1 entity');
-    expect(res.text).toContain('1 raw event');
+    expect(res.text).toContain('1 fresh (24h)');
+    expect(res.text).toContain('0 migrated');
     expect(res.text).toContain('$0.12 MTD');
+  });
+
+  it('home page splits raw_events into fresh (email, 24h) vs migrated buckets', async () => {
+    const nowIso = new Date().toISOString();
+    const old = new Date(
+      Date.now() - 48 * 60 * 60 * 1000,
+    ).toISOString();
+    brainDb
+      .prepare(
+        `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
+         VALUES
+           ('f1', 'email', 'thread-fresh-1', X'', ?),
+           ('f2', 'email', 'thread-fresh-2', X'', ?),
+           ('f_old', 'email', 'thread-old', X'', ?),
+           ('m1', 'tracked_item', 'ti-1', X'', ?),
+           ('m2', 'commitment', 'co-1', X'', ?),
+           ('m3', 'acted_email', 'ae-1', X'', ?),
+           ('m4', 'auto_capture', 'ac-1', X'', ?),
+           ('m5', 'auto_capture', 'ac-2', X'', ?)`,
+      )
+      .run(nowIso, nowIso, old, old, old, old, old, old);
+
+    const res = await request(app).get('/brain');
+    // 2 fresh email events in the last 24h (the 48h-old email doesn't count).
+    expect(res.text).toContain('2 fresh (24h)');
+    // 5 migrated rows total regardless of age.
+    expect(res.text).toContain('5 migrated');
   });
 
   it('home page recent-activity section lists raw_events newest first', async () => {
