@@ -97,6 +97,8 @@ import {
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
+import { ensureBrainCollection } from './brain/qdrant.js';
+import { handleRecallCommand } from './brain/recall-command.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1204,6 +1206,10 @@ async function main(): Promise<void> {
   ensureQdrantCollection().catch((err) =>
     logger.warn({ err }, 'Qdrant collection init failed'),
   );
+  // Brain P1: separate collection, Nomic 768d. Safe alongside the legacy one.
+  ensureBrainCollection().catch((err) =>
+    logger.warn({ err }, 'Brain Qdrant collection init failed'),
+  );
   initOutcomeStore();
   // Brain P0: raw_events capture from email.received. Must start before
   // the SSE/watchers do any emitting so no events are missed.
@@ -1334,6 +1340,23 @@ async function main(): Promise<void> {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
+        return;
+      }
+
+      // Brain /recall command — free-form query against brain.db.
+      // Intercepts here so the agent container is never invoked; the
+      // reply comes from FTS5 + Qdrant + rerank directly.
+      if (trimmed.startsWith('/recall')) {
+        (async () => {
+          const args = trimmed.slice('/recall'.length);
+          try {
+            const reply = await handleRecallCommand(args);
+            const ch = findChannel(channels, chatJid);
+            if (ch) await ch.sendMessage(chatJid, reply);
+          } catch (err) {
+            logger.error({ err, chatJid }, '/recall handler crashed');
+          }
+        })().catch((err) => logger.error({ err }, '/recall error'));
         return;
       }
 
