@@ -18,6 +18,7 @@ import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
 import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
+import { createBrainRoutes } from './brain-routes.js';
 import {
   detectSignUrl,
   isSignInvite,
@@ -33,6 +34,12 @@ export interface MiniAppServerOpts {
   pendingSendRegistry?: PendingSendRegistry;
   fetchImpl?: typeof globalThis.fetch;
   spawnAgentTask?: import('./actions.js').SpawnAgentTask;
+  /**
+   * Brain DB handle. Optional — production wires the singleton from
+   * `getBrainDb()` on boot; tests can seed a fresh handle for isolated
+   * brain-route tests without touching the singleton.
+   */
+  brainDb?: Database.Database;
 }
 
 export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
@@ -50,6 +57,9 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
       spawnAgentTask: opts.spawnAgentTask,
     }),
   );
+  // Brain miniapp — read/feedback UI over brain.db. Sub-router keeps the
+  // 1130-line main server.ts uncluttered.
+  app.use('/brain', createBrainRoutes({ brainDb: opts.brainDb }));
 
   // Lightweight queue fingerprint for polling refresh. Returns sorted IDs so
   // the client can detect any add/remove/resolve without re-rendering HTML.
