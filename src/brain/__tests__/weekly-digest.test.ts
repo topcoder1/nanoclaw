@@ -24,8 +24,9 @@ import { _closeBrainDb, getBrainDb } from '../db.js';
 import {
   collectWeeklyDigest,
   formatWeeklyDigestMarkdown,
+  startWeeklyDigestSchedule,
 } from '../weekly-digest.js';
-import { logCost, setSystemState } from '../metrics.js';
+import { getSystemState, logCost, setSystemState } from '../metrics.js';
 import { newId } from '../ulid.js';
 
 describe('brain/weekly-digest', () => {
@@ -143,6 +144,49 @@ describe('brain/weekly-digest', () => {
     expect(md).toMatch(/New entities/);
     expect(md).toMatch(/Last reconcile/);
     expect(md).toMatch(/alpha topic/);
+  });
+
+  it('startWeeklyDigestSchedule fires at Sunday 09:30, debounces, and stays silent on Monday', () => {
+    const deliveries: string[] = [];
+    // Sunday 2026-04-26 09:30 local.
+    const sunMorning = new Date(2026, 3, 26, 9, 30, 0);
+    const stop1 = startWeeklyDigestSchedule(
+      (md) => {
+        deliveries.push(md);
+      },
+      { nowFn: () => sunMorning, checkIntervalMs: 60 * 60 * 1000 },
+    );
+    stop1();
+    expect(deliveries.length).toBe(1);
+    const first = getSystemState('last_weekly_digest');
+    expect(first).not.toBeNull();
+
+    // Same Sunday, 11:45 — inside the widened window but debounce holds.
+    const sunLate = new Date(2026, 3, 26, 11, 45, 0);
+    const stop2 = startWeeklyDigestSchedule(
+      (md) => {
+        deliveries.push(md);
+      },
+      { nowFn: () => sunLate, checkIntervalMs: 60 * 60 * 1000 },
+    );
+    stop2();
+    expect(deliveries.length).toBe(1);
+
+    // Monday 10:00 — outside the Sunday window; no fire even if debounce
+    // were stale.
+    const monMorning = new Date(2026, 3, 27, 10, 0, 0);
+    setSystemState(
+      'last_weekly_digest',
+      new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    );
+    const stop3 = startWeeklyDigestSchedule(
+      (md) => {
+        deliveries.push(md);
+      },
+      { nowFn: () => monMorning, checkIntervalMs: 60 * 60 * 1000 },
+    );
+    stop3();
+    expect(deliveries.length).toBe(1);
   });
 
   it('truncates long KU text at 120 chars in the formatted output', () => {

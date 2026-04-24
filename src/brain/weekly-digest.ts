@@ -228,33 +228,56 @@ export function formatWeeklyDigestMarkdown(
   return lines.join('\n');
 }
 
+export interface WeeklyDigestScheduleOptions {
+  checkIntervalMs?: number;
+  /** Inject a clock for deterministic tests. */
+  nowFn?: () => Date;
+}
+
 /**
  * Start a simple schedule for the weekly digest. Checks every hour; fires
- * whenever the current time is Sunday 09:xx local AND we haven't fired in
- * the last 23h (tracked in system_state).
+ * whenever the current time is Sunday 09:00-11:59 local AND we haven't
+ * fired in the last 23h (tracked in system_state so a restart inside the
+ * window still delivers).
+ *
+ * The window was widened from the original single 09:xx hour because a
+ * process restart between 09:00 and 10:00 on Sunday could silently skip
+ * the whole week's digest. 09:00-11:59 gives three chances and the 23h
+ * debounce prevents duplicates.
+ *
+ * Runs one check at startup (unawaited) so a fresh boot inside the
+ * window delivers immediately rather than waiting for the first hourly
+ * tick.
  */
 export function startWeeklyDigestSchedule(
   deliver: (markdown: string) => void | Promise<void>,
-  checkIntervalMs: number = 60 * 60 * 1000,
+  opts: WeeklyDigestScheduleOptions | number = {},
 ): () => void {
+  const options: WeeklyDigestScheduleOptions =
+    typeof opts === 'number' ? { checkIntervalMs: opts } : opts;
+  const checkIntervalMs = options.checkIntervalMs ?? 60 * 60 * 1000;
+  const nowFn = options.nowFn ?? (() => new Date());
   const run = (): void => {
-    const now = new Date();
+    const now = nowFn();
     const isSunday = now.getDay() === 0;
-    const isNineHour = now.getHours() === 9;
-    if (!isSunday || !isNineHour) return;
+    const inWindow = now.getHours() >= 9 && now.getHours() < 12;
+    if (!isSunday || !inWindow) return;
     const last = getSystemState('last_weekly_digest');
     if (last) {
       const lastMs = Date.parse(last.value);
-      if (!Number.isNaN(lastMs) && Date.now() - lastMs < 23 * 60 * 60 * 1000) {
+      if (
+        !Number.isNaN(lastMs) &&
+        now.getTime() - lastMs < 23 * 60 * 60 * 1000
+      ) {
         return;
       }
     }
     try {
       const md = formatWeeklyDigestMarkdown();
       void Promise.resolve(deliver(md)).catch(() => undefined);
-      // Record delivery time via setSystemState
+      // Record delivery time via setSystemState.
       const db = getBrainDb();
-      const iso = new Date().toISOString();
+      const iso = now.toISOString();
       db.prepare(
         `INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
@@ -263,6 +286,7 @@ export function startWeeklyDigestSchedule(
       // deliver() or format failure shouldn't stop the scheduler.
     }
   };
+  run();
   const handle = setInterval(run, checkIntervalMs);
   return () => clearInterval(handle);
 }
