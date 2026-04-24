@@ -24,6 +24,9 @@ console.log(`inserted${dryRun ? ' (planned)' : ''}:           ${report.inserted}
 console.log(`skippedEmpty:          ${report.legacyRowsSkippedEmpty}`);
 console.log(`qdrantWritten:         ${report.qdrantWritten}`);
 console.log(`qdrantFailed:          ${report.qdrantFailed}`);
+console.log(`trackedItemsLinked:    ${report.trackedItemsLinked}`);
+console.log(`commitmentsLinked:     ${report.commitmentsLinked}`);
+console.log(`actedEmailsLinked:     ${report.actedEmailsLinked}`);
 console.log(`errors:                ${report.errors.length}`);
 if (report.errors.length > 0) {
   for (const e of report.errors) console.log(`  - ${e}`);

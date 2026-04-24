@@ -211,4 +211,74 @@ describe('brain/migrate-knowledge-facts', () => {
     expect(report.legacyRowsTotal).toBe(0);
     expect(report.inserted).toBe(0);
   });
+
+  it('rolls tracked_items/commitments/acted_emails into raw_events', async () => {
+    const p = path.join(tmpDir, 'messages.db');
+    const legacy = new Database(p);
+    legacy.exec(
+      `CREATE VIRTUAL TABLE knowledge_facts USING fts5(
+         text, domain, group_id, source, created_at
+       );
+       CREATE TABLE tracked_items (id INTEGER PRIMARY KEY, topic TEXT, created_at TEXT);
+       CREATE TABLE commitments (uuid TEXT PRIMARY KEY, owner TEXT);
+       CREATE TABLE acted_emails (thread_id TEXT PRIMARY KEY, action TEXT);`,
+    );
+    legacy
+      .prepare(`INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`)
+      .run(1, 'renewal', '2026-04-20T10:00:00Z');
+    legacy
+      .prepare(`INSERT INTO tracked_items (id, topic, created_at) VALUES (?, ?, ?)`)
+      .run(2, 'followup', '2026-04-21T10:00:00Z');
+    legacy
+      .prepare(`INSERT INTO commitments (uuid, owner) VALUES (?, ?)`)
+      .run('c-1', 'alice');
+    legacy
+      .prepare(`INSERT INTO commitments (uuid, owner) VALUES (?, ?)`)
+      .run('c-2', 'bob');
+    legacy
+      .prepare(`INSERT INTO acted_emails (thread_id, action) VALUES (?, ?)`)
+      .run('thr-xyz', 'replied');
+    legacy.close();
+
+    const r = await migrateKnowledgeFacts();
+    expect(r.trackedItemsLinked).toBe(2);
+    expect(r.commitmentsLinked).toBe(2);
+    expect(r.actedEmailsLinked).toBe(1);
+
+    const brain = getBrainDb();
+    const bySrc = brain
+      .prepare(
+        `SELECT source_type, COUNT(*) AS n FROM raw_events GROUP BY source_type`,
+      )
+      .all() as Array<{ source_type: string; n: number }>;
+    const m = new Map(bySrc.map((x) => [x.source_type, x.n]));
+    expect(m.get('tracked_item')).toBe(2);
+    expect(m.get('commitment')).toBe(2);
+    expect(m.get('acted_email')).toBe(1);
+
+    // Second run is idempotent — INSERT OR IGNORE dedups on
+    // (source_type, source_ref).
+    const r2 = await migrateKnowledgeFacts();
+    expect(r2.trackedItemsLinked).toBe(0);
+    expect(r2.commitmentsLinked).toBe(0);
+    expect(r2.actedEmailsLinked).toBe(0);
+
+    const totalRaw = (
+      brain.prepare(`SELECT COUNT(*) AS n FROM raw_events`).get() as { n: number }
+    ).n;
+    expect(totalRaw).toBe(5);
+  });
+
+  it('gracefully skips legacy tables that do not exist', async () => {
+    // Seed only knowledge_facts — none of tracked_items, commitments,
+    // acted_emails. Second pass should log + continue, not throw.
+    seedLegacyDb([
+      { text: 'fact only', source: 'manual', created_at: '2026-04-01T10:00:00Z' },
+    ]);
+    const r = await migrateKnowledgeFacts();
+    expect(r.inserted).toBe(1);
+    expect(r.trackedItemsLinked).toBe(0);
+    expect(r.commitmentsLinked).toBe(0);
+    expect(r.actedEmailsLinked).toBe(0);
+  });
 });

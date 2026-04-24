@@ -48,6 +48,10 @@ export interface MigrationReport {
   inserted: number;
   qdrantWritten: number;
   qdrantFailed: number;
+  /** raw_events rollup counts for legacy tables not covered by knowledge_facts. */
+  trackedItemsLinked: number;
+  commitmentsLinked: number;
+  actedEmailsLinked: number;
   startedAt: string;
   finishedAt: string;
   errors: string[];
@@ -95,6 +99,9 @@ export async function migrateKnowledgeFacts(
     inserted: 0,
     qdrantWritten: 0,
     qdrantFailed: 0,
+    trackedItemsLinked: 0,
+    commitmentsLinked: 0,
+    actedEmailsLinked: 0,
     startedAt,
     finishedAt: startedAt,
     errors,
@@ -318,6 +325,68 @@ export async function migrateKnowledgeFacts(
     if (total > 0) {
       const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker());
       await Promise.all(workers);
+    }
+
+    // Second pass — preserve other legacy tables as raw_events so the
+    // append-only capture log has parity with pre-migration history. Each
+    // legacy row becomes one raw_events row keyed by (source_type, source_ref)
+    // so a rerun is idempotent.
+    //
+    // Skipped when dryRun — caller only wants counts; we'd need real
+    // transactions to produce them, and legacy tables are small.
+    if (!dryRun) {
+      const legacyTables: Array<{
+        table: 'tracked_items' | 'commitments' | 'acted_emails';
+        srcType: 'tracked_item' | 'commitment' | 'acted_email';
+        reportField: 'trackedItemsLinked' | 'commitmentsLinked' | 'actedEmailsLinked';
+      }> = [
+        { table: 'tracked_items', srcType: 'tracked_item', reportField: 'trackedItemsLinked' },
+        { table: 'commitments', srcType: 'commitment', reportField: 'commitmentsLinked' },
+        { table: 'acted_emails', srcType: 'acted_email', reportField: 'actedEmailsLinked' },
+      ];
+      const nowIso = new Date().toISOString();
+      const insertRaw = brain.prepare(
+        `INSERT OR IGNORE INTO raw_events
+           (id, source_type, source_ref, payload, received_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+
+      for (const { table, srcType, reportField } of legacyTables) {
+        // Some installs may not have every table — probe first.
+        let exists = false;
+        try {
+          legacy.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get();
+          exists = true;
+        } catch {
+          logger.info({ table }, 'migrateKnowledgeFacts: legacy table missing — skipped');
+          continue;
+        }
+        if (!exists) continue;
+
+        const rows = legacy
+          .prepare(`SELECT * FROM ${table}`)
+          .all() as Array<Record<string, unknown>>;
+
+        const txn = brain.transaction((batch: Array<Record<string, unknown>>) => {
+          for (const row of batch) {
+            const sourceRef = String(
+              (row as { id?: unknown; uuid?: unknown; thread_id?: unknown }).id ??
+                (row as { uuid?: unknown }).uuid ??
+                (row as { thread_id?: unknown }).thread_id ??
+                '',
+            );
+            if (!sourceRef) continue;
+            const payload = Buffer.from(JSON.stringify(row), 'utf8');
+            const result = insertRaw.run(newId(), srcType, sourceRef, payload, nowIso);
+            if (result.changes > 0) report[reportField]++;
+          }
+        });
+        txn(rows);
+        logger.info(
+          { table, srcType, rows: rows.length, linked: report[reportField] },
+          'migrateKnowledgeFacts: legacy table rolled into raw_events',
+        );
+      }
     }
   } finally {
     legacy.close();
