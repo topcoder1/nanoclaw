@@ -96,6 +96,7 @@ import {
   initKnowledgeStore,
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
+import { handleBrainHealthCommand } from './brain/health.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
@@ -1340,6 +1341,21 @@ async function main(): Promise<void> {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
+        return;
+      }
+
+      // Brain /brainhealth command — structured health report (design §9).
+      // Intercepts here so the agent container is never invoked.
+      if (trimmed.startsWith('/brainhealth')) {
+        (async () => {
+          try {
+            const reply = handleBrainHealthCommand();
+            const ch = findChannel(channels, chatJid);
+            if (ch) await ch.sendMessage(chatJid, reply);
+          } catch (err) {
+            logger.error({ err, chatJid }, '/brainhealth handler crashed');
+          }
+        })().catch((err) => logger.error({ err }, '/brainhealth error'));
         return;
       }
 
