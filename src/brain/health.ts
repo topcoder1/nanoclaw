@@ -14,11 +14,14 @@
  */
 
 import {
+  EMAILS_SEEN_KEY,
+  LAST_INGEST_EVENT_KEY,
   getBrainCounts,
   getDailyCostUsd,
   getLatencyStats,
   getMonthlyCostUsd,
   getRollingDailyCostUsd,
+  getSystemCounter,
   getSystemState,
   type BrainCounts,
   type LatencyStats,
@@ -66,6 +69,18 @@ export interface BrainHealthReport {
   legacy: {
     cutoverAt: string | null;
     cutoverDue: boolean;
+  };
+  /**
+   * SSE→brain ingest canary (see `src/brain/metrics.ts`).
+   *   - `emails_seen_by_brain_24h` counts email.received events seen by
+   *     brain ingest in a rolling 24h window, independent of raw_events
+   *     inserts (which include migrated backfill).
+   *   - `lastIngestEventAt` is the ISO timestamp of the most recent event.
+   * Zero + an old timestamp is the signal that live ingest is wedged.
+   */
+  ingest: {
+    emailsSeenByBrain24h: number;
+    lastIngestEventAt: string | null;
   };
   reEvalTriggers: ReEvalTriggerStatus[];
 }
@@ -124,6 +139,8 @@ export function getBrainHealthReport(nowIso?: string): BrainHealthReport {
     },
   ];
 
+  const emailsSeen = getSystemCounter(EMAILS_SEEN_KEY, iso);
+  const lastIngestEventRow = getSystemState(LAST_INGEST_EVENT_KEY);
   return {
     generatedAt: iso,
     counts,
@@ -149,6 +166,10 @@ export function getBrainHealthReport(nowIso?: string): BrainHealthReport {
     legacy: {
       cutoverAt: getLegacyCutoverAt(),
       cutoverDue: isLegacyCutoverDue(Date.parse(iso)),
+    },
+    ingest: {
+      emailsSeenByBrain24h: emailsSeen.count,
+      lastIngestEventAt: lastIngestEventRow?.value ?? null,
     },
     reEvalTriggers: triggers,
   };
@@ -199,6 +220,10 @@ export function handleBrainHealthCommand(
   lines.push(
     `\n*Legacy cutover:* at=${r.legacy.cutoverAt ?? '(not set)'} ` +
       `due=${r.legacy.cutoverDue ? 'YES — run scripts/drop-legacy.ts --confirm' : 'no'}`,
+  );
+  lines.push(
+    `\n*SSE ingest canary:* emails seen (24h)=${r.ingest.emailsSeenByBrain24h} ` +
+      `last=${r.ingest.lastIngestEventAt ?? 'never'}`,
   );
   const firing = r.reEvalTriggers.filter((t) => t.fired);
   if (firing.length === 0) {

@@ -51,6 +51,12 @@ vi.mock('../qdrant.js', () => ({
 import { eventBus } from '../../event-bus.js';
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import { startBrainIngest, stopBrainIngest } from '../ingest.js';
+import {
+  EMAILS_SEEN_KEY,
+  LAST_INGEST_EVENT_KEY,
+  getSystemCounter,
+  getSystemState,
+} from '../metrics.js';
 
 function emit(threadId: string, subject: string, text: string): void {
   eventBus.emit('email.received', {
@@ -138,6 +144,31 @@ describe('brain/ingest — P1 pipeline integration', () => {
     expect(qdrantUpsertMock).toHaveBeenCalled();
     const firstUpsert = qdrantUpsertMock.mock.calls[0][0];
     expect(firstUpsert.payload.model_version).toBe('nomic-embed-text-v1.5:768');
+  });
+
+  it('each email.received bumps the SSE→brain canary counter (independent of raw_events)', async () => {
+    startBrainIngest();
+    emit('thread-canary-1', 'Subj 1', 'body 1');
+    emit('thread-canary-2', 'Subj 2', 'body 2');
+    // Duplicate thread id — raw_events insert is deduped by the UNIQUE
+    // constraint, but the canary must still bump (it measures events
+    // SEEN by ingest, not rows written).
+    emit('thread-canary-1', 'Subj 1 dup', 'body 1 dup');
+    await wait(1500);
+
+    const db = getBrainDb();
+    const rawCount = (
+      db.prepare(`SELECT COUNT(*) AS n FROM raw_events`).get() as { n: number }
+    ).n;
+    // Two distinct thread ids → two raw_events rows.
+    expect(rawCount).toBe(2);
+
+    const counter = getSystemCounter(EMAILS_SEEN_KEY);
+    // Three emails flowed past ingest → counter == 3.
+    expect(counter.count).toBe(3);
+
+    const last = getSystemState(LAST_INGEST_EVENT_KEY);
+    expect(last).not.toBeNull();
   });
 
   it('SQLite row survives even if Qdrant upsert throws', async () => {

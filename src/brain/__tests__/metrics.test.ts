@@ -28,7 +28,9 @@ import {
   getLatencyStats,
   getMonthlyCostUsd,
   getRollingDailyCostUsd,
+  getSystemCounter,
   getSystemState,
+  incrementSystemCounter,
   logCost,
   recordRetrievalLatencyMs,
   setSystemState,
@@ -242,6 +244,50 @@ describe('brain/metrics', () => {
 
       const c = getBrainCounts();
       expect(c.kuNeedsReview).toBe(1);
+    });
+  });
+
+  describe('rolling system counter', () => {
+    // The 24h rolling counter is the backbone of the SSE→brain canary.
+    // Correct roll-over is the single most important behaviour.
+
+    it('starts at 0 when never set', () => {
+      getBrainDb(); // open
+      const c = getSystemCounter('never_set_key', '2026-04-23T10:00:00Z');
+      expect(c.count).toBe(0);
+      expect(c.resetAt).toBeNull();
+    });
+
+    it('increments within the 24h window', () => {
+      const base = '2026-04-23T10:00:00Z';
+      expect(incrementSystemCounter('k', base).count).toBe(1);
+      expect(
+        incrementSystemCounter('k', '2026-04-23T11:00:00Z').count,
+      ).toBe(2);
+      expect(
+        incrementSystemCounter('k', '2026-04-23T23:00:00Z').count,
+      ).toBe(3);
+      // Reading inside the window sees 3.
+      expect(
+        getSystemCounter('k', '2026-04-23T23:30:00Z').count,
+      ).toBe(3);
+    });
+
+    it('resets when the 24h window has elapsed', () => {
+      incrementSystemCounter('k', '2026-04-23T10:00:00Z'); // 1
+      incrementSystemCounter('k', '2026-04-23T11:00:00Z'); // 2
+      // 25h later — window expired.
+      const after = incrementSystemCounter('k', '2026-04-24T11:00:00Z');
+      expect(after.count).toBe(1);
+      expect(after.resetAt).toBe('2026-04-24T11:00:00Z');
+    });
+
+    it('getSystemCounter returns 0 when window elapsed but write is pending', () => {
+      incrementSystemCounter('k', '2026-04-23T10:00:00Z');
+      // 30h later, no increment yet: read must NOT show the stale value.
+      const c = getSystemCounter('k', '2026-04-24T16:00:00Z');
+      expect(c.count).toBe(0);
+      expect(c.resetAt).toBeNull();
     });
   });
 });

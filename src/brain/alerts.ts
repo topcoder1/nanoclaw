@@ -22,9 +22,12 @@ import { logger } from '../logger.js';
 
 import { isLegacyCutoverDue } from './drop-legacy-tombstone.js';
 import {
+  EMAILS_SEEN_KEY,
+  LAST_INGEST_EVENT_KEY,
   getDailyCostUsd,
   getMonthlyCostUsd,
   getRollingDailyCostUsd,
+  getSystemCounter,
   getSystemState,
   setSystemState,
 } from './metrics.js';
@@ -36,7 +39,8 @@ export type AlertCategory =
   | 'qdrant_drift'
   | 'monthly_budget'
   | 'legacy_drop_reminder'
-  | 'backup_failed';
+  | 'backup_failed'
+  | 'brain_ingest_stale';
 
 export interface Alert {
   category: AlertCategory;
@@ -52,6 +56,14 @@ export const MONTHLY_BUDGET_USD = 10;
 export const PROVIDER_DOWN_THRESHOLD_MS = 15 * 60 * 1000;
 export const BACKUP_FAILED_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 export const LEGACY_DROP_REMINDER_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * SSE→brain ingest staleness threshold. When the canary counter is 0 AND
+ * the last-seen event is older than this, `brain_ingest_stale` fires
+ * (throttled 1/hour via the standard alert:<category> key). Six hours is
+ * long enough to avoid false positives during quiet weekends while still
+ * catching a wedged SSE stream within the same workday.
+ */
+export const INGEST_STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 
 // system_state tombstone for the legacy-drop weekly reminder. Stored
 // separately from the per-category throttle so the 7-day cadence is
@@ -177,6 +189,34 @@ export function evaluateAlerts(input: EvaluateInput = {}): Alert[] {
           'Legacy cutover window elapsed — run `scripts/drop-legacy.ts --confirm` to retire messages.db.',
       });
       setSystemState(LEGACY_DROP_REMINDER_KEY, nowIso, nowIso);
+    }
+  }
+
+  // --- SSE→brain ingest stale ---
+  // Fire only if we have a last-seen timestamp at all (fresh install with
+  // no ingest events yet shouldn't spam the owner). `emails_seen=0` plus
+  // `last_seen > 6h ago` means the stream WAS delivering and now isn't —
+  // that's the specific condition we want to surface.
+  const emailsSeen = getSystemCounter(EMAILS_SEEN_KEY, nowIso);
+  const lastIngestRow = getSystemState(LAST_INGEST_EVENT_KEY);
+  if (lastIngestRow && emailsSeen.count === 0) {
+    const lastMs = Date.parse(lastIngestRow.value);
+    if (
+      !Number.isNaN(lastMs) &&
+      nowMs - lastMs > INGEST_STALE_THRESHOLD_MS &&
+      canFire('brain_ingest_stale', nowMs)
+    ) {
+      const ageMin = Math.floor((nowMs - lastMs) / 60_000);
+      fired.push({
+        category: 'brain_ingest_stale',
+        severity: 'warn',
+        firedAt: nowIso,
+        message:
+          `SSE→brain ingest stale: 0 emails seen in last 24h; ` +
+          `last event at ${lastIngestRow.value} (${ageMin} min ago). ` +
+          `Check SSE connection + event bus.`,
+      });
+      markFired('brain_ingest_stale', nowIso);
     }
   }
 

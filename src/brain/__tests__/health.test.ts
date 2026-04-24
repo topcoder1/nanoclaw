@@ -121,6 +121,10 @@ describe('brain/health', () => {
         driftThreshold: 0.01,
       },
       legacy: { cutoverAt: '2026-04-23T00:00:00Z', cutoverDue: false },
+      ingest: {
+        emailsSeenByBrain24h: 7,
+        lastIngestEventAt: '2026-04-23T09:59:00Z',
+      },
       reEvalTriggers: [
         {
           id: 'monthly_budget',
@@ -138,6 +142,8 @@ describe('brain/health', () => {
     expect(msg).toMatch(/Latency/);
     expect(msg).toMatch(/Reconcile:/);
     expect(msg).toMatch(/Legacy cutover:/);
+    expect(msg).toMatch(/SSE ingest canary/);
+    expect(msg).toContain('emails seen (24h)=7');
     expect(msg).toMatch(/Re-eval triggers:\*? none fired/);
   });
 
@@ -165,6 +171,7 @@ describe('brain/health', () => {
       latency: { count: 0, p50: 0, p95: 0, p99: 0 },
       reconcile: { lastRunAt: null, lastStats: null, driftThreshold: 0.01 },
       legacy: { cutoverAt: null, cutoverDue: false },
+      ingest: { emailsSeenByBrain24h: 0, lastIngestEventAt: null },
       reEvalTriggers: [
         {
           id: 'monthly_budget',
@@ -178,5 +185,34 @@ describe('brain/health', () => {
     const msg = handleBrainHealthCommand({ reportFn: fake });
     expect(msg).toMatch(/Re-eval triggers fired/);
     expect(msg).toMatch(/monthly_budget/);
+  });
+
+  it('report includes SSE→brain ingest canary', async () => {
+    // Fresh DB → zero counter, no last-seen.
+    const r0 = getBrainHealthReport('2026-04-23T10:00:00Z');
+    expect(r0.ingest.emailsSeenByBrain24h).toBe(0);
+    expect(r0.ingest.lastIngestEventAt).toBeNull();
+
+    // Inject two canary bumps + last-seen.
+    const { incrementSystemCounter, setSystemState } = await import(
+      '../metrics.js'
+    );
+    incrementSystemCounter(
+      'emails_seen_by_brain_24h',
+      '2026-04-23T09:30:00Z',
+    );
+    incrementSystemCounter(
+      'emails_seen_by_brain_24h',
+      '2026-04-23T09:45:00Z',
+    );
+    setSystemState(
+      'last_ingest_event_at',
+      '2026-04-23T09:45:00Z',
+      '2026-04-23T09:45:00Z',
+    );
+
+    const r1 = getBrainHealthReport('2026-04-23T10:00:00Z');
+    expect(r1.ingest.emailsSeenByBrain24h).toBe(2);
+    expect(r1.ingest.lastIngestEventAt).toBe('2026-04-23T09:45:00Z');
   });
 });

@@ -24,6 +24,7 @@ import type Database from 'better-sqlite3';
 
 import { getBrainDb } from '../brain/db.js';
 import { markImportant } from '../brain/important.js';
+import { EMAILS_SEEN_KEY } from '../brain/metrics.js';
 import { AsyncWriteQueue } from '../brain/queue.js';
 import { recall, type RecallResult } from '../brain/retrieve.js';
 import { logger } from '../logger.js';
@@ -89,7 +90,39 @@ interface HomeStats {
    * one-shot backfills. Shown so the count isn't hidden, but labelled.
    */
   rawMigrated: number;
+  /**
+   * Canary counter: email.received events actually observed by brain
+   * ingest in the last 24h. In steady state this should equal
+   * `rawFreshLast24h`; a divergence means raw_events writes are failing
+   * or the event bus is dropping events.
+   */
+  emailsSeenByBrain24h: number;
   costMtdUsd: number;
+}
+
+const ROLLING_WINDOW_MS_HOME = 24 * 60 * 60 * 1000;
+
+/**
+ * Read the canary counter from the injected brain DB. Mirrors
+ * `getSystemCounter` in `src/brain/metrics.ts` but against the
+ * specific handle so tests don't need to rewire the singleton.
+ */
+function readEmailsSeenCounter(db: Database.Database, nowMs: number): number {
+  const row = db
+    .prepare(`SELECT value FROM system_state WHERE key = ?`)
+    .get(EMAILS_SEEN_KEY) as { value: string } | undefined;
+  if (!row) return 0;
+  let parsed: { count: number; resetAt: string } | null = null;
+  try {
+    parsed = JSON.parse(row.value);
+  } catch {
+    return 0;
+  }
+  if (!parsed || typeof parsed.count !== 'number') return 0;
+  const resetMs = Date.parse(parsed.resetAt);
+  if (!Number.isFinite(resetMs)) return 0;
+  if (nowMs - resetMs >= ROLLING_WINDOW_MS_HOME) return 0;
+  return parsed.count;
 }
 
 const MIGRATED_SOURCE_TYPES = [
@@ -143,6 +176,7 @@ function getHomeStats(db: Database.Database, nowMs: number): HomeStats {
     entityTotal: ent.n,
     rawFreshLast24h: fresh.n,
     rawMigrated: migrated.n,
+    emailsSeenByBrain24h: readEmailsSeenCounter(db, nowMs),
     costMtdUsd: cost.total,
   };
 }
@@ -251,6 +285,7 @@ ${reviewBanner}
     ${stats.kuSuperseded} superseded ·
     ${stats.entityTotal} entit${stats.entityTotal === 1 ? 'y' : 'ies'} ·
     ${stats.rawFreshLast24h} fresh (24h) ·
+    ${stats.emailsSeenByBrain24h} seen by brain (24h) ·
     ${stats.rawMigrated} migrated ·
     $${escapeHtml(costStr)} MTD
   </p>

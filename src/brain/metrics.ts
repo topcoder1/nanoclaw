@@ -112,6 +112,87 @@ export function getSystemState(
   return row ?? null;
 }
 
+// --- 24h rolling counters (stored in system_state) ------------------------
+
+/**
+ * Shape stored in `system_state.value` for 24h rolling counters. JSON so
+ * we can extend (e.g. per-source breakdowns) without a schema change.
+ */
+interface RollingCounter {
+  count: number;
+  /** ISO timestamp of the start of the current 24h window. */
+  resetAt: string;
+}
+
+const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Increment a named rolling 24h counter. If the current window has
+ * elapsed, the counter resets to 1 with a fresh `resetAt`. Persists in
+ * `system_state` so it survives process restart.
+ *
+ * Used by the SSE→brain ingest canary: a zero value at /brainhealth or
+ * the daily digest means no live email events reached ingestion, even
+ * if raw_events has plenty of migrated rows.
+ */
+export function incrementSystemCounter(
+  key: string,
+  nowIso?: string,
+): RollingCounter {
+  const iso = nowIso ?? new Date().toISOString();
+  const nowMs = Date.parse(iso);
+  const existing = getSystemState(key);
+  let next: RollingCounter;
+  if (!existing) {
+    next = { count: 1, resetAt: iso };
+  } else {
+    let parsed: RollingCounter | null = null;
+    try {
+      parsed = JSON.parse(existing.value) as RollingCounter;
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || nowMs - Date.parse(parsed.resetAt) >= ROLLING_WINDOW_MS) {
+      next = { count: 1, resetAt: iso };
+    } else {
+      next = { count: parsed.count + 1, resetAt: parsed.resetAt };
+    }
+  }
+  setSystemState(key, JSON.stringify(next), iso);
+  return next;
+}
+
+/**
+ * Read a rolling counter. Returns `{count: 0, resetAt: null}` if the
+ * window elapsed (a fresh read does NOT write — it just reports the
+ * current live value). Used by /brainhealth, the digest, and the alert
+ * dispatcher.
+ */
+export function getSystemCounter(
+  key: string,
+  nowIso?: string,
+): { count: number; resetAt: string | null } {
+  const iso = nowIso ?? new Date().toISOString();
+  const nowMs = Date.parse(iso);
+  const row = getSystemState(key);
+  if (!row) return { count: 0, resetAt: null };
+  let parsed: RollingCounter | null = null;
+  try {
+    parsed = JSON.parse(row.value) as RollingCounter;
+  } catch {
+    return { count: 0, resetAt: null };
+  }
+  if (!parsed || nowMs - Date.parse(parsed.resetAt) >= ROLLING_WINDOW_MS) {
+    return { count: 0, resetAt: null };
+  }
+  return { count: parsed.count, resetAt: parsed.resetAt };
+}
+
+/** Key for the SSE→brain ingest canary counter. */
+export const EMAILS_SEEN_KEY = 'emails_seen_by_brain_24h';
+/** Key for the last observed email.received event (ISO timestamp). */
+export const LAST_INGEST_EVENT_KEY = 'last_ingest_event_at';
+
 // --- Retrieval latency ring buffer ----------------------------------------
 
 const LATENCY_BUFFER_SIZE = 1000;

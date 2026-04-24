@@ -31,6 +31,12 @@ import {
   type Entity,
 } from './entities.js';
 import { extractPipeline, type Claim } from './extract.js';
+import {
+  EMAILS_SEEN_KEY,
+  LAST_INGEST_EVENT_KEY,
+  incrementSystemCounter,
+  setSystemState,
+} from './metrics.js';
 import { upsertKu } from './qdrant.js';
 import { AsyncWriteQueue } from './queue.js';
 import { _shutdownAccessQueue } from './retrieve.js';
@@ -283,6 +289,19 @@ export function startBrainIngest(): void {
           'email.received entry missing thread_id — skipping brain capture',
         );
         continue;
+      }
+      // Canary counter: bumped per email.received that reaches brain
+      // ingest, independent of the raw_events insert (which is deduped
+      // by UNIQUE(source_type, source_ref)). A zero value over 24h with
+      // fresh timestamps elsewhere = SSE wedged or event bus broken.
+      try {
+        incrementSystemCounter(EMAILS_SEEN_KEY, receivedAt);
+        setSystemState(LAST_INGEST_EVENT_KEY, receivedAt, receivedAt);
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'brain ingest: canary counter update failed',
+        );
       }
       const payloadJson = JSON.stringify(email);
       const row: RawEventRow = {

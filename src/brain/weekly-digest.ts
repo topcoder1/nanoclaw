@@ -26,9 +26,12 @@
 import { getBrainDb } from './db.js';
 import { escapeMarkdown } from './markdown.js';
 import {
+  EMAILS_SEEN_KEY,
+  LAST_INGEST_EVENT_KEY,
   getBrainCounts,
   getMonthlyCostUsd,
   getRollingDailyCostUsd,
+  getSystemCounter,
   getSystemState,
 } from './metrics.js';
 import { getBrainHealthReport } from './health.js';
@@ -60,6 +63,10 @@ export interface WeeklyDigestSummary {
   newEntityCount: number;
   deadLetterCount: number;
   staleUnprocessedCount: number;
+  /** SSE→brain canary: email.received events actually seen in last 24h. */
+  emailsSeenByBrain24h: number;
+  /** ISO of the most recent email.received event. */
+  lastIngestEventAt: string | null;
   firedTriggers: string[];
   reconcileStats: unknown | null;
 }
@@ -157,6 +164,9 @@ export function collectWeeklyDigest(
     .filter((t) => t.fired)
     .map((t) => t.id);
 
+  const emailsSeen = getSystemCounter(EMAILS_SEEN_KEY, nowIso);
+  const lastIngest = getSystemState(LAST_INGEST_EVENT_KEY);
+
   return {
     windowStartIso: startIso,
     windowEndIso: nowIso,
@@ -170,6 +180,8 @@ export function collectWeeklyDigest(
     newEntityCount: newEntities,
     deadLetterCount: counts.deadLetterCandidates,
     staleUnprocessedCount: staleUnprocessed,
+    emailsSeenByBrain24h: emailsSeen.count,
+    lastIngestEventAt: lastIngest?.value ?? null,
     firedTriggers,
     reconcileStats,
   };
@@ -204,6 +216,10 @@ export function formatWeeklyDigestMarkdown(
   lines.push(
     `\n*Ingestion (${windowLabel}):* ${s.ingestedRawEvents} raw events  ` +
       `(${s.processedRawEvents} processed, ${ingestPct.toFixed(1)}%)`,
+  );
+  lines.push(
+    `\n*SSE canary:* emails seen by brain (24h)=${s.emailsSeenByBrain24h}  ` +
+      `last=${s.lastIngestEventAt ?? 'never'}`,
   );
 
   if (s.topRetrievedKus.length > 0) {
