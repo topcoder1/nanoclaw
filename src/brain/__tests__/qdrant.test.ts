@@ -24,9 +24,13 @@ import {
   _setQdrantClientForTest,
   BRAIN_COLLECTION,
   ensureBrainCollection,
+  kuPointId,
   searchSemantic,
   upsertKu,
 } from '../qdrant.js';
+
+const UUID_V5_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe('brain/qdrant', () => {
   let fake: ReturnType<typeof makeFakeClient>;
@@ -60,10 +64,12 @@ describe('brain/qdrant', () => {
     });
   });
 
-  it('upsertKu forwards kuId, vector, and payload', async () => {
+  it('upsertKu derives a UUIDv5 point id and carries the ULID in payload.ku_id', async () => {
     fake.upsert.mockResolvedValue({});
+    // A realistic ULID (26-char Crockford Base32).
+    const ulid = '01HYZ0000000000000000000AB';
     await upsertKu({
-      kuId: 'KU-1',
+      kuId: ulid,
       vector: [0.1, 0.2, 0.3],
       payload: {
         account: 'work',
@@ -77,18 +83,24 @@ describe('brain/qdrant', () => {
     expect(fake.upsert).toHaveBeenCalledTimes(1);
     const [coll, payload] = fake.upsert.mock.calls[0];
     expect(coll).toBe(BRAIN_COLLECTION);
-    expect(payload.points[0].id).toBe('KU-1');
+    // Point id is UUIDv5, not the raw ULID.
+    expect(payload.points[0].id).toMatch(UUID_V5_RE);
+    expect(payload.points[0].id).not.toBe(ulid);
+    // Derivation is deterministic.
+    expect(payload.points[0].id).toBe(kuPointId(ulid));
     expect(payload.points[0].vector).toEqual([0.1, 0.2, 0.3]);
     expect(payload.points[0].payload.model_version).toBe(
       'nomic-embed-text-v1.5:768',
     );
     expect(payload.points[0].payload.account).toBe('work');
+    // Logical ULID is preserved in the payload so searchSemantic can map back.
+    expect(payload.points[0].payload.ku_id).toBe(ulid);
   });
 
   it('upsertKu defaults model_version when caller omits it', async () => {
     fake.upsert.mockResolvedValue({});
     await upsertKu({
-      kuId: 'KU-2',
+      kuId: '01HYZ0000000000000000000CD',
       vector: [0, 0, 0],
       payload: {
         account: 'work',
@@ -130,12 +142,14 @@ describe('brain/qdrant', () => {
     expect(must.some((m) => m.key === 'account')).toBe(true);
   });
 
-  it('searchSemantic maps Qdrant hits to {id, score, payload}', async () => {
+  it('searchSemantic maps Qdrant UUID ids back to payload.ku_id (logical ULID)', async () => {
+    const ulid = '01HYZ0000000000000000000AB';
     fake.search.mockResolvedValue([
       {
-        id: 'KU-A',
+        id: kuPointId(ulid), // Qdrant returns the UUIDv5 we wrote
         score: 0.91,
         payload: {
+          ku_id: ulid,
           account: 'work',
           model_version: 'nomic-embed-text-v1.5:768',
           source_type: 'email',
@@ -150,7 +164,8 @@ describe('brain/qdrant', () => {
       5,
     );
     expect(hits).toHaveLength(1);
-    expect(hits[0].id).toBe('KU-A');
+    // Caller sees the logical ULID, not the UUIDv5.
+    expect(hits[0].id).toBe(ulid);
     expect(hits[0].score).toBeCloseTo(0.91);
     expect(hits[0].payload.source_type).toBe('email');
   });

@@ -11,6 +11,7 @@
  */
 
 import { QdrantClient } from '@qdrant/js-client-rest';
+import { v5 as uuidv5 } from 'uuid';
 
 import { QDRANT_URL } from '../config.js';
 import { logger } from '../logger.js';
@@ -22,6 +23,19 @@ import { EMBEDDING_DIMS, getEmbeddingModelVersion } from './embed.js';
 // keep the form close to the design. Example:
 //   ku_nomic-embed-text-v1.5_768
 export const BRAIN_COLLECTION = `ku_nomic-embed-text-v1.5_${EMBEDDING_DIMS}`;
+
+// Qdrant REST API only accepts point IDs as uint64 or UUID — ULIDs are
+// rejected as 4xx. We derive a deterministic UUIDv5 from the ULID (kuId)
+// for the Qdrant point ID and keep the original ULID in the payload under
+// `ku_id` so callers can still query back by the logical KU id.
+// Namespace is the RFC 4122 DNS namespace — any fixed UUID works; the
+// standard DNS one is chosen so the derivation is reproducible across
+// processes and versions.
+const KU_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+
+export function kuPointId(kuId: string): string {
+  return uuidv5(kuId, KU_NAMESPACE);
+}
 
 export interface KuPayload {
   account: 'personal' | 'work';
@@ -96,19 +110,24 @@ export async function ensureBrainCollection(): Promise<void> {
  * Upsert a single KU vector to Qdrant. The payload MUST carry model_version
  * so retrieval can filter by it. We default it from `getEmbeddingModelVersion()`
  * if the caller forgets — cheaper than silently writing an unfilterable point.
+ *
+ * The Qdrant point ID is a UUIDv5 derived deterministically from the ULID
+ * (see `kuPointId`); the original ULID is preserved in `payload.ku_id` so
+ * searches can map results back to the logical KU id.
  */
 export async function upsertKu(input: UpsertKuInput): Promise<void> {
   const c = getClient();
   if (!c) return;
   const payload: KuPayload = {
     ...input.payload,
+    ku_id: input.kuId,
     model_version: input.payload.model_version ?? getEmbeddingModelVersion(),
   };
   await c.upsert(BRAIN_COLLECTION, {
     wait: true,
     points: [
       {
-        id: input.kuId,
+        id: kuPointId(input.kuId),
         vector: input.vector,
         payload: payload as Record<string, unknown>,
       },
@@ -150,9 +169,20 @@ export async function searchSemantic(
     payload?: Record<string, unknown> | null;
   }>;
 
-  return results.map((r) => ({
-    id: String(r.id),
-    score: r.score,
-    payload: (r.payload ?? {}) as KuPayload,
-  }));
+  return results
+    .map((r) => {
+      const payload = (r.payload ?? {}) as KuPayload;
+      // The Qdrant point id is a UUIDv5 — map back to the logical ULID
+      // carried in payload.ku_id. If ku_id is missing (legacy/bad point),
+      // fall back to the UUID so the caller at least gets a stable string.
+      const logicalId =
+        typeof payload.ku_id === 'string' && payload.ku_id.length > 0
+          ? payload.ku_id
+          : String(r.id);
+      return {
+        id: logicalId,
+        score: r.score,
+        payload,
+      };
+    });
 }
