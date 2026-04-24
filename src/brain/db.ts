@@ -45,6 +45,34 @@ function applySchema(database: Database.Database): void {
   database.pragma('synchronous = NORMAL');
   database.pragma('foreign_keys = ON');
   database.exec(loadSchemaSql());
+  applyColumnMigrations(database);
+}
+
+/**
+ * Idempotent column additions for pre-existing brain.db files.
+ *
+ * The base schema uses `CREATE TABLE IF NOT EXISTS`, so adding a new column
+ * to `schema.sql` does NOT propagate to databases that already exist. We
+ * ALTER TABLE ADD COLUMN in a try/catch — re-applying is a no-op because
+ * SQLite throws "duplicate column" when the column already exists.
+ *
+ * Same pattern used in src/db.ts for tracked_items/draft_originals etc.
+ */
+function applyColumnMigrations(database: Database.Database): void {
+  // Brain miniapp v1: `important` flag for boosting KUs in retrieval.
+  try {
+    database.exec(
+      `ALTER TABLE knowledge_units ADD COLUMN important INTEGER NOT NULL DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists — idempotent no-op */
+  }
+  // Index is idempotent via CREATE INDEX IF NOT EXISTS — safe to run every time
+  // so brain.db files that existed before the column was added still get the
+  // index once the column has been ALTERed in.
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_ku_important ON knowledge_units(important) WHERE important = 1`,
+  );
 }
 
 /**

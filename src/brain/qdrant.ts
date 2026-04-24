@@ -136,6 +136,27 @@ export async function upsertKu(input: UpsertKuInput): Promise<void> {
 }
 
 /**
+ * Merge extra fields into an existing Qdrant point's payload. Used by the
+ * brain miniapp's "mark important" feedback — we flip a single boolean on
+ * the point without re-embedding. No-op if QDRANT_URL is not set.
+ *
+ * Qdrant's `setPayload` preserves other payload fields; callers only need
+ * to pass the keys they want to add/overwrite.
+ */
+export async function setPayload(
+  kuId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const c = getClient();
+  if (!c) return;
+  await c.setPayload(BRAIN_COLLECTION, {
+    wait: true,
+    payload,
+    points: [kuPointId(kuId)],
+  });
+}
+
+/**
  * Semantic search against the brain collection. `filter.modelVersion` is
  * required — callers should pass `getEmbeddingModelVersion()`. Returns
  * a flat list of hits, each with a string id matching the KU row.

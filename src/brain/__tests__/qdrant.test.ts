@@ -17,6 +17,7 @@ function makeFakeClient() {
     createCollection: vi.fn(),
     upsert: vi.fn(),
     search: vi.fn(),
+    setPayload: vi.fn(),
   };
 }
 
@@ -26,6 +27,7 @@ import {
   ensureBrainCollection,
   kuPointId,
   searchSemantic,
+  setPayload,
   upsertKu,
 } from '../qdrant.js';
 
@@ -168,6 +170,27 @@ describe('brain/qdrant', () => {
     expect(hits[0].id).toBe(ulid);
     expect(hits[0].score).toBeCloseTo(0.91);
     expect(hits[0].payload.source_type).toBe('email');
+  });
+
+  it('setPayload targets the correct point id and merges payload', async () => {
+    fake.setPayload.mockResolvedValue({});
+    const ulid = '01HYZ0000000000000000000EF';
+    await setPayload(ulid, { important: true });
+    expect(fake.setPayload).toHaveBeenCalledTimes(1);
+    const [coll, args] = fake.setPayload.mock.calls[0];
+    expect(coll).toBe(BRAIN_COLLECTION);
+    expect(args.points[0]).toBe(kuPointId(ulid));
+    expect(args.payload).toEqual({ important: true });
+    expect(args.wait).toBe(true);
+  });
+
+  it('setPayload is a no-op when the Qdrant client is unavailable', async () => {
+    _setQdrantClientForTest(null);
+    // QDRANT_URL is likely unset in tests — falls through to no-op. If it
+    // *is* set we still exit cleanly since we don't assert anything beyond
+    // "no throw". The setPayload mock was on the prior fake client, which
+    // is now detached.
+    await expect(setPayload('anything', { x: 1 })).resolves.toBeUndefined();
   });
 
   it('upsertKu returns void without throwing', async () => {

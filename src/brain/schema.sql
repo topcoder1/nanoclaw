@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS knowledge_units (
   metadata          TEXT,              -- JSON
   access_count      INTEGER NOT NULL DEFAULT 0,
   last_accessed_at  TEXT,
-  needs_review      INTEGER NOT NULL DEFAULT 0
+  needs_review      INTEGER NOT NULL DEFAULT 0,
+  important         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_ku_account      ON knowledge_units(account, valid_from);
 CREATE INDEX IF NOT EXISTS idx_ku_source       ON knowledge_units(source_type, source_ref);
@@ -88,6 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_ku_topic        ON knowledge_units(topic_key) WHE
 CREATE INDEX IF NOT EXISTS idx_ku_superseded   ON knowledge_units(superseded_at) WHERE superseded_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ku_recorded     ON knowledge_units(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_ku_needs_review ON knowledge_units(needs_review) WHERE needs_review = 1;
+CREATE INDEX IF NOT EXISTS idx_ku_important    ON knowledge_units(important) WHERE important = 1;
 
 CREATE TABLE IF NOT EXISTS ku_entities (
   ku_id      TEXT NOT NULL REFERENCES knowledge_units(id),
