@@ -718,10 +718,14 @@ ${pager}`;
   <button class="feedback-btn reject" id="btn-reject"${isSuperseded ? ' disabled' : ''} title="Soft-delete (superseded_at). Hides this KU from agent retrieval.">${isSuperseded ? '🔴 Rejected' : '🔴 Reject'}</button>
   <span id="feedback-msg" class="meta" style="margin-left:10px"></span>
 </div>
-<p class="meta" style="margin-top:8px;font-size:12px">
-  <strong>Approve</strong> = promote (confidence → 1.0, clears review flag). KU is <em>already</em> retrievable by the agent.
-  <strong>Reject</strong> = soft-delete. Hides this KU from agent retrieval.
-</p>`;
+<aside class="kb-help">
+  <h3>What these buttons do</h3>
+  <ul>
+    <li><strong>⭐ Mark important</strong> — boosts this KU in recall ranking so the agent weights it higher when retrieving.</li>
+    <li><strong>🟢 Approve</strong> — promotes to <code>confidence = 1.0</code> and clears the <code>needs_review</code> flag. The KU is <em>already</em> retrievable; this locks it in.</li>
+    <li><strong>🔴 Reject</strong> — soft-delete (sets <code>superseded_at</code>). Hides this KU from agent retrieval; the row stays in the DB for audit.</li>
+  </ul>
+</aside>`;
 
     const body = `
 <h1>${escapeHtml((row.text.split('\n')[0] || row.id).slice(0, 120))}</h1>

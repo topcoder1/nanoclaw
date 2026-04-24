@@ -70,6 +70,12 @@ h2{font-size:15px;margin:24px 0 8px;color:#444}
 .searchbox button{background:#0366d6;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
 .searchbox button:hover{background:#0255b3}
 .badge{display:inline-block;background:#d9534f;color:#fff;border-radius:10px;font-size:11px;padding:1px 7px;margin-left:4px;font-weight:600}
+.kb-help{background:#f0f4f8;border:1px solid #d8e1ea;border-radius:10px;padding:12px 14px;margin-top:16px;font-size:13px;color:#3a4756;line-height:1.5}
+.kb-help h3{margin:0 0 8px;font-size:12px;color:#1f2a37;text-transform:uppercase;letter-spacing:0.05em;font-weight:600}
+.kb-help ul{list-style:none;padding:0;margin:0}
+.kb-help li{padding:3px 0;border:none}
+.kb-help strong{color:#111}
+.kb-help code{font-size:12px;background:#e1e8ef;padding:1px 4px;border-radius:3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 `;
 
 /**
@@ -132,8 +138,6 @@ ${body}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-    var desktop = tg.platform === 'tdesktop' || tg.platform === 'macos' || tg.platform === 'web';
-    if (desktop && typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
     var initData = tg.initData || '';
     if (initData) {
       var origFetch = window.fetch.bind(window);
