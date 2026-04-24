@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && cp src/brain/schema.sql dist/brain/schema.sql",
+    "build": "tsc && cp src/brain/schema.sql dist/brain/schema.sql && cp src/brain/golden-set.json dist/brain/golden-set.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

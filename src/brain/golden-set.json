@@ -1,0 +1,152 @@
+[
+  {
+    "id": 1,
+    "category": "recency",
+    "template": "What did {person} email me about in the last 7 days?",
+    "expected_capabilities": ["recency"]
+  },
+  {
+    "id": 2,
+    "category": "recency",
+    "template": "Show me the last 3 messages from {company_domain}.",
+    "expected_capabilities": ["recency"]
+  },
+  {
+    "id": 3,
+    "category": "recency",
+    "template": "Any urgent emails I haven't acted on?",
+    "expected_capabilities": ["recency"]
+  },
+  {
+    "id": 4,
+    "category": "historical",
+    "template": "What was the first email I received from {person}?",
+    "expected_capabilities": ["historical"]
+  },
+  {
+    "id": 5,
+    "category": "historical",
+    "template": "What did {company} say about {topic} before {date}?",
+    "expected_capabilities": ["historical"]
+  },
+  {
+    "id": 6,
+    "category": "historical",
+    "template": "When did I first hear about {project}?",
+    "expected_capabilities": ["historical"]
+  },
+  {
+    "id": 7,
+    "category": "entity_lookup",
+    "template": "Who is {person}?",
+    "expected_capabilities": ["entity_lookup"]
+  },
+  {
+    "id": 8,
+    "category": "entity_lookup",
+    "template": "What is {company}'s domain and what deals are open with them?",
+    "expected_capabilities": ["entity_lookup"]
+  },
+  {
+    "id": 9,
+    "category": "entity_lookup",
+    "template": "What was {person}'s previous employer?",
+    "expected_capabilities": ["entity_lookup"]
+  },
+  {
+    "id": 10,
+    "category": "multi_hop",
+    "template": "Which projects is {person} involved in?",
+    "expected_capabilities": ["multi_hop"]
+  },
+  {
+    "id": 11,
+    "category": "multi_hop",
+    "template": "Who introduced me to {person}?",
+    "expected_capabilities": ["multi_hop"]
+  },
+  {
+    "id": 12,
+    "category": "multi_hop",
+    "template": "What do I know about {company} through {person}?",
+    "expected_capabilities": ["multi_hop"]
+  },
+  {
+    "id": 13,
+    "category": "bitemporal",
+    "template": "What did I know about {company} on {past_date}?",
+    "expected_capabilities": ["bitemporal"]
+  },
+  {
+    "id": 14,
+    "category": "bitemporal",
+    "template": "Find contradictions in what {person} told me.",
+    "expected_capabilities": ["bitemporal"]
+  },
+  {
+    "id": 15,
+    "category": "bitemporal",
+    "template": "How has {company}'s position on {topic} changed over time?",
+    "expected_capabilities": ["bitemporal"]
+  },
+  {
+    "id": 16,
+    "category": "cross_source",
+    "template": "Which Gong calls and emails both mention {person}?",
+    "expected_capabilities": ["cross_source"]
+  },
+  {
+    "id": 17,
+    "category": "cross_source",
+    "template": "What deals am I working on with {company}?",
+    "expected_capabilities": ["cross_source"]
+  },
+  {
+    "id": 18,
+    "category": "cross_source",
+    "template": "Find mentions of {competitor} across all sources.",
+    "expected_capabilities": ["cross_source"]
+  },
+  {
+    "id": 19,
+    "category": "precision",
+    "template": "What was the exact dollar amount in the {company} quote?",
+    "expected_capabilities": ["precision"]
+  },
+  {
+    "id": 20,
+    "category": "precision",
+    "template": "What was the first commitment I made to {person}?",
+    "expected_capabilities": ["precision"]
+  },
+  {
+    "id": 21,
+    "category": "fuzzy",
+    "template": "That thing I saw about LLM quantization.",
+    "expected_capabilities": ["fuzzy"]
+  },
+  {
+    "id": 22,
+    "category": "fuzzy",
+    "template": "The article about sales pipeline optimization.",
+    "expected_capabilities": ["fuzzy"]
+  },
+  {
+    "id": 23,
+    "category": "negation",
+    "template": "Emails from {company} NOT about pricing.",
+    "expected_capabilities": ["negation"]
+  },
+  {
+    "id": 24,
+    "category": "negation",
+    "template": "Messages mentioning both {topic_a} and {topic_b}.",
+    "expected_capabilities": ["negation"]
+  },
+  {
+    "id": 25,
+    "category": "negation",
+    "template": "Newsletters about {topic} but not from {excluded_sender}.",
+    "expected_capabilities": ["negation"]
+  }
+]
