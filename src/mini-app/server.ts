@@ -260,7 +260,6 @@ li a{color:#0366d6;text-decoration:none}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-    if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
   } catch(_) { /* non-Telegram context */ }
 })();
 </script>
