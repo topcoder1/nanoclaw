@@ -49,6 +49,7 @@ vi.mock('../qdrant.js', () => qdrantMock);
 vi.mock('../rerank.js', () => rerankMock);
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
+import { stopBrainIngest } from '../ingest.js';
 import {
   _shutdownAccessQueue,
   accessScore,
@@ -212,6 +213,33 @@ describe('brain/retrieve — end-to-end', () => {
       .get() as { access_count: number; last_accessed_at: string | null };
     expect(row.access_count).toBe(1);
     expect(row.last_accessed_at).not.toBeNull();
+  });
+
+  it('stopBrainIngest drains the access-bump queue so shutdown flushes pending UPDATEs', async () => {
+    const db = getBrainDb();
+    const now = Date.now();
+    const recent = new Date(now - 1000).toISOString();
+    seedKu(db, 'Q', 'shutdown test', recent, 0);
+
+    qdrantMock.searchSemantic.mockResolvedValue([
+      { id: 'Q', score: 0.9, payload: {} },
+    ]);
+    rerankMock.rerank.mockImplementation(async (_q, cands) =>
+      cands.map((c: { id: string; text: string }) => ({
+        id: c.id,
+        text: c.text,
+        score: 0.9,
+      })),
+    );
+
+    await recall('shutdown', { limit: 5, nowMs: now });
+    // Do NOT call _shutdownAccessQueue here — we're asserting that
+    // stopBrainIngest itself drains the lazy access queue.
+    await stopBrainIngest();
+    const row = db
+      .prepare(`SELECT access_count FROM knowledge_units WHERE id = 'Q'`)
+      .get() as { access_count: number };
+    expect(row.access_count).toBe(1);
   });
 
   it('recency decay affects final ranking', async () => {

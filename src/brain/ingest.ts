@@ -32,6 +32,7 @@ import {
 import { extractPipeline, type Claim } from './extract.js';
 import { upsertKu } from './qdrant.js';
 import { AsyncWriteQueue } from './queue.js';
+import { _shutdownAccessQueue } from './retrieve.js';
 import { newId } from './ulid.js';
 
 // --- Raw event capture (P0, preserved) ------------------------------------
@@ -310,4 +311,8 @@ export async function stopBrainIngest(): Promise<void> {
   // Entities has its own write-serializer; drain it here so unit tests
   // don't hang on its flushTimer.
   await _shutdownEntityQueue();
+  // retrieve.ts lazily creates an access-bump queue on the first recall();
+  // drain it too so SIGTERM → process.exit doesn't drop in-flight
+  // UPDATEs of access_count / last_accessed_at.
+  await _shutdownAccessQueue();
 }
