@@ -20,10 +20,7 @@ import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
 import { createBrainRoutes, createBrainApiRoutes } from './brain-routes.js';
 import { createTelegramAuthMiddleware } from './telegram-auth.js';
-import {
-  getTelegramBotToken,
-  TELEGRAM_INITDATA_REQUIRED,
-} from '../config.js';
+import { getTelegramBotToken, TELEGRAM_INITDATA_REQUIRED } from '../config.js';
 import {
   detectSignUrl,
   isSignInvite,
@@ -260,6 +257,11 @@ li a{color:#0366d6;text-decoration:none}
     tg.ready();
     tg.expand();
     if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    // Desktop only: requestFullscreen() fills the Telegram app window (no
+    // system status bar to cover). On mobile it would hide the status bar,
+    // which the user rejected.
+    var desktop = tg.platform === 'tdesktop' || tg.platform === 'macos' || tg.platform === 'web';
+    if (desktop && typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
   } catch(_) { /* non-Telegram context */ }
 })();
 </script>

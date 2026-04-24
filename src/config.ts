@@ -198,9 +198,7 @@ export const BRAIN_DIGEST_CADENCE: 'weekly' | 'daily' = (() => {
  * can set it via env without rebuilding the module. Returns '' when unset.
  */
 export function getTelegramBotToken(): string {
-  return (
-    process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || ''
-  );
+  return process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 }
 
 /**

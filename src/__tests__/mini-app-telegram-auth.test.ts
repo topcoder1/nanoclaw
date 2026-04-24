@@ -135,9 +135,7 @@ describe('verifyInitData', () => {
 describe('createTelegramAuthMiddleware', () => {
   function buildApp(token = BOT_TOKEN): express.Express {
     const app = express();
-    app.use(
-      createTelegramAuthMiddleware({ getBotToken: () => token }),
-    );
+    app.use(createTelegramAuthMiddleware({ getBotToken: () => token }));
     app.get('/ok', (_req, res) => res.json({ ok: true }));
     return app;
   }
@@ -146,9 +144,7 @@ describe('createTelegramAuthMiddleware', () => {
     // HTML browser navigation (Accept: text/html) gets the bootstrap page
     // that reads Telegram.WebApp.initData from the URL fragment and reloads
     // with ?tgWebAppData=… so the next request carries the payload.
-    const res = await request(buildApp())
-      .get('/ok')
-      .set('Accept', 'text/html');
+    const res = await request(buildApp()).get('/ok').set('Accept', 'text/html');
     expect(res.status).toBe(200);
     expect(res.text).toContain('Telegram.WebApp');
     expect(res.text).toContain('tgWebAppData');

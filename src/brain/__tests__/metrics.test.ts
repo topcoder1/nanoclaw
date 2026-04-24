@@ -261,16 +261,10 @@ describe('brain/metrics', () => {
     it('increments within the 24h window', () => {
       const base = '2026-04-23T10:00:00Z';
       expect(incrementSystemCounter('k', base).count).toBe(1);
-      expect(
-        incrementSystemCounter('k', '2026-04-23T11:00:00Z').count,
-      ).toBe(2);
-      expect(
-        incrementSystemCounter('k', '2026-04-23T23:00:00Z').count,
-      ).toBe(3);
+      expect(incrementSystemCounter('k', '2026-04-23T11:00:00Z').count).toBe(2);
+      expect(incrementSystemCounter('k', '2026-04-23T23:00:00Z').count).toBe(3);
       // Reading inside the window sees 3.
-      expect(
-        getSystemCounter('k', '2026-04-23T23:30:00Z').count,
-      ).toBe(3);
+      expect(getSystemCounter('k', '2026-04-23T23:30:00Z').count).toBe(3);
     });
 
     it('resets when the 24h window has elapsed', () => {
