@@ -1355,6 +1355,7 @@ export function createBrainApiRoutes(
       .prepare(`SELECT important FROM knowledge_units WHERE id = ?`)
       .get(id) as { important: number } | undefined;
     if (!row) {
+      logger.warn({ id }, '/api/brain/ku/:id/important 404 — ku_not_found');
       res.status(404).json({ error: 'ku_not_found' });
       return;
     }
@@ -1379,6 +1380,7 @@ export function createBrainApiRoutes(
       .prepare(`SELECT id FROM knowledge_units WHERE id = ?`)
       .get(id) as { id: string } | undefined;
     if (!row) {
+      logger.warn({ id }, '/api/brain/ku/:id/approve 404 — ku_not_found');
       res.status(404).json({ error: 'ku_not_found' });
       return;
     }
@@ -1403,6 +1405,7 @@ export function createBrainApiRoutes(
       .prepare(`SELECT id FROM knowledge_units WHERE id = ?`)
       .get(id) as { id: string } | undefined;
     if (!row) {
+      logger.warn({ id }, '/api/brain/ku/:id/reject 404 — ku_not_found');
       res.status(404).json({ error: 'ku_not_found' });
       return;
     }
