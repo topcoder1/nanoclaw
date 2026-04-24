@@ -22,7 +22,10 @@ import { QDRANT_URL, STORE_DIR } from '../config.js';
 import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
+import { setSystemState } from './metrics.js';
 import { BRAIN_COLLECTION } from './qdrant.js';
+
+export const LAST_BACKUP_FAILED_KEY = 'last_backup_failed_at';
 
 // Directories are functions (not constants) so tests that mock STORE_DIR
 // via a getter see the active value at call time rather than at module
@@ -208,12 +211,14 @@ export function startNightlyBackupSchedule(): () => void {
     if (hour === 2 && min < 15 && lastBrainDay !== today) {
       lastBrainDay = today;
       void backupBrainDb()
-        .catch((err) =>
+        .catch((err) => {
+          const iso = new Date().toISOString();
+          setSystemState(LAST_BACKUP_FAILED_KEY, iso, iso);
           logger.warn(
             { err: err instanceof Error ? err.message : String(err) },
             'scheduled brain.db backup failed',
-          ),
-        )
+          );
+        })
         .finally(() => {
           pruneOldBackups(getBrainBackupDir(), BRAIN_BACKUP_RETENTION_DAYS);
         });
@@ -221,12 +226,14 @@ export function startNightlyBackupSchedule(): () => void {
     if (hour === 2 && min >= 15 && lastSnapshotDay !== today) {
       lastSnapshotDay = today;
       void backupQdrant()
-        .catch((err) =>
+        .catch((err) => {
+          const iso = new Date().toISOString();
+          setSystemState(LAST_BACKUP_FAILED_KEY, iso, iso);
           logger.warn(
             { err: err instanceof Error ? err.message : String(err) },
             'scheduled Qdrant snapshot failed',
-          ),
-        )
+          );
+        })
         .finally(() => {
           pruneOldBackups(getQdrantSnapshotDir(), QDRANT_SNAPSHOT_RETENTION_DAYS);
         });

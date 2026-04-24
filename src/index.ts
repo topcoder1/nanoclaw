@@ -96,6 +96,7 @@ import {
   initKnowledgeStore,
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
+import { startAlertsSchedule } from './brain/alert-dispatcher.js';
 import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
@@ -1298,7 +1299,10 @@ async function main(): Promise<void> {
   const stopReconcileSched = startReconcileSchedule();
   const stopBackupSched = startNightlyBackupSchedule();
   const stopProviderProbe = startProviderProbe();
-  const stopDigestSched = startWeeklyDigestSchedule((md) => {
+  // Shared Telegram deliverer reused by both the weekly digest and the
+  // alert dispatcher — a single code path for "send brain markdown to the
+  // main group, fall back to an info log when no channel is wired".
+  const deliverBrainMessage = (label: string) => (md: string): void => {
     const primary = channels.find((c) => c.name.startsWith('telegram'));
     const mainGroup = Object.entries(registeredGroups).find(
       ([, g]) => g.isMain,
@@ -1308,16 +1312,26 @@ async function main(): Promise<void> {
         .sendMessage(mainGroup[0], md)
         .catch((err) =>
           logger.warn(
-            { err: err instanceof Error ? err.message : String(err) },
-            'weekly digest delivery failed',
+            { err: err instanceof Error ? err.message : String(err), label },
+            'brain message delivery failed',
           ),
         );
     } else {
-      // No wired destination — log at info level so an ops operator running
-      // `grep 'Brain weekly digest'` still sees the content.
+      logger.info({ label, md }, 'brain message (no channel)');
+    }
+  };
+
+  const stopDigestSched = startWeeklyDigestSchedule((md) => {
+    const delivered = deliverBrainMessage('weekly-digest');
+    if (md) {
+      delivered(md);
+    } else {
+      // Safety: log a fallback preview using the formatter.
       logger.info({ digest: formatWeeklyDigestMarkdown() }, 'weekly digest (no channel)');
     }
   });
+
+  const stopAlertsSched = startAlertsSchedule(deliverBrainMessage('alert'));
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -1342,6 +1356,7 @@ async function main(): Promise<void> {
     stopBackupSched();
     stopProviderProbe();
     stopDigestSched();
+    stopAlertsSched();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

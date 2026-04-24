@@ -161,6 +161,9 @@ export async function reconcileQdrant(
     JSON.stringify(report),
     ranAt,
   );
+  // Also persist under the alert-dispatcher key so the scheduled
+  // dispatcher picks up drift without needing in-memory state.
+  setSystemState('last_reconcile_report', JSON.stringify(report), ranAt);
   return report;
 }
 
