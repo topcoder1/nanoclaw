@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 claw — NanoClaw CLI
-Run a NanoClaw agent container from the command line.
+Run a NanoClaw agent container from the command line, or query the brain.
 
 Usage:
   claw "What is 2+2?"
@@ -12,6 +12,13 @@ Usage:
   claw --list-groups
   echo "prompt text" | claw --pipe -g <channel_name>
   cat prompt.txt | claw --pipe
+
+Brain / second-brain subcommands:
+  claw know "stellar cyber pricing"         # search brain.db + SuperPilot KB
+  claw know "orphan vpn" --limit 20         # more hits
+  claw know "Q4 renewal" --brain-only       # skip SP lookup
+  claw know "Q4 renewal" --kb-only          # skip local brain
+  claw know "alice mentioned" --json        # raw JSON output
 """
 
 from __future__ import annotations
@@ -24,6 +31,9 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # ── Globals ─────────────────────────────────────────────────────────────────
@@ -41,17 +51,26 @@ def _find_nanoclaw_dir() -> Path:
 
     Resolution order:
     1. NANOCLAW_DIR env var
-    2. The directory containing this script (if it looks like a NanoClaw install)
-    3. ~/src/nanoclaw (legacy default)
+    2. Walk up from the script location until we find a dir with both
+       `store/` and `.env` — that's nanoclaw. Handles the script living deep
+       inside .claude/skills/claw/scripts/ (4 levels down) as well as a
+       shallower `scripts/` placement.
+    3. ~/dev/nanoclaw (current default)
+    4. ~/src/nanoclaw (legacy default)
     """
     if env := os.environ.get("NANOCLAW_DIR"):
         return Path(env).expanduser()
-    # If this script lives inside the NanoClaw tree (e.g. scripts/claw), walk up
     here = Path(__file__).resolve()
-    for parent in [here.parent, here.parent.parent]:
-        if (parent / "store" / "messages.db").exists() or (parent / ".env").exists():
+    for parent in here.parents:
+        if (parent / "store").is_dir() and (parent / ".env").exists():
             return parent
-    return Path.home() / "src" / "nanoclaw"
+        if parent == parent.parent:  # hit filesystem root
+            break
+    for candidate in (Path.home() / "dev" / "nanoclaw",
+                      Path.home() / "src" / "nanoclaw"):
+        if candidate.exists():
+            return candidate
+    return Path.home() / "dev" / "nanoclaw"
 
 NANOCLAW_DIR = _find_nanoclaw_dir()
 DB_PATH      = NANOCLAW_DIR / "store" / "messages.db"
@@ -270,9 +289,220 @@ def run_container(runtime: str, image: str, payload: dict,
         sys.exit(proc.returncode)
 
 
+# ── `claw know` — brain + SP KB search ────────────────────────────────────
+
+_BRAIN_DB_PATH = NANOCLAW_DIR / "store" / "brain.db"
+_KNOW_ENV_KEYS = ("NANOCLAW_SERVICE_TOKEN", "SUPERPILOT_API_URL")
+
+
+def _read_know_env(env_file: Path) -> dict:
+    """Read just the env keys `claw know` needs. Separate from read_secrets()
+    which filters on SECRET_KEYS (a different set)."""
+    out = {}
+    if not env_file.exists():
+        return out
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        if k in _KNOW_ENV_KEYS:
+            out[k] = v.strip()
+    return out
+
+
+def _fts_tokenize(q: str) -> str:
+    """Match retrieve.ts:ftsSearchTopN — OR-of-quoted tokens so arbitrary user
+    input is safe against FTS5 operators (AND, NOT, punctuation)."""
+    tokens = [t for t in q.strip().split() if t]
+    if not tokens:
+        return ""
+    return " OR ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens)
+
+
+def _normalize_bm25(bm25: float) -> float:
+    """BM25 in SQLite is negative-smaller-is-better, typically in [-20, 0].
+    Collapse to [0, 1] larger-better for merging with SP scores.
+    Heuristic: score = 1 / (1 + |bm25|); good separation in the common range."""
+    return 1.0 / (1.0 + abs(bm25))
+
+
+def _query_brain(query: str, limit: int, project: str | None) -> list[dict]:
+    if not _BRAIN_DB_PATH.exists():
+        dbg(f"brain.db not found at {_BRAIN_DB_PATH}")
+        return []
+    match = _fts_tokenize(query)
+    if not match:
+        return []
+    conn = sqlite3.connect(f"file:{_BRAIN_DB_PATH}?mode=ro", uri=True)
+    try:
+        sql = """
+            SELECT ku.id, ku.text, ku.source_type, ku.source_ref, ku.account,
+                   bm25(ku_fts) AS bm25
+              FROM ku_fts
+              JOIN knowledge_units ku ON ku.rowid = ku_fts.rowid
+             WHERE ku_fts MATCH ?
+               AND ku.superseded_at IS NULL
+        """
+        params: list = [match]
+        if project:
+            # Simple substring match — brain stores tags as JSON arrays today;
+            # a strict containment check is overkill for v0.
+            sql += " AND (ku.tags IS NOT NULL AND ku.tags LIKE ?)"
+            params.append(f'%"project:{project}"%')
+        sql += " ORDER BY bm25 LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        ku_id, text, src_type, src_ref, account, bm25 = row
+        out.append({
+            "source": "brain",
+            "id": ku_id,
+            "title": (text or "").split("\n", 1)[0][:140],
+            "score": _normalize_bm25(bm25),
+            "meta": {
+                "source_type": src_type,
+                "source_ref": src_ref,
+                "account": account,
+                "bm25": bm25,
+            },
+        })
+    return out
+
+
+def _query_superpilot(query: str, limit: int, tags: str | None,
+                      api_url: str, token: str, timeout: float = 5.0) -> list[dict]:
+    # nanoclaw_bridge router is mounted at the app root (not under /api) —
+    # strip a trailing `/api` if the user's .env pointed at the generic api base.
+    base = api_url.rstrip("/")
+    if base.endswith("/api"):
+        base = base[:-4]
+    params = {"q": query, "limit": str(limit)}
+    if tags:
+        params["tags"] = tags
+    url = f"{base}/api/nanoclaw/kb/search?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={
+        "x-service-token": token,
+        "accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        dbg(f"SP KB search failed: {e}")
+        print(f"warning: SP KB unreachable ({e}); returning brain-only results",
+              file=sys.stderr)
+        return []
+    out = []
+    for r in body.get("results", []):
+        out.append({
+            "source": "kb",
+            "id": r.get("document_id", ""),
+            "title": r.get("title") or r.get("content_preview", "")[:140],
+            "score": float(r.get("relevance_score") or 0.0),
+            "meta": {
+                "content_preview": r.get("content_preview", ""),
+                "tags": r.get("tags") or [],
+            },
+        })
+    return out
+
+
+def _render_hit(hit: dict, width: int) -> str:
+    tag = "🧠 brain" if hit["source"] == "brain" else "📚 kb   "
+    score = f"{hit['score']:.2f}"
+    title = hit["title"].replace("\n", " ")
+    if len(title) > width:
+        title = title[: width - 1] + "…"
+    return f"{tag}  {score}  {title}"
+
+
+def cmd_know(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="claw know",
+                                description="Search brain.db + SuperPilot KB.")
+    p.add_argument("query", nargs="+", help="Search query (joined with spaces)")
+    p.add_argument("--limit", type=int, default=10,
+                   help="Results per source (default: 10)")
+    p.add_argument("--brain-only", action="store_true",
+                   help="Skip SuperPilot KB lookup")
+    p.add_argument("--kb-only", action="store_true",
+                   help="Skip local brain.db lookup")
+    p.add_argument("--project", help="Filter brain hits by project tag "
+                                     "(e.g. --project attaxion)")
+    p.add_argument("--tags", help="Pass through to SP KB as comma-separated tags")
+    p.add_argument("--json", action="store_true",
+                   help="Emit raw merged JSON instead of a formatted list")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Debug info on stderr")
+    args = p.parse_args(argv)
+
+    global VERBOSE
+    VERBOSE = args.verbose
+    query = " ".join(args.query).strip()
+    if not query:
+        print("error: empty query", file=sys.stderr)
+        return 2
+
+    hits: list[dict] = []
+    if not args.kb_only:
+        hits.extend(_query_brain(query, args.limit, args.project))
+
+    if not args.brain_only:
+        env = _read_know_env(ENV_FILE)
+        token = env.get("NANOCLAW_SERVICE_TOKEN", "").split(",")[0].split("@")[0]
+        api_url = env.get("SUPERPILOT_API_URL",
+                          "https://app.inboxsuperpilot.com/api")
+        if not token:
+            print("warning: NANOCLAW_SERVICE_TOKEN missing in .env; "
+                  "skipping SP KB lookup", file=sys.stderr)
+        else:
+            hits.extend(_query_superpilot(
+                query, args.limit, args.tags, api_url, token,
+            ))
+
+    hits.sort(key=lambda h: h["score"], reverse=True)
+
+    if args.json:
+        print(json.dumps({"query": query, "results": hits}, indent=2))
+        return 0
+
+    if not hits:
+        print(f"no matches for {query!r}")
+        return 0
+
+    # Cap at 2 × limit total so a noisy source can't crowd the other out.
+    cap = args.limit * 2
+    try:
+        width = max(40, os.get_terminal_size().columns - 22)
+    except OSError:
+        width = 100
+    brain_n = sum(1 for h in hits if h["source"] == "brain")
+    kb_n = sum(1 for h in hits if h["source"] == "kb")
+    print(f"\n{len(hits)} hit(s) for {query!r}  "
+          f"(brain={brain_n}, kb={kb_n})\n", file=sys.stderr)
+    for hit in hits[:cap]:
+        print(_render_hit(hit, width))
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+_SUBCOMMANDS = {"know"}
+
+
 def main():
+    # Subcommand dispatch (runs before argparse so `claw know "x y z"` works
+    # without conflicting with the bare-prompt positional arg).
+    argv = sys.argv[1:]
+    if argv and argv[0] in _SUBCOMMANDS:
+        sub = argv[0]
+        if sub == "know":
+            sys.exit(cmd_know(argv[1:]))
+
     parser = argparse.ArgumentParser(
         prog="claw",
         description="Run a NanoClaw agent from the command line.",
