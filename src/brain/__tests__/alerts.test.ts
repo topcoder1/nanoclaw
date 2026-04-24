@@ -202,15 +202,12 @@ describe('brain/alerts', () => {
       // System_state has no `last_ingest_event_at` key — we don't want to
       // alert on a boot-time blank slate.
       const fired = evaluateAlerts({ nowIso: '2026-04-23T10:00:00Z' });
-      expect(fired.map((a) => a.category)).not.toContain(
-        'brain_ingest_stale',
-      );
+      expect(fired.map((a) => a.category)).not.toContain('brain_ingest_stale');
     });
 
     it('does NOT fire when emails were seen in the last 24h', async () => {
-      const { setSystemState: sss, incrementSystemCounter } = await import(
-        '../metrics.js'
-      );
+      const { setSystemState: sss, incrementSystemCounter } =
+        await import('../metrics.js');
       // Last event was 7h ago (stale by the 6h threshold) BUT a later
       // counter bump within the 24h window keeps emails_seen > 0.
       const lastEvent = '2026-04-23T03:00:00Z';
@@ -220,9 +217,7 @@ describe('brain/alerts', () => {
         '2026-04-23T03:00:00Z',
       );
       const fired = evaluateAlerts({ nowIso: '2026-04-23T10:00:00Z' });
-      expect(fired.map((a) => a.category)).not.toContain(
-        'brain_ingest_stale',
-      );
+      expect(fired.map((a) => a.category)).not.toContain('brain_ingest_stale');
     });
 
     it('throttles to 1/hour even when stale condition persists', async () => {
@@ -232,9 +227,7 @@ describe('brain/alerts', () => {
       const first = evaluateAlerts({ nowIso: '2026-04-23T10:00:00Z' });
       expect(first.map((a) => a.category)).toContain('brain_ingest_stale');
       const soon = evaluateAlerts({ nowIso: '2026-04-23T10:30:00Z' });
-      expect(soon.map((a) => a.category)).not.toContain(
-        'brain_ingest_stale',
-      );
+      expect(soon.map((a) => a.category)).not.toContain('brain_ingest_stale');
       // Past the 1h throttle — refires.
       const later = evaluateAlerts({ nowIso: '2026-04-23T11:30:00Z' });
       expect(later.map((a) => a.category)).toContain('brain_ingest_stale');

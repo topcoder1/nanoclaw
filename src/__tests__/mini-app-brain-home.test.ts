@@ -152,9 +152,7 @@ describe('Brain miniapp — skeleton', () => {
 
   it('home page splits raw_events into fresh (email, 24h) vs migrated buckets', async () => {
     const nowIso = new Date().toISOString();
-    const old = new Date(
-      Date.now() - 48 * 60 * 60 * 1000,
-    ).toISOString();
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     brainDb
       .prepare(
         `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)

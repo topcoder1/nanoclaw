@@ -194,17 +194,10 @@ describe('brain/health', () => {
     expect(r0.ingest.lastIngestEventAt).toBeNull();
 
     // Inject two canary bumps + last-seen.
-    const { incrementSystemCounter, setSystemState } = await import(
-      '../metrics.js'
-    );
-    incrementSystemCounter(
-      'emails_seen_by_brain_24h',
-      '2026-04-23T09:30:00Z',
-    );
-    incrementSystemCounter(
-      'emails_seen_by_brain_24h',
-      '2026-04-23T09:45:00Z',
-    );
+    const { incrementSystemCounter, setSystemState } =
+      await import('../metrics.js');
+    incrementSystemCounter('emails_seen_by_brain_24h', '2026-04-23T09:30:00Z');
+    incrementSystemCounter('emails_seen_by_brain_24h', '2026-04-23T09:45:00Z');
     setSystemState(
       'last_ingest_event_at',
       '2026-04-23T09:45:00Z',

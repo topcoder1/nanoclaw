@@ -20,10 +20,7 @@ import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
 import { createBrainRoutes, createBrainApiRoutes } from './brain-routes.js';
 import { createTelegramAuthMiddleware } from './telegram-auth.js';
-import {
-  getTelegramBotToken,
-  TELEGRAM_INITDATA_REQUIRED,
-} from '../config.js';
+import { getTelegramBotToken, TELEGRAM_INITDATA_REQUIRED } from '../config.js';
 import {
   detectSignUrl,
   isSignInvite,
