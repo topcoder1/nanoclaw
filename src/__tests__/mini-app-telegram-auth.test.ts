@@ -142,13 +142,27 @@ describe('createTelegramAuthMiddleware', () => {
     return app;
   }
 
-  it('401 when no initData provided', async () => {
-    const res = await request(buildApp()).get('/ok');
+  it('serves fragment-reading bootstrap HTML on GET page nav without initData', async () => {
+    // HTML browser navigation (Accept: text/html) gets the bootstrap page
+    // that reads Telegram.WebApp.initData from the URL fragment and reloads
+    // with ?tgWebAppData=… so the next request carries the payload.
+    const res = await request(buildApp())
+      .get('/ok')
+      .set('Accept', 'text/html');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Telegram.WebApp');
+    expect(res.text).toContain('tgWebAppData');
+  });
+
+  it('401 JSON on API call without initData', async () => {
+    const res = await request(buildApp())
+      .get('/ok')
+      .set('Accept', 'application/json');
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('missing_initdata');
   });
 
-  it('401 when hash tampered', async () => {
+  it('401 JSON on API call with tampered hash', async () => {
     const raw = signInitData({
       auth_date: String(Math.floor(Date.now() / 1000)),
       user: JSON.stringify({ id: 1 }),
@@ -159,9 +173,21 @@ describe('createTelegramAuthMiddleware', () => {
 
     const res = await request(buildApp())
       .get('/ok')
+      .set('Accept', 'application/json')
       .set('x-telegram-init-data', params.toString());
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('bad_hash');
+  });
+
+  it('bootstrap does NOT loop: HTML request WITH tgWebAppData but tampered hash → 401', async () => {
+    // Once the bootstrap has redirected with ?tgWebAppData=…, a subsequent
+    // failure is a real auth failure (forged payload, expired, etc.) and we
+    // return 401 instead of serving the bootstrap again.
+    const res = await request(buildApp())
+      .get('/ok')
+      .set('Accept', 'text/html')
+      .query({ tgWebAppData: 'garbage-no-hash' });
+    expect(res.status).toBe(401);
   });
 
   it('passes through with valid header initData', async () => {

@@ -146,10 +146,60 @@ declare global {
 }
 
 /**
+ * Minimal HTML page that reads `Telegram.WebApp.initData` from the URL
+ * fragment (the only place Telegram delivers it) and reloads the current
+ * URL with `?tgWebAppData=...` appended so the next request carries the
+ * payload as a query param — which the server can actually see, unlike
+ * fragments which browsers never send.
+ *
+ * Served on unauthenticated HTML GETs so the middleware can bootstrap
+ * auth on the very first page load. The reload is one-shot: if initData
+ * is already in the query string we skip the rewrite to avoid loops.
+ */
+const BOOTSTRAP_HTML = `<!doctype html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brain · authorizing…</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>body{font:14px -apple-system,system-ui,sans-serif;background:#f4f6f8;color:#666;padding:40px;text-align:center}</style>
+</head><body>
+Authorizing…
+<script>
+(function(){
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    var existing = new URLSearchParams(location.search).get('tgWebAppData');
+    if (existing) return; // already have it and still 401 → don't loop
+    var initData = tg && tg.initData;
+    if (!initData) {
+      document.body.innerText = 'Not in Telegram. Open this page from the Mini App.';
+      return;
+    }
+    var sep = location.search ? '&' : '?';
+    var next = location.pathname + location.search + sep +
+               'tgWebAppData=' + encodeURIComponent(initData) +
+               location.hash;
+    location.replace(next);
+  } catch(e) {
+    document.body.innerText = 'Auth bootstrap error: ' + String(e);
+  }
+})();
+</script>
+</body></html>`;
+
+/**
  * Express middleware that rejects requests lacking a valid Telegram
  * `initData` payload. Reads from either the `x-telegram-init-data` header
- * or the `tgWebAppData` query param (Telegram delivers it as a URL
- * fragment; the client forwards it to us via one of these).
+ * or the `tgWebAppData` query param.
+ *
+ * Telegram delivers initData in the URL **fragment** (`#tgWebAppData=…`),
+ * which browsers never send to the server. So the first GET of an HTML
+ * page has no initData. We serve a tiny bootstrap HTML that reads the
+ * fragment client-side and redirects to the same URL with the initData
+ * appended as a query param — from then on the middleware sees it and
+ * lets the user through.
+ *
+ * JSON API endpoints (`/api/*`) always 401 on failure — the browser JS
+ * wrapper in `brain-layout.ts` attaches the header on every fetch.
  *
  * On success, attaches `req.telegramUser`.
  */
@@ -167,6 +217,24 @@ export function createTelegramAuthMiddleware(
     const raw = headerVal ?? queryVal;
     const result = verifyInitData(raw, opts.getBotToken(), maxAgeSec, nowFn());
     if (!result.ok) {
+      // GET HTML pages get the fragment-reading bootstrap ONLY when the
+      // client hasn't already supplied initData (i.e. truly first navigation
+      // from Telegram). If initData WAS supplied but failed verification
+      // (tampered, expired, wrong token) we 401 — the bootstrap redirecting
+      // back into a failing payload would infinite-loop.
+      const hasAttemptedAuth = raw !== undefined && raw !== '';
+      const isHtmlNav =
+        req.method === 'GET' &&
+        !req.path.startsWith('/api/') &&
+        (req.accepts(['html', 'json']) === 'html' ||
+          // Some Telegram WebView builds omit Accept — default to HTML
+          // if the Sec-Fetch-Dest header hints at document navigation.
+          req.header('sec-fetch-dest') === 'document' ||
+          !req.header('accept'));
+      if (isHtmlNav && !hasAttemptedAuth) {
+        res.status(200).type('html').send(BOOTSTRAP_HTML);
+        return;
+      }
       res.status(401).json({ error: result.error });
       return;
     }
