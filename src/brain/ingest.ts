@@ -1,12 +1,18 @@
 /**
- * Brain ingestion — P0 capture only (v2 §12).
+ * Brain ingestion pipeline (v2 §8).
  *
- * Subscribes to `email.received` on the event bus. Writes one row to
- * `raw_events` per inbound email thread. Idempotent on (source_type, source_ref)
- * via UNIQUE — a second event for the same Gmail thread_id is skipped silently.
+ * P0 behavior (preserved): capture every inbound email into `raw_events`
+ * idempotently via UNIQUE(source_type, source_ref).
  *
- * No extraction, no entity resolution, no embedding. Those land in P1/P2.
- * `processed_at` stays NULL so downstream processors can pick these up later.
+ * P1 upgrade: after raw_events insert, drive the full extraction pipeline:
+ *   1. cheap-rules extraction
+ *   2. LLM extraction (budget-gated)
+ *   3. deterministic entity resolution for every claim mention
+ *   4. insert knowledge_unit + ku_entities (single transaction)
+ *   5. embed text and upsert to Qdrant (separate step — SQLite row stands
+ *      even if Qdrant fails; a warn is logged)
+ *   6. set raw_events.processed_at = now
+ *   7. on failure in any step: set process_error, increment retry_count
  */
 
 import type Database from 'better-sqlite3';
@@ -16,8 +22,19 @@ import type { EmailReceivedEvent } from '../events.js';
 import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
+import { embedText } from './embed.js';
+import {
+  _shutdownEntityQueue,
+  createCompanyFromDomain,
+  createPersonFromEmail,
+  type Entity,
+} from './entities.js';
+import { extractPipeline, type Claim } from './extract.js';
+import { upsertKu } from './qdrant.js';
 import { AsyncWriteQueue } from './queue.js';
 import { newId } from './ulid.js';
+
+// --- Raw event capture (P0, preserved) ------------------------------------
 
 interface RawEventRow {
   id: string;
@@ -25,22 +42,67 @@ interface RawEventRow {
   source_ref: string;
   payload: Buffer;
   received_at: string;
+  /** Parsed payload passed along so the P1 pipeline can consume it. */
+  parsedEmail: ParsedEmail | null;
+}
+
+interface ParsedEmail {
+  thread_id: string;
+  account?: string;
+  subject?: string;
+  sender?: string;
+  snippet?: string;
 }
 
 let unsubscribe: (() => void) | null = null;
 let queue: AsyncWriteQueue<RawEventRow> | null = null;
 
-function flushRawEvents(db: Database.Database, batch: RawEventRow[]): void {
-  // OR IGNORE honors the UNIQUE(source_type, source_ref) constraint without
-  // throwing — idempotent re-ingestion of the same Gmail thread is a no-op.
+async function processRawEvent(
+  db: Database.Database,
+  row: RawEventRow,
+): Promise<void> {
+  if (!row.parsedEmail) {
+    markProcessed(db, row.source_type, row.source_ref);
+    return;
+  }
+  try {
+    await runExtractionPipeline(db, row);
+    markProcessed(db, row.source_type, row.source_ref);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { threadId: row.parsedEmail.thread_id, err: msg },
+      'brain ingest: extraction pipeline failed — raw_event flagged for retry',
+    );
+    db.prepare(
+      `UPDATE raw_events
+         SET process_error = ?, retry_count = retry_count + 1
+       WHERE source_type = ? AND source_ref = ?`,
+    ).run(msg, row.source_type, row.source_ref);
+  }
+}
+
+function markProcessed(
+  db: Database.Database,
+  sourceType: string,
+  sourceRef: string,
+): void {
+  db.prepare(
+    `UPDATE raw_events SET processed_at = ?
+     WHERE source_type = ? AND source_ref = ? AND processed_at IS NULL`,
+  ).run(new Date().toISOString(), sourceType, sourceRef);
+}
+
+function flushRawEvents(db: Database.Database, batch: RawEventRow[]): {
+  inserted: string[];
+} {
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO raw_events
        (id, source_type, source_ref, payload, received_at)
      VALUES (?, ?, ?, ?, ?)`,
   );
-  const insertMany = db.transaction((rows: RawEventRow[]) => {
-    let inserted = 0;
-    let skipped = 0;
+  const txn = db.transaction((rows: RawEventRow[]) => {
+    const inserted: string[] = [];
     for (const row of rows) {
       const result = stmt.run(
         row.id,
@@ -49,40 +111,157 @@ function flushRawEvents(db: Database.Database, batch: RawEventRow[]): void {
         row.payload,
         row.received_at,
       );
-      if (result.changes > 0) inserted++;
-      else skipped++;
+      if (result.changes > 0) inserted.push(row.source_ref);
     }
-    return { inserted, skipped };
+    return inserted;
   });
-  const { inserted, skipped } = insertMany(batch);
-  if (skipped > 0) {
-    logger.debug(
-      { inserted, skipped, batchSize: batch.length },
-      'raw_events batch flushed (skipped duplicates)',
-    );
-  } else {
-    logger.debug(
-      { inserted, batchSize: batch.length },
-      'raw_events batch flushed',
-    );
+  const inserted = txn(batch);
+  return { inserted };
+}
+
+// --- P1: extraction pipeline ----------------------------------------------
+
+async function runExtractionPipeline(
+  db: Database.Database,
+  row: RawEventRow,
+): Promise<void> {
+  const email = row.parsedEmail!;
+  const text = [email.subject, email.snippet ?? '', email.sender ?? '']
+    .filter(Boolean)
+    .join('\n');
+  if (!text.trim()) {
+    logger.debug({ threadId: email.thread_id }, 'brain ingest: empty text — skipping');
+    return;
+  }
+
+  // Step 1–2: cheap + LLM extraction.
+  const claims = await extractPipeline({
+    text,
+    subject: email.subject,
+    sender: email.sender,
+  });
+  if (claims.length === 0) return;
+
+  // Step 3: deterministic entity resolution for sender + any email/domain
+  // mentions on each claim.
+  const entitiesPerClaim: Entity[][] = [];
+  for (const claim of claims) {
+    const set = new Map<string, Entity>();
+    // Sender → person.
+    if (email.sender && /@/.test(email.sender)) {
+      const person = await createPersonFromEmail(email.sender);
+      set.set(person.entity_id, person);
+      const domain = email.sender.split('@')[1];
+      if (domain) {
+        const company = await createCompanyFromDomain(domain);
+        set.set(company.entity_id, company);
+      }
+    }
+    for (const m of claim.entities_mentioned) {
+      if (m.kind === 'email') {
+        const p = await createPersonFromEmail(m.value);
+        set.set(p.entity_id, p);
+      } else if (m.kind === 'domain') {
+        const c = await createCompanyFromDomain(m.value);
+        set.set(c.entity_id, c);
+      }
+    }
+    entitiesPerClaim.push([...set.values()]);
+  }
+
+  // Step 4: insert KU + ku_entities rows in a single transaction.
+  const nowIso = new Date().toISOString();
+  const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> = claims.map(
+    (c, i) => ({
+      id: newId(),
+      claim: c,
+      entities: entitiesPerClaim[i],
+    }),
+  );
+
+  const insertKu = db.prepare(
+    `INSERT INTO knowledge_units
+       (id, text, source_type, source_ref, account, scope, confidence,
+        valid_from, recorded_at, topic_key, tags, extracted_by,
+        extraction_chain, metadata, needs_review)
+     VALUES (?, ?, 'email', ?, 'work', NULL, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?)`,
+  );
+  const insertLink = db.prepare(
+    `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, ?)`,
+  );
+
+  const txn = db.transaction(() => {
+    for (const row of kuRows) {
+      insertKu.run(
+        row.id,
+        row.claim.text,
+        email.thread_id,
+        row.claim.confidence,
+        row.claim.topic_seed ? nowIso : nowIso, // valid_from = now for emails
+        nowIso,
+        row.claim.topic_key,
+        row.claim.extracted_by,
+        row.claim.needs_review ? 1 : 0,
+      );
+      for (const ent of row.entities) {
+        insertLink.run(row.id, ent.entity_id, 'mentioned');
+      }
+    }
+  });
+  txn();
+
+  // Step 5: embed and upsert each KU. Best-effort — a Qdrant failure does
+  // NOT roll back the SQLite write.
+  for (const row of kuRows) {
+    try {
+      const vec = await embedText(row.claim.text, 'document');
+      await upsertKu({
+        kuId: row.id,
+        vector: vec,
+        payload: {
+          account: 'work',
+          scope: null,
+          model_version: 'nomic-embed-text-v1.5:768',
+          valid_from: nowIso,
+          recorded_at: nowIso,
+          source_type: 'email',
+          topic_key: row.claim.topic_key ?? null,
+        },
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          kuId: row.id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'brain ingest: embed/upsert failed — SQLite row retained',
+      );
+    }
   }
 }
 
+// --- Startup / shutdown ---------------------------------------------------
+
 /**
- * Start the P0 brain ingest listener. Safe to call multiple times — second
+ * Start the brain ingest listener. Safe to call multiple times — second
  * call is a no-op if already started.
  */
 export function startBrainIngest(): void {
   if (unsubscribe) return;
-
   const db = getBrainDb();
+
   queue = new AsyncWriteQueue<RawEventRow>(async (batch) => {
-    flushRawEvents(db, batch);
+    const { inserted } = flushRawEvents(db, batch);
+    const insertedSet = new Set(inserted);
+    // Drive the P1 pipeline only for rows that were actually inserted —
+    // duplicates are a no-op.
+    for (const row of batch) {
+      if (!insertedSet.has(row.source_ref)) continue;
+      await processRawEvent(db, row);
+    }
   });
 
   unsubscribe = eventBus.on('email.received', (event: EmailReceivedEvent) => {
-    // Capture queue reference atomically — if shutdown races with in-flight
-    // dispatch, we avoid calling `.enqueue` on a null target.
     const q = queue;
     if (!q) return;
     const receivedAt = new Date(event.timestamp).toISOString();
@@ -95,12 +274,14 @@ export function startBrainIngest(): void {
         );
         continue;
       }
+      const payloadJson = JSON.stringify(email);
       const row: RawEventRow = {
         id: newId(),
         source_type: 'email',
         source_ref: threadId,
-        payload: Buffer.from(JSON.stringify(email), 'utf8'),
+        payload: Buffer.from(payloadJson, 'utf8'),
         received_at: receivedAt,
+        parsedEmail: email as ParsedEmail,
       };
       q.enqueue(row).catch((err) => {
         logger.error(
@@ -111,12 +292,11 @@ export function startBrainIngest(): void {
     }
   });
 
-  logger.info('Brain ingest started (raw_events capture only)');
+  logger.info('Brain ingest started (raw_events + P1 extraction pipeline)');
 }
 
 /**
- * Drain the in-flight queue and unsubscribe. Exposed for orderly shutdown
- * and for tests.
+ * Drain the in-flight queue and unsubscribe.
  */
 export async function stopBrainIngest(): Promise<void> {
   if (unsubscribe) {
@@ -127,4 +307,7 @@ export async function stopBrainIngest(): Promise<void> {
     await queue.shutdown();
     queue = null;
   }
+  // Entities has its own write-serializer; drain it here so unit tests
+  // don't hang on its flushTimer.
+  await _shutdownEntityQueue();
 }
