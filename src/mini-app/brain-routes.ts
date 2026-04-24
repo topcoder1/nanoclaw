@@ -23,6 +23,8 @@ import express from 'express';
 import type Database from 'better-sqlite3';
 
 import { getBrainDb } from '../brain/db.js';
+import { markImportant } from '../brain/important.js';
+import { AsyncWriteQueue } from '../brain/queue.js';
 import { recall, type RecallResult } from '../brain/retrieve.js';
 import { logger } from '../logger.js';
 
@@ -501,6 +503,216 @@ ${pager}`;
     );
   });
 
+  // --- KU detail + feedback --------------------------------------------
+  // Access-count bumps happen on the page-render router (read side). The
+  // feedback POSTs live on the parallel API router at /api/brain — see
+  // createBrainApiRoutes below.
+  const accessBumpQueue = makeAccessBumpQueue(() => getDb());
+
+  // GET /brain/ku/:id — detail page
+  router.get('/ku/:id', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const id = req.params.id;
+
+    const row = db
+      .prepare(
+        `SELECT id, text, source_type, source_ref, account, scope, confidence,
+                valid_from, valid_until, recorded_at, superseded_at, topic_key,
+                tags, extracted_by, extraction_chain, metadata,
+                access_count, last_accessed_at, needs_review, important
+           FROM knowledge_units WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          id: string;
+          text: string;
+          source_type: string;
+          source_ref: string | null;
+          account: string;
+          scope: string | null;
+          confidence: number;
+          valid_from: string;
+          valid_until: string | null;
+          recorded_at: string;
+          superseded_at: string | null;
+          topic_key: string | null;
+          tags: string | null;
+          extracted_by: string | null;
+          extraction_chain: string | null;
+          metadata: string | null;
+          access_count: number;
+          last_accessed_at: string | null;
+          needs_review: number;
+          important: number;
+        }
+      | undefined;
+
+    if (!row) {
+      res.status(404).type('html').send(
+        brainShell('Not found — Brain', `
+<h1>KU not found</h1>
+<div class="card"><p class="meta">No KU with id <code>${escapeHtml(id)}</code>.</p></div>`, {
+          reviewCount,
+        }),
+      );
+      return;
+    }
+
+    // Side effect: bump access_count + last_accessed_at. Same behavior as
+    // recall() — this is how the brain measures "which KUs get looked at".
+    accessBumpQueue
+      .enqueue({ id: row.id, ts: new Date().toISOString() })
+      .catch((err) =>
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), id: row.id },
+          '/brain/ku: access bump failed',
+        ),
+      );
+
+    const linkedEntities = db
+      .prepare(
+        `SELECT e.entity_id, e.entity_type, e.canonical, ke.role
+           FROM ku_entities ke
+           JOIN entities e ON e.entity_id = ke.entity_id
+          WHERE ke.ku_id = ?`,
+      )
+      .all(row.id) as Array<{
+      entity_id: string;
+      entity_type: string;
+      canonical: string | null;
+      role: string;
+    }>;
+
+    // extraction_chain is a JSON array of source-KU ids
+    let chainIds: string[] = [];
+    if (row.extraction_chain) {
+      try {
+        const parsed = JSON.parse(row.extraction_chain);
+        if (Array.isArray(parsed)) {
+          chainIds = parsed.filter((x): x is string => typeof x === 'string');
+        }
+      } catch {
+        /* malformed — ignore */
+      }
+    }
+
+    const needsReview = row.needs_review === 1;
+    const isImportant = row.important === 1;
+    const isSuperseded = row.superseded_at !== null;
+    const deepLink = sourceDeepLink(row.source_type, row.source_ref);
+
+    const entityPills = linkedEntities.length
+      ? linkedEntities
+          .map((e) => {
+            const name = renderEntityDisplayName({
+              entity_id: e.entity_id,
+              canonical: e.canonical,
+            });
+            return `<a href="/brain/entities/${escapeHtml(e.entity_id)}" class="pill ${escapeHtml(e.entity_type)}" title="${escapeHtml(e.role)}">${escapeHtml(name)}</a>`;
+          })
+          .join(' ')
+      : '<span class="meta">none</span>';
+
+    const chainHtml = chainIds.length
+      ? chainIds
+          .map(
+            (cid) =>
+              `<a href="/brain/ku/${escapeHtml(cid)}"><code>${escapeHtml(cid)}</code></a>`,
+          )
+          .join(', ')
+      : '';
+
+    const feedbackButtons = `
+<div id="feedback" style="margin-top:16px">
+  <button class="feedback-btn${isImportant ? ' active' : ''}" id="btn-important" data-on="${isImportant ? '1' : '0'}">
+    ⭐ ${isImportant ? 'Important' : 'Mark important'}
+  </button>
+  ${needsReview ? '<button class="feedback-btn approve" id="btn-approve">🟢 Approve</button>' : ''}
+  <button class="feedback-btn reject" id="btn-reject"${isSuperseded ? ' disabled' : ''}>${isSuperseded ? '🔴 Rejected' : '🔴 Reject'}</button>
+  <span id="feedback-msg" class="meta" style="margin-left:10px"></span>
+</div>`;
+
+    const body = `
+<h1>${escapeHtml((row.text.split('\n')[0] || row.id).slice(0, 120))}</h1>
+<div class="card">
+  <p class="meta">
+    <span class="pill source">${escapeHtml(row.source_type)}</span>
+    <span class="pill">${escapeHtml(row.account)}</span>
+    ${isSuperseded ? '<span class="pill">superseded</span>' : ''}
+    ${needsReview ? '<span class="pill">needs_review</span>' : ''}
+    ${isImportant ? '<span class="pill">⭐ important</span>' : ''}
+    ${confidenceBar(row.confidence)}
+    <span>confidence ${row.confidence.toFixed(2)}</span>
+    · valid_from ${escapeHtml(row.valid_from)}
+    · recorded_at ${escapeHtml(row.recorded_at)}
+    · accessed ${row.access_count}×
+  </p>
+  ${row.scope ? `<p class="meta">scope: <code>${escapeHtml(row.scope)}</code></p>` : ''}
+  ${row.topic_key ? `<p class="meta">topic: <code>${escapeHtml(row.topic_key)}</code></p>` : ''}
+  ${deepLink ? `<p><a href="${escapeHtml(deepLink)}" target="_blank" rel="noopener">Open source →</a></p>` : ''}
+</div>
+<div class="card">
+  <pre style="white-space:pre-wrap;font:inherit;margin:0">${escapeHtml(row.text)}</pre>
+</div>
+<h2>Entities</h2>
+<div class="card">${entityPills}</div>
+${chainHtml ? `<h2>Extraction chain</h2>\n<div class="card"><p class="meta">${chainHtml}</p></div>` : ''}
+${feedbackButtons}
+<script>
+(function(){
+  const id=${JSON.stringify(row.id)};
+  const msg=document.getElementById('feedback-msg');
+  async function post(path){
+    const r=await fetch('/api/brain/ku/'+encodeURIComponent(id)+path,{method:'POST',headers:{'content-type':'application/json'}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }
+  const imp=document.getElementById('btn-important');
+  if(imp){
+    imp.addEventListener('click',async()=>{
+      imp.disabled=true;msg.textContent='';
+      try{
+        const j=await post('/important');
+        imp.dataset.on=j.important?'1':'0';
+        imp.classList.toggle('active',!!j.important);
+        imp.textContent=j.important?'⭐ Important':'⭐ Mark important';
+        msg.textContent='saved';
+      }catch(e){msg.textContent=e.message;}finally{imp.disabled=false;}
+    });
+  }
+  const app=document.getElementById('btn-approve');
+  if(app){
+    app.addEventListener('click',async()=>{
+      app.disabled=true;msg.textContent='';
+      try{
+        await post('/approve');
+        app.style.display='none';
+        msg.textContent='approved';
+      }catch(e){msg.textContent=e.message;app.disabled=false;}
+    });
+  }
+  const rej=document.getElementById('btn-reject');
+  if(rej && !rej.disabled){
+    rej.addEventListener('click',async()=>{
+      if(!confirm('Reject this KU? It will be excluded from retrieval.'))return;
+      rej.disabled=true;msg.textContent='';
+      try{
+        await post('/reject');
+        rej.textContent='🔴 Rejected';
+        msg.textContent='rejected — reload to refresh header';
+      }catch(e){msg.textContent=e.message;rej.disabled=false;}
+    });
+  }
+})();
+</script>`;
+    res.type('html').send(
+      brainShell(`KU ${row.id.slice(0, 8)} — Brain`, body, {
+        reviewCount,
+      }),
+    );
+  });
+
   // --- GET /brain/search — relevance-ranked search via recall() ---------
   router.get('/search', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -716,9 +928,166 @@ export function createBrainApiRoutes(
 ): express.Router {
   const router = express.Router();
   const getDb = (): Database.Database => opts.brainDb ?? getBrainDb();
+  const reviewWriteQueue = makeReviewWriteQueue(() => getDb());
+
   router.get('/status', (_req, res) => {
     const db = getDb();
     res.json(getStatusFingerprint(db));
   });
+
+  // POST /api/brain/ku/:id/important — toggle the important flag.
+  // Returns the new value so the client can update its button state
+  // without reloading.
+  router.post('/ku/:id/important', async (req, res) => {
+    const db = getDb();
+    const id = req.params.id;
+    const row = db
+      .prepare(`SELECT important FROM knowledge_units WHERE id = ?`)
+      .get(id) as { important: number } | undefined;
+    if (!row) {
+      res.status(404).json({ error: 'ku_not_found' });
+      return;
+    }
+    const next = row.important === 1 ? false : true;
+    try {
+      await markImportant(id, next);
+      res.json({ important: next });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), id },
+        '/api/brain/ku/:id/important failed',
+      );
+      res.status(500).json({ error: 'important_write_failed' });
+    }
+  });
+
+  // POST /api/brain/ku/:id/approve — clear needs_review + raise confidence.
+  router.post('/ku/:id/approve', async (req, res) => {
+    const db = getDb();
+    const id = req.params.id;
+    const row = db
+      .prepare(`SELECT id FROM knowledge_units WHERE id = ?`)
+      .get(id) as { id: string } | undefined;
+    if (!row) {
+      res.status(404).json({ error: 'ku_not_found' });
+      return;
+    }
+    try {
+      await reviewWriteQueue.enqueue({ kind: 'approve', id });
+      res.json({ ok: true });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), id },
+        '/api/brain/ku/:id/approve failed',
+      );
+      res.status(500).json({ error: 'approve_write_failed' });
+    }
+  });
+
+  // POST /api/brain/ku/:id/reject — soft-delete (superseded_at = now). We
+  // never hard-delete so audit trail + bitemporal history stays intact.
+  router.post('/ku/:id/reject', async (req, res) => {
+    const db = getDb();
+    const id = req.params.id;
+    const row = db
+      .prepare(`SELECT id FROM knowledge_units WHERE id = ?`)
+      .get(id) as { id: string } | undefined;
+    if (!row) {
+      res.status(404).json({ error: 'ku_not_found' });
+      return;
+    }
+    try {
+      await reviewWriteQueue.enqueue({
+        kind: 'reject',
+        id,
+        ts: new Date().toISOString(),
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), id },
+        '/api/brain/ku/:id/reject failed',
+      );
+      res.status(500).json({ error: 'reject_write_failed' });
+    }
+  });
+
   return router;
+}
+
+// --- Write-queue factories ---------------------------------------------
+
+interface AccessBump {
+  id: string;
+  ts: string;
+}
+
+function makeAccessBumpQueue(
+  getDb: () => Database.Database,
+): AsyncWriteQueue<AccessBump> {
+  return new AsyncWriteQueue<AccessBump>(
+    async (batch) => {
+      const db = getDb();
+      const stmt = db.prepare(
+        `UPDATE knowledge_units
+           SET access_count = access_count + 1,
+               last_accessed_at = ?
+         WHERE id = ?`,
+      );
+      const txn = db.transaction((bumps: AccessBump[]) => {
+        for (const b of bumps) stmt.run(b.ts, b.id);
+      });
+      txn(batch);
+    },
+    { maxBatchSize: 20, maxLatencyMs: 50 },
+  );
+}
+
+type ReviewWrite =
+  | { kind: 'approve'; id: string }
+  | { kind: 'reject'; id: string; ts: string };
+
+function makeReviewWriteQueue(
+  getDb: () => Database.Database,
+): AsyncWriteQueue<ReviewWrite> {
+  return new AsyncWriteQueue<ReviewWrite>(
+    async (batch) => {
+      const db = getDb();
+      const approveStmt = db.prepare(
+        `UPDATE knowledge_units
+           SET needs_review = 0, confidence = 1.0 WHERE id = ?`,
+      );
+      const rejectStmt = db.prepare(
+        `UPDATE knowledge_units SET superseded_at = ? WHERE id = ?`,
+      );
+      const txn = db.transaction((writes: ReviewWrite[]) => {
+        for (const w of writes) {
+          if (w.kind === 'approve') {
+            approveStmt.run(w.id);
+          } else {
+            rejectStmt.run(w.ts, w.id);
+          }
+        }
+      });
+      txn(batch);
+    },
+    { maxBatchSize: 20, maxLatencyMs: 50 },
+  );
+}
+
+/**
+ * Best-effort deep link for a source_ref. Email threads open in Gmail;
+ * other sources fall through (null) — UI hides the link when absent.
+ */
+function sourceDeepLink(
+  sourceType: string,
+  sourceRef: string | null,
+): string | null {
+  if (!sourceRef) return null;
+  if (sourceType === 'email') {
+    // Gmail thread deep link. Works for both accounts since it's anchored
+    // by thread id; the user's active Gmail account resolves it.
+    return `https://mail.google.com/mail/u/0/#inbox/${encodeURIComponent(sourceRef)}`;
+  }
+  return null;
 }
