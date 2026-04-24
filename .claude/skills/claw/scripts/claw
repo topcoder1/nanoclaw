@@ -592,8 +592,25 @@ def cmd_know(argv: list[str]) -> int:
 # ── `claw sync` — repo → brain.db indexer (v1.0 markdown + README only) ────
 
 _REPOS_YAML = Path.home() / ".claw" / "repos.yaml"
-_MAX_FILE_BYTES = 64 * 1024      # skip files larger than this
-_TEXT_SNIFF_BYTES = 512          # bytes read to check for binary content
+_MAX_DOC_BYTES = 64 * 1024        # v1.0 cap for markdown/README
+_MAX_CODE_BYTES = 1024 * 1024     # v1.2 cap for source files
+_TEXT_SNIFF_BYTES = 512           # bytes read to check for binary content
+_CODE_CHUNK_LINES = 200           # line-count chunks for code files
+_CODE_CHUNK_OVERLAP = 20          # overlap so a symbol near a boundary isn't lost
+
+# Languages eligible for code indexing (v1.2). JSON/YAML/TOML/HTML/CSS are
+# deliberately excluded — too noisy, mostly configuration generated elsewhere.
+_CODE_SUFFIXES = {
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+    '.py', '.pyi',
+    '.go', '.rs', '.rb',
+    '.java', '.kt', '.scala',
+    '.swift',
+    '.c', '.cc', '.cpp', '.h', '.hpp',
+    '.sh', '.bash', '.zsh',
+    '.sql',
+}
+_DOC_SUFFIXES = {'.md', '.mdx'}
 
 
 def _load_repos_config() -> dict:
@@ -610,20 +627,54 @@ def _load_repos_config() -> dict:
     return cfg
 
 
-def _is_indexable_name(path: Path) -> bool:
-    """v1.0 indexing rules: markdown files and root-level READMEs/etc.
-    Code files deferred to v1.1."""
+def _classify_file(path: Path, allow_code: bool, scope: str) -> str | None:
+    """Return 'doc', 'code', or None based on filename + scope + global flag.
+
+    Docs are always indexed. Code is indexed only when `allow_code` is True
+    (the sync-level `--code` flag) AND the repo's scope permits it."""
     suffix = path.suffix.lower()
-    if suffix in (".md", ".mdx"):
-        return True
     name_lower = path.name.lower()
-    if name_lower in ("readme", "changelog", "contributing", "license"):
-        return True
+
+    if suffix in _DOC_SUFFIXES:
+        return 'doc'
+    if name_lower in ('readme', 'changelog', 'contributing', 'license'):
+        return 'doc'
     if any(name_lower.startswith(p) for p in (
-        "readme.", "changelog.", "contributing.", "license.",
+        'readme.', 'changelog.', 'contributing.', 'license.',
     )):
-        return True
-    return False
+        return 'doc'
+
+    if not allow_code:
+        return None
+    if scope not in ('docs+code', 'full'):
+        return None
+    if suffix not in _CODE_SUFFIXES:
+        return None
+    # Filter obvious noise — minified / bundled / generated artefacts.
+    for needle in ('.min.', '.bundle.', '.generated.', '.pb.'):
+        if needle in name_lower:
+            return None
+    return 'code'
+
+
+def _chunk_by_lines(text: str, chunk_lines: int, overlap: int
+                    ) -> list[tuple[int, int, str]]:
+    """Slide a line-count window over `text`. Returns list of
+    (start_line_1indexed, end_line_1indexed_inclusive, chunk_text)."""
+    lines = text.splitlines()
+    n = len(lines)
+    if n == 0:
+        return []
+    step = max(1, chunk_lines - overlap)
+    out: list[tuple[int, int, str]] = []
+    i = 0
+    while i < n:
+        end = min(n, i + chunk_lines)
+        out.append((i + 1, end, '\n'.join(lines[i:end])))
+        if end == n:
+            break
+        i += step
+    return out
 
 
 def _looks_binary(path: Path) -> bool:
@@ -665,12 +716,12 @@ def _walk_filesystem(root: Path) -> list[Path]:
     return out
 
 
-def _read_file_safely(path: Path) -> str | None:
+def _read_file_safely(path: Path, cap_bytes: int) -> str | None:
     try:
         size = path.stat().st_size
     except OSError:
         return None
-    if size == 0 or size > _MAX_FILE_BYTES:
+    if size == 0 or size > cap_bytes:
         return None
     if _looks_binary(path):
         return None
@@ -716,8 +767,8 @@ def _upsert_repo_ku(
     return ku_id
 
 
-def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool
-                   ) -> dict:
+def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
+                   allow_code: bool) -> dict:
     path_raw = repo_cfg.get("path")
     if not path_raw:
         return {"ok": False, "reason": "no-path"}
@@ -726,25 +777,31 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool
         return {"ok": False, "reason": "not-found", "path": str(root)}
 
     files = _git_tracked_files(root) or _walk_filesystem(root)
-    files = [f for f in files if _is_indexable_name(f)]
+    scope = repo_cfg.get("scope", "docs+code")
+    classified: list[tuple[Path, str]] = []
+    for f in files:
+        kind = _classify_file(f, allow_code, scope)
+        if kind:
+            classified.append((f, kind))
 
     account = repo_cfg.get("account", "work")
     tags = list(repo_cfg.get("tags") or [])
     repo_name = root.name
 
-    indexed = 0
+    indexed_docs = 0
+    indexed_code_chunks = 0
     skipped_binary = 0
     skipped_large = 0
     now_iso = datetime.now(timezone.utc).isoformat(
         timespec="seconds").replace("+00:00", "Z")
 
-    for fpath in files:
-        content = _read_file_safely(fpath)
+    for fpath, kind in classified:
+        cap = _MAX_DOC_BYTES if kind == 'doc' else _MAX_CODE_BYTES
+        content = _read_file_safely(fpath, cap)
         if content is None:
-            # Figure out why for accurate counters.
             try:
                 size = fpath.stat().st_size
-                if size > _MAX_FILE_BYTES:
+                if size > cap:
                     skipped_large += 1
                 else:
                     skipped_binary += 1
@@ -755,38 +812,77 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool
             rel = fpath.relative_to(root).as_posix()
         except ValueError:
             continue
-        source_ref = f"{repo_name}:{rel}"
         try:
             mtime = datetime.fromtimestamp(fpath.stat().st_mtime,
                                            timezone.utc).isoformat(
                 timespec="seconds").replace("+00:00", "Z")
         except OSError:
             mtime = now_iso
-        metadata = {
+        base_meta = {
             "repo": repo_name,
             "repo_path": str(root),
             "rel_path": rel,
             "file_size": len(content),
             "modified_at": mtime,
+            "kind": kind,
         }
+
+        if kind == 'doc':
+            source_ref = f"{repo_name}:{rel}"
+            if not dry_run:
+                _upsert_repo_ku(
+                    conn,
+                    source_ref=source_ref,
+                    text=content,
+                    account=account,
+                    tags=tags + ["kind:doc"],
+                    metadata=base_meta,
+                    now_iso=now_iso,
+                )
+            indexed_docs += 1
+            continue
+
+        # kind == 'code' — chunk by line count so retrieval hits the relevant
+        # region, not the whole file.
+        chunks = _chunk_by_lines(content, _CODE_CHUNK_LINES, _CODE_CHUNK_OVERLAP)
+        if not chunks:
+            continue
+        chunk_prefix = f"{repo_name}:{rel}#L"
         if not dry_run:
-            _upsert_repo_ku(
-                conn,
-                source_ref=source_ref,
-                text=content,
-                account=account,
-                tags=tags,
-                metadata=metadata,
-                now_iso=now_iso,
+            # Drop any stale chunks from a previous sync — covers file
+            # shrinkage (fewer chunks now than before).
+            conn.execute(
+                "DELETE FROM knowledge_units "
+                "WHERE source_type='repo' AND source_ref LIKE ?",
+                (chunk_prefix + "%",),
             )
-        indexed += 1
+        for start, end, chunk_text in chunks:
+            source_ref = f"{chunk_prefix}{start}-L{end}"
+            if not dry_run:
+                _upsert_repo_ku(
+                    conn,
+                    source_ref=source_ref,
+                    text=chunk_text,
+                    account=account,
+                    tags=tags + ["kind:code", f"ext:{fpath.suffix.lower().lstrip('.')}"],
+                    metadata={
+                        **base_meta,
+                        "chunk_start_line": start,
+                        "chunk_end_line": end,
+                        "chunk_total_lines": end - start + 1,
+                    },
+                    now_iso=now_iso,
+                )
+            indexed_code_chunks += 1
 
     return {
         "ok": True,
         "repo": repo_name,
         "path": str(root),
-        "files_seen": len(files),
-        "indexed": indexed,
+        "files_seen": len(classified),
+        "indexed": indexed_docs + indexed_code_chunks,
+        "indexed_docs": indexed_docs,
+        "indexed_code_chunks": indexed_code_chunks,
         "skipped_binary": skipped_binary,
         "skipped_large": skipped_large,
     }
@@ -801,6 +897,11 @@ def cmd_sync(argv: list[str]) -> int:
                    help="Sync every tracked repo (the default when --repo is omitted)")
     p.add_argument("--dry-run", action="store_true",
                    help="Walk + count, but do not write")
+    p.add_argument("--code", action="store_true",
+                   help="Also index source files (v1.2). Respects each repo's "
+                        "`scope` in repos.yaml — docs-only repos stay doc-only. "
+                        "Without this flag, only markdown + READMEs are "
+                        "indexed, preserving v1.0 behaviour.")
     p.add_argument("--no-embed", action="store_true",
                    help="Skip the Nomic embedding step after SQL insert. "
                         "Use for a fast FTS-only sync; semantic search over "
@@ -841,21 +942,29 @@ def cmd_sync(argv: list[str]) -> int:
     conn.execute("PRAGMA foreign_keys=ON")
 
     total_indexed = 0
+    total_docs = 0
+    total_code = 0
     total_files = 0
-    print(f"{'repo':<28} {'files':>6} {'indexed':>8} {'skipped':>8}",
+    mode_hdr = "docs + code" if args.code else "docs only"
+    print(f"sync mode: {mode_hdr}", file=sys.stderr)
+    print(f"{'repo':<28} {'files':>6} {'docs':>6} {'chunks':>7} {'skipped':>8}",
           file=sys.stderr)
-    print("-" * 54, file=sys.stderr)
+    print("-" * 61, file=sys.stderr)
     try:
         for repo_cfg in repos:
-            result = _sync_one_repo(conn, repo_cfg, args.dry_run)
+            result = _sync_one_repo(conn, repo_cfg, args.dry_run, args.code)
             if not result["ok"]:
                 print(f"{repo_cfg.get('path', '?'):<28} "
                       f"SKIPPED ({result['reason']})", file=sys.stderr)
                 continue
             skipped = result["skipped_binary"] + result["skipped_large"]
             print(f"{result['repo']:<28} {result['files_seen']:>6} "
-                  f"{result['indexed']:>8} {skipped:>8}", file=sys.stderr)
+                  f"{result['indexed_docs']:>6} "
+                  f"{result['indexed_code_chunks']:>7} "
+                  f"{skipped:>8}", file=sys.stderr)
             total_indexed += result["indexed"]
+            total_docs += result["indexed_docs"]
+            total_code += result["indexed_code_chunks"]
             total_files += result["files_seen"]
         if not args.dry_run:
             conn.commit()
@@ -863,8 +972,9 @@ def cmd_sync(argv: list[str]) -> int:
         conn.close()
 
     verb = "would-index" if args.dry_run else "indexed"
-    print(f"\n{verb} {total_indexed} file(s) across {len(repos)} repo(s) "
-          f"({total_files} walked)",
+    print(f"\n{verb} {total_indexed} KU(s) across {len(repos)} repo(s) "
+          f"({total_docs} doc + {total_code} code chunks; "
+          f"{total_files} files eligible)",
           file=sys.stderr)
     if args.dry_run:
         print("(dry-run — no writes committed)", file=sys.stderr)

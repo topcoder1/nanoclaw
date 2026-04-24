@@ -124,11 +124,25 @@ Effect: `claw know "orphan vpn"` used to return 1 false-positive from an email; 
 
 The initial v1.1a embedding run dropped 103/1131 files on Nomic's 8192-token context limit. Fix: cap input at a 28KB soft limit before `embedText()`; on fail, retry once at 12KB. Truncation is recorded in the Qdrant payload (`truncated_to_bytes`) so we can audit later. v1.2's code indexer will replace this with symbol-boundary chunking.
 
-### v1.2 — code file indexing (planned)
+### v1.2 — code file indexing (shipped 2026-04-24)
 
-Opt-in per repo (`scope: docs+code` in repos.yaml). Chunk by symbol boundaries for `.ts` / `.py` / `.go`; fall back to 4KB rolling windows. Adds potentially 5–50× more KUs — worth it only if v1.0 + v1.1's doc-only coverage proves too narrow.
+Gated behind a `--code` flag on `claw sync`. Without it, sync remains markdown + READMEs only (preserves v1.0 default — accidental `claw sync` doesn't suddenly add tens of thousands of KUs). With it, eligible source files are indexed per each repo's `scope` from repos.yaml (`docs+code` or `full` opts in; `docs` stays doc-only).
 
-### v1.3 — fswatch daemon (planned)
+Indexing rules:
+- **Eligible extensions**: `.ts/.tsx/.js/.jsx/.mjs/.cjs`, `.py/.pyi`, `.go`, `.rs`, `.rb`, `.java/.kt/.scala`, `.swift`, `.c/.cc/.cpp/.h/.hpp`, `.sh/.bash/.zsh`, `.sql`. JSON/YAML/TOML/HTML/CSS deliberately excluded — too noisy.
+- **Filter**: skip files whose names contain `.min.`, `.bundle.`, `.generated.`, `.pb.` — minified or generated artefacts.
+- **Cap**: 1MB per file (vs 64KB for docs). Files larger than that are skipped.
+- **Chunking**: line-count windows of 200 lines with 20-line overlap. Each chunk becomes its own KU with `source_ref = <repo>:<rel_path>#L<start>-L<end>`.
+- **Stale chunk cleanup**: before re-inserting chunks for a file, `DELETE WHERE source_ref LIKE '<repo>:<path>#L%'`. Handles file shrinkage cleanly.
+- **Tags**: `kind:code` and `ext:<suffix>` are appended so `claw know` can filter by language later.
+
+Smoke run on nanoclaw: 669 eligible files → 155 doc + **795 code chunks**. Initial embedding ~13 min at ~1 doc/s. Future v1.3 will replace line-count chunking with symbol-boundary chunking via tree-sitter once v1.2's coverage proves noisy in practice.
+
+### v1.3 — symbol-aware chunking + content-hash incremental (planned)
+
+Replace the line-count windows with tree-sitter symbol boundaries (function / class / module level). Add a `content_hash` column on `knowledge_units` so re-syncing a file with unchanged hash is a no-op (no FTS churn, no Qdrant churn). Required when `claw sync --code --all` becomes a routine cron job.
+
+### v1.4 — fswatch daemon (planned)
 
 Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watching paths from `~/.claw/repos.yaml` via `fswatch`. Debounces changes, re-indexes modified files only. Deferred until (a) v1.0 + v1.1 retrieval is felt-to-be-useful and (b) manual `claw sync` + nightly cron becomes annoying. Likely trigger: team grows beyond one person, or you want "saved a file → searchable within 30s" latency.
 
