@@ -26,7 +26,8 @@ Augmented brain subsystem — see `.omc/design/brain-architecture-v2.md` for the
 | `reconcile.ts` | Qdrant ↔ SQLite drift detection + scheduler. |
 | `alerts.ts` | Threshold-based alert dispatch with per-category hourly throttle. |
 | `health.ts` | `/brainhealth` command + structured health report. |
-| `weekly-digest.ts` | Sunday 09:00 Markdown digest. |
+| `weekly-digest.ts` | Digest composer + scheduler. Cadence is `weekly` (Sunday 09:00) by default or `daily` (every day 09:00) when `BRAIN_DIGEST_CADENCE=daily`. |
+| `stream-command.ts` | `/brainstream [N]` — 24h ingestion timeline (raw_events + KUs + entities, correlated). |
 | `backup.ts` | Nightly `brain.db` backup (02:00) + Qdrant snapshot (02:15). |
 | `RECOVERY.md` | Recovery run-book (Qdrant lost / brain.db lost / catastrophic). |
 
@@ -56,9 +57,19 @@ email.received (SSE)
 
 ### Routine
 - `/brainhealth` — one-shot status check. Shows counts, cost, latency p50/p95/p99, reconcile drift, legacy-cutover status, re-eval triggers.
-- `npx tsx scripts/brain-weekly-digest.ts` — ad-hoc digest. Automatic at Sunday 09:00 local.
+- `/brainstream [N]` — show recent ingestion stream. Optional `N` = max events (default 20, max 50). Covers the last 24h across `raw_events` / `knowledge_units` / `entities`, correlated where possible.
+- `npx tsx scripts/brain-weekly-digest.ts` — ad-hoc weekly digest. Automatic at Sunday 09:00 local.
+- `npx tsx scripts/brain-daily-digest.ts` — ad-hoc daily digest. Automatic every day 09:00 local when `BRAIN_DIGEST_CADENCE=daily`.
 - `ls store/backups/` — confirm recent `brain.db` backup exists.
 - `ls store/qdrant-snapshots/` — confirm recent Qdrant snapshot exists.
+
+### Enable daily digest mode (30-day measurement phase)
+Add to the launchd plist `EnvironmentVariables`:
+```xml
+<key>BRAIN_DIGEST_CADENCE</key>
+<string>daily</string>
+```
+Then `launchctl unload` + `launchctl load` the plist to pick up the change. Default is `weekly` — unset or any unrecognized value falls back silently. After the measurement phase, remove the key (or set back to `weekly`) to return to the Sunday-only cadence.
 
 ### Migration (one-time)
 ```bash
@@ -103,6 +114,10 @@ Throttled 1/category/hour via `system_state` row `alert:<category>`:
 - `cost_spike` — today > 2× rolling 7-day avg (warn)
 - `qdrant_drift` — `driftRatio > 1%` on last reconcile (warn)
 - `monthly_budget` — MTD > $10 (warn)
+
+## Known trade-offs
+
+- **Daily digest volume.** Daily mode generates 30 messages in 30 days vs 4 for weekly — acceptable for the measurement phase, revert to weekly afterwards by removing `BRAIN_DIGEST_CADENCE` from the plist.
 
 ## Design authority
 - `.omc/design/brain-architecture-v2.md` — signed-off 2026-04-23
