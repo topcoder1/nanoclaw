@@ -530,6 +530,21 @@ If superpilot MCP tools fail (connection refused, timeout, 5xx):
   "Superpilot has been unreachable for 2+ hours — email processing paused"
 - Do not send repeated alerts — only alert once per outage
 
+### Gmail MCP reliability
+
+Gmail tools (`mcp__gmail-personal__*`, `mcp__gmail-whoisxml__*`, `mcp__gmail-attaxion__*`, `mcp__gmail-dev__*`) live in the **deferred-tool registry**. On the first call in a session you may see a transient error while the schema loads — this is NOT an outage.
+
+**Do not declare Gmail tools "offline" or "disconnected" based on a single failed call.** The MCP subprocesses are spawned at container start and verified; a single error is almost always a deferred-loading race, a transient 5xx, or a momentary stdio hiccup — not a real outage.
+
+Required recovery sequence before giving up:
+
+1. If the error mentions the tool being unavailable or the schema not loaded, call `ToolSearch` with `select:mcp__gmail-personal__search_emails,mcp__gmail-personal__read_email` (or the specific account/tools you need) to reload schemas, then retry.
+2. Retry **at least 3 times**, spaced **≥ 5 seconds apart**. Transient MCP errors usually clear within one retry window.
+3. Only after 3 failed retries on 3 different attempts: report the **specific error message verbatim** back to the user (e.g., "Gmail read_email returned: invalid_grant"). Do NOT paraphrase as "offline" or "disconnected" — that loses the signal the user needs to debug.
+4. Never tell the user to "wait for tools to reconnect." If the tool genuinely can't be called, say what failed and what you tried.
+
+The user has confirmed (via direct MCP probe inside the running container) that Gmail MCP is healthy and auth is valid — so if you think Gmail is offline, assume you are wrong until you have ≥3 concrete errors to prove otherwise.
+
 ### Cost Awareness
 
 Each agent session costs API tokens. Be efficient:
