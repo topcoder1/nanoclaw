@@ -1350,7 +1350,8 @@ async function main(): Promise<void> {
         (async () => {
           const args = trimmed.slice('/recall'.length);
           try {
-            const reply = await handleRecallCommand(args);
+            // TODO(P2): derive account from chatJid once personal ingestion lands.
+            const reply = await handleRecallCommand(args, { account: 'work' });
             const ch = findChannel(channels, chatJid);
             if (ch) await ch.sendMessage(chatJid, reply);
           } catch (err) {

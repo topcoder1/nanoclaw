@@ -24,6 +24,12 @@ export interface RecallCommandOptions {
   recallFn?: RecallFn;
   /** Max results shown in the reply. Default 5. */
   limit?: number;
+  /**
+   * Account scope to query. P1 ingests everything as 'work', so callers
+   * pass 'work' today. Plumbed through now so P2 personal ingestion does
+   * not silently leak across scopes.
+   */
+  account?: 'personal' | 'work';
 }
 
 /**
@@ -38,10 +44,11 @@ export async function handleRecallCommand(
 
   const limit = opts.limit ?? 5;
   const fn = opts.recallFn ?? recall;
+  const account = opts.account;
 
   let results: RecallResult[];
   try {
-    results = await fn(question, { limit });
+    results = await fn(question, { limit, account });
   } catch (err) {
     logger.warn(
       { err: err instanceof Error ? err.message : String(err) },
