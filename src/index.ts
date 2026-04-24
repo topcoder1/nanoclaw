@@ -96,10 +96,16 @@ import {
   initKnowledgeStore,
   ensureQdrantCollection,
 } from './memory/knowledge-store.js';
+import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
 import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
+import { startReconcileSchedule } from './brain/reconcile.js';
+import {
+  formatWeeklyDigestMarkdown,
+  startWeeklyDigestSchedule,
+} from './brain/weekly-digest.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1211,6 +1217,25 @@ async function main(): Promise<void> {
   ensureBrainCollection().catch((err) =>
     logger.warn({ err }, 'Brain Qdrant collection init failed'),
   );
+  // Brain P2: warm up the embedding + reranker models fire-and-forget so the
+  // first /recall doesn't pay the ~2s cold-start cost. Errors here are
+  // non-fatal — retrieval retries on its own load if the pipeline fails.
+  void import('./brain/embed.js')
+    .then((m) => m.getEmbeddingPipeline())
+    .catch((err) =>
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'brain embed warm-up failed (non-fatal)',
+      ),
+    );
+  void import('./brain/rerank.js')
+    .then((m) => m.getRerankPipeline())
+    .catch((err) =>
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'brain rerank warm-up failed (non-fatal)',
+      ),
+    );
   initOutcomeStore();
   // Brain P0: raw_events capture from email.received. Must start before
   // the SSE/watchers do any emitting so no events are missed.
@@ -1266,6 +1291,32 @@ async function main(): Promise<void> {
 
   // Graceful shutdown handlers
   let stopSnooze: (() => void) | null = null;
+
+  // Brain P2 background schedules — start alongside the ingest pipeline.
+  // Each returns a stop fn for clean SIGTERM shutdown.
+  const stopReconcileSched = startReconcileSchedule();
+  const stopBackupSched = startNightlyBackupSchedule();
+  const stopDigestSched = startWeeklyDigestSchedule((md) => {
+    const primary = channels.find((c) => c.name.startsWith('telegram'));
+    const mainGroup = Object.entries(registeredGroups).find(
+      ([, g]) => g.isMain,
+    );
+    if (primary && mainGroup) {
+      void primary
+        .sendMessage(mainGroup[0], md)
+        .catch((err) =>
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            'weekly digest delivery failed',
+          ),
+        );
+    } else {
+      // No wired destination — log at info level so an ops operator running
+      // `grep 'Brain weekly digest'` still sees the content.
+      logger.info({ digest: formatWeeklyDigestMarkdown() }, 'weekly digest (no channel)');
+    }
+  });
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     try {
@@ -1285,6 +1336,9 @@ async function main(): Promise<void> {
       proactiveSuggestionTimer = null;
     }
     stopSnooze?.();
+    stopReconcileSched();
+    stopBackupSched();
+    stopDigestSched();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
