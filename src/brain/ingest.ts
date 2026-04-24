@@ -191,20 +191,20 @@ async function runExtractionPipeline(
   );
 
   const txn = db.transaction(() => {
-    for (const row of kuRows) {
+    for (const ku of kuRows) {
       insertKu.run(
-        row.id,
-        row.claim.text,
+        ku.id,
+        ku.claim.text,
         email.thread_id,
-        row.claim.confidence,
-        row.claim.topic_seed ? nowIso : nowIso, // valid_from = now for emails
+        ku.claim.confidence,
+        nowIso, // valid_from = now for emails
         nowIso,
-        row.claim.topic_key,
-        row.claim.extracted_by,
-        row.claim.needs_review ? 1 : 0,
+        ku.claim.topic_key,
+        ku.claim.extracted_by,
+        ku.claim.needs_review ? 1 : 0,
       );
-      for (const ent of row.entities) {
-        insertLink.run(row.id, ent.entity_id, 'mentioned');
+      for (const ent of ku.entities) {
+        insertLink.run(ku.id, ent.entity_id, 'mentioned');
       }
     }
   });
@@ -212,11 +212,11 @@ async function runExtractionPipeline(
 
   // Step 5: embed and upsert each KU. Best-effort — a Qdrant failure does
   // NOT roll back the SQLite write.
-  for (const row of kuRows) {
+  for (const ku of kuRows) {
     try {
-      const vec = await embedText(row.claim.text, 'document');
+      const vec = await embedText(ku.claim.text, 'document');
       await upsertKu({
-        kuId: row.id,
+        kuId: ku.id,
         vector: vec,
         payload: {
           account: 'work',
@@ -225,13 +225,13 @@ async function runExtractionPipeline(
           valid_from: nowIso,
           recorded_at: nowIso,
           source_type: 'email',
-          topic_key: row.claim.topic_key ?? null,
+          topic_key: ku.claim.topic_key ?? null,
         },
       });
     } catch (err) {
       logger.warn(
         {
-          kuId: row.id,
+          kuId: ku.id,
           err: err instanceof Error ? err.message : String(err),
         },
         'brain ingest: embed/upsert failed — SQLite row retained',
