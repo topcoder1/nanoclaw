@@ -23,9 +23,11 @@ import express from 'express';
 import type Database from 'better-sqlite3';
 
 import { getBrainDb } from '../brain/db.js';
+import { recall, type RecallResult } from '../brain/retrieve.js';
+import { logger } from '../logger.js';
 
 import { escapeHtml } from './templates/escape.js';
-import { brainShell, formatAge } from './templates/brain-layout.js';
+import { brainShell, confidenceBar, formatAge } from './templates/brain-layout.js';
 
 export interface BrainRoutesOptions {
   /**
@@ -251,7 +253,172 @@ ${reviewBanner}
     );
   });
 
+  // --- GET /brain/search — relevance-ranked search via recall() ---------
+  router.get('/search', async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const account =
+      req.query.account === 'personal' || req.query.account === 'work'
+        ? req.query.account
+        : 'work';
+    const source = typeof req.query.source === 'string' ? req.query.source : '';
+    const entity = typeof req.query.entity === 'string' ? req.query.entity : '';
+    const fromStr = typeof req.query.from === 'string' ? req.query.from : '';
+    const toStr = typeof req.query.to === 'string' ? req.query.to : '';
+    const rawLimit =
+      typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, 50)
+      : 20;
+
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+
+    const filtersHtml = renderSearchFiltersForm({
+      q,
+      source,
+      entity,
+      account,
+      from: fromStr,
+      to: toStr,
+      limit,
+    });
+
+    if (!q) {
+      const body = `
+<h1>Search the brain</h1>
+${filtersHtml}
+<div class="card"><p class="empty">Enter a query above to search the brain.</p></div>`;
+      res.type('html').send(
+        brainShell('Search — Brain', body, {
+          activeNav: 'search',
+          reviewCount,
+        }),
+      );
+      return;
+    }
+
+    // recall() does RRF + rerank + recency + access + important. We fetch
+    // a bit more than `limit` so post-filters (source/from/to) have room.
+    let results: RecallResult[] = [];
+    try {
+      results = await recall(q, { account, limit: Math.max(limit, 50) });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), q },
+        '/brain/search: recall failed',
+      );
+    }
+
+    const fromMs = fromStr ? Date.parse(fromStr) : null;
+    const toMs = toStr ? Date.parse(toStr) : null;
+
+    const entityLinkedKuIds = entity
+      ? new Set(
+          (
+            db
+              .prepare(`SELECT ku_id FROM ku_entities WHERE entity_id = ?`)
+              .all(entity) as Array<{ ku_id: string }>
+          ).map((r) => r.ku_id),
+        )
+      : null;
+
+    const filtered = results
+      .filter((r) => (source ? r.source_type === source : true))
+      .filter((r) => {
+        if (!fromMs && !toMs) return true;
+        const ts = Date.parse(r.recorded_at);
+        if (!Number.isFinite(ts)) return false;
+        if (fromMs !== null && Number.isFinite(fromMs) && ts < fromMs) return false;
+        if (toMs !== null && Number.isFinite(toMs) && ts > toMs) return false;
+        return true;
+      })
+      .filter((r) => (entityLinkedKuIds ? entityLinkedKuIds.has(r.ku_id) : true))
+      .slice(0, limit);
+
+    const resultsHtml = filtered.length
+      ? `<ul>${filtered.map(renderSearchRow).join('')}</ul>`
+      : '<p class="empty">No results.</p>';
+
+    const body = `
+<h1>Search: ${escapeHtml(q)}</h1>
+${filtersHtml}
+<div class="card">
+  <p class="meta">${filtered.length} result${filtered.length === 1 ? '' : 's'} (of ${results.length} candidate${results.length === 1 ? '' : 's'})</p>
+  ${resultsHtml}
+</div>`;
+    res.type('html').send(
+      brainShell(`Search — ${q}`, body, {
+        activeNav: 'search',
+        reviewCount,
+      }),
+    );
+  });
+
   return router;
+}
+
+function renderSearchFiltersForm(params: {
+  q: string;
+  source: string;
+  entity: string;
+  account: string;
+  from: string;
+  to: string;
+  limit: number;
+}): string {
+  return `
+<form class="searchbox" action="/brain/search" method="get">
+  <input type="text" name="q" value="${escapeHtml(params.q)}" placeholder="Search…" autofocus>
+  <button type="submit">Search</button>
+</form>
+<div class="card">
+  <form action="/brain/search" method="get" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px">
+    <input type="hidden" name="q" value="${escapeHtml(params.q)}">
+    <label>source
+      <select name="source">
+        <option value=""${params.source === '' ? ' selected' : ''}>any</option>
+        <option value="email"${params.source === 'email' ? ' selected' : ''}>email</option>
+        <option value="gong"${params.source === 'gong' ? ' selected' : ''}>gong</option>
+        <option value="hubspot"${params.source === 'hubspot' ? ' selected' : ''}>hubspot</option>
+        <option value="tracked_item"${params.source === 'tracked_item' ? ' selected' : ''}>tracked_item</option>
+        <option value="manual"${params.source === 'manual' ? ' selected' : ''}>manual</option>
+        <option value="attachment"${params.source === 'attachment' ? ' selected' : ''}>attachment</option>
+        <option value="browser"${params.source === 'browser' ? ' selected' : ''}>browser</option>
+      </select>
+    </label>
+    <label>account
+      <select name="account">
+        <option value="work"${params.account === 'work' ? ' selected' : ''}>work</option>
+        <option value="personal"${params.account === 'personal' ? ' selected' : ''}>personal</option>
+      </select>
+    </label>
+    <label>entity <input type="text" name="entity" value="${escapeHtml(params.entity)}" placeholder="entity_id" style="width:160px"></label>
+    <label>from <input type="date" name="from" value="${escapeHtml(params.from)}"></label>
+    <label>to <input type="date" name="to" value="${escapeHtml(params.to)}"></label>
+    <label>limit <input type="number" name="limit" value="${params.limit}" min="1" max="50" style="width:60px"></label>
+    <button type="submit">Apply filters</button>
+  </form>
+</div>`;
+}
+
+function renderSearchRow(r: RecallResult): string {
+  const first = r.text.replace(/\s+/g, ' ').trim();
+  const subject = first.length > 80 ? first.slice(0, 80) + '…' : first;
+  const age = formatAge(r.recorded_at);
+  // The `finalScore` blend produces values in [0, 1]; we use it as a rough
+  // proxy for confidence in the row since the raw KU confidence is not
+  // exposed by recall(). It's a visualization, not a claim.
+  return `<li>
+    <a class="row-link" href="/brain/ku/${escapeHtml(r.ku_id)}">
+      <div><strong>${escapeHtml(subject)}</strong> <span class="age">· ${age}</span></div>
+      <div class="meta">
+        <span class="pill source">${escapeHtml(r.source_type)}</span>
+        ${r.important ? '<span class="pill" title="Marked important">⭐</span>' : ''}
+        ${confidenceBar(r.finalScore)}
+        <span>score ${r.finalScore.toFixed(2)}</span>
+      </div>
+    </a>
+  </li>`;
 }
 
 /**
