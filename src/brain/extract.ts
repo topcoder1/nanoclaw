@@ -297,11 +297,21 @@ export const defaultLlmCaller: LlmCaller = async (prompt: string) => {
       readEnvValue('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1',
   });
   const model = anthropic('claude-haiku-4-5-20251001');
+  // 4096 gives ~4× headroom over the prior 1024 cap, which truncated dense
+  // emails (e.g. multi-SKU licensing quotes) mid-string and broke JSON.parse.
+  // Claim JSON is compact; going higher buys marginal coverage for quadratic
+  // cost if the model is ever run on a very long input.
   const result = await generateText({
     model,
     messages: [{ role: 'user', content: prompt }],
-    maxOutputTokens: 1024,
+    maxOutputTokens: 4096,
   });
+  if (result.finishReason === 'length') {
+    logger.warn(
+      { textLen: result.text.length },
+      'extractLLM output hit the max token cap — JSON likely truncated',
+    );
+  }
   // Strip Markdown fences if the model wrapped JSON.
   const raw = result.text.replace(/^```(?:json)?\s*|\s*```\s*$/g, '').trim();
   const parsed = JSON.parse(raw) as {

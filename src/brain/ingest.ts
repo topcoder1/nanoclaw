@@ -24,6 +24,9 @@ import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
 import { ensureLegacyCutoverTombstone } from './drop-legacy-tombstone.js';
 import { embedText } from './embed.js';
+import { kuPointId, BRAIN_COLLECTION } from './qdrant.js';
+import { QdrantClient } from '@qdrant/js-client-rest';
+import { QDRANT_URL } from '../config.js';
 import {
   _shutdownEntityQueue,
   createCompanyFromDomain,
@@ -44,6 +47,18 @@ import { shouldSkipBrainExtraction } from './transactional-filter.js';
 import { newId } from './ulid.js';
 
 import { getDb as getNanoclawDb } from '../db.js';
+
+/**
+ * Map the Gmail-alias `email.account` (e.g. "personal", "whoisxml",
+ * "attaxion", "dev") onto the brain schema's two-bucket taxonomy
+ * ('personal' | 'work'). Only the literal `'personal'` lands in the
+ * personal bucket; every other value (including undefined) is treated
+ * as work. This mirrors the heuristic described in
+ * `migrate-knowledge-facts.ts` (sender/account-based triage).
+ */
+function toAccountBucket(raw?: string): 'personal' | 'work' {
+  return raw === 'personal' ? 'personal' : 'work';
+}
 
 // --- Raw event capture (P0, preserved) ------------------------------------
 
@@ -217,12 +232,13 @@ async function runExtractionPipeline(
       entities: entitiesPerClaim[i],
     }));
 
+  const accountBucket = toAccountBucket(email.account);
   const insertKu = db.prepare(
     `INSERT INTO knowledge_units
        (id, text, source_type, source_ref, account, scope, confidence,
         valid_from, recorded_at, topic_key, tags, extracted_by,
         extraction_chain, metadata, needs_review)
-     VALUES (?, ?, 'email', ?, 'work', NULL, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?)`,
+     VALUES (?, ?, 'email', ?, ?, NULL, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?)`,
   );
   const insertLink = db.prepare(
     `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, ?)`,
@@ -234,6 +250,7 @@ async function runExtractionPipeline(
         ku.id,
         ku.claim.text,
         email.thread_id,
+        accountBucket,
         ku.claim.confidence,
         nowIso, // valid_from = now for emails
         nowIso,
@@ -257,7 +274,7 @@ async function runExtractionPipeline(
         kuId: ku.id,
         vector: vec,
         payload: {
-          account: 'work',
+          account: accountBucket,
           scope: null,
           model_version: 'nomic-embed-text-v1.5:768',
           valid_from: nowIso,
@@ -347,6 +364,80 @@ export function startBrainIngest(): void {
   });
 
   logger.info('Brain ingest started (raw_events + P1 extraction pipeline)');
+}
+
+/**
+ * Re-run the P1 extraction pipeline for a previously-ingested raw_event,
+ * discarding any KUs (and their Qdrant vectors) that the prior run produced.
+ *
+ * Intended for one-off backfills when the extractor has changed (e.g. the
+ * LLM call was misconfigured on a prior pass) — NOT for normal operation.
+ * Idempotent: if the raw_event row does not exist, resolves to `{ reprocessed: false }`.
+ */
+export async function reprocessRawEvent(
+  sourceType: string,
+  sourceRef: string,
+): Promise<{ reprocessed: boolean; deletedKus: number }> {
+  const db = getBrainDb();
+  const row = db
+    .prepare(
+      `SELECT payload FROM raw_events WHERE source_type = ? AND source_ref = ?`,
+    )
+    .get(sourceType, sourceRef) as { payload: Buffer } | undefined;
+  if (!row) return { reprocessed: false, deletedKus: 0 };
+
+  // Find existing KUs so we can purge their Qdrant points before the DB rows
+  // disappear (Qdrant cleanup is best-effort — a failure logs but does not
+  // abort the SQLite cleanup).
+  const oldKuIds = (
+    db
+      .prepare(
+        `SELECT id FROM knowledge_units WHERE source_type = ? AND source_ref = ?`,
+      )
+      .all(sourceType, sourceRef) as Array<{ id: string }>
+  ).map((r) => r.id);
+
+  if (oldKuIds.length > 0 && QDRANT_URL) {
+    try {
+      const client = new QdrantClient({ url: QDRANT_URL });
+      await client.delete(BRAIN_COLLECTION, {
+        wait: true,
+        points: oldKuIds.map(kuPointId),
+      });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), sourceRef },
+        'reprocessRawEvent: Qdrant delete failed — orphan points may remain',
+      );
+    }
+  }
+
+  db.transaction(() => {
+    db.prepare(
+      `DELETE FROM ku_entities WHERE ku_id IN (
+         SELECT id FROM knowledge_units WHERE source_type = ? AND source_ref = ?
+       )`,
+    ).run(sourceType, sourceRef);
+    db.prepare(
+      `DELETE FROM knowledge_units WHERE source_type = ? AND source_ref = ?`,
+    ).run(sourceType, sourceRef);
+    db.prepare(
+      `UPDATE raw_events SET processed_at = NULL, process_error = NULL, retry_count = 0
+       WHERE source_type = ? AND source_ref = ?`,
+    ).run(sourceType, sourceRef);
+  })();
+
+  const parsedEmail = JSON.parse(row.payload.toString('utf8')) as ParsedEmail;
+  const fakeRow: RawEventRow = {
+    id: '',
+    source_type: sourceType,
+    source_ref: sourceRef,
+    payload: row.payload,
+    received_at: '',
+    parsedEmail,
+  };
+  await processRawEvent(db, fakeRow);
+  return { reprocessed: true, deletedKus: oldKuIds.length };
 }
 
 /**
