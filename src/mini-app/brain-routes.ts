@@ -36,6 +36,13 @@ export interface BrainRoutesOptions {
    * Brain DB handle. Defaults to the singleton from `getBrainDb()` so
    * production code doesn't need to wire it. Tests pass a fresh in-memory
    * or tmp-file DB.
+   *
+   * NOTE: `markImportant` (from `src/brain/important.ts`) always writes
+   * through the `getBrainDb()` singleton — injecting a different handle
+   * here makes read/write target different DBs. In prod this is fine
+   * because boot wires both to the same singleton. Feedback-endpoint
+   * tests either stub `STORE_DIR` so the singleton resolves to the same
+   * file, or use the singleton directly.
    */
   brainDb?: Database.Database;
 }
@@ -1354,12 +1361,23 @@ function makeReviewWriteQueue(
   return new AsyncWriteQueue<ReviewWrite>(
     async (batch) => {
       const db = getDb();
+      // Guards make both ops idempotent under double-click / race:
+      //   - approve no-ops if already approved or already rejected (avoids
+      //     clobbering confidence on a rejected KU)
+      //   - reject no-ops if already rejected (preserves the original
+      //     superseded_at timestamp in the audit trail)
       const approveStmt = db.prepare(
         `UPDATE knowledge_units
-           SET needs_review = 0, confidence = 1.0 WHERE id = ?`,
+           SET needs_review = 0, confidence = 1.0
+         WHERE id = ?
+           AND needs_review = 1
+           AND superseded_at IS NULL`,
       );
       const rejectStmt = db.prepare(
-        `UPDATE knowledge_units SET superseded_at = ? WHERE id = ?`,
+        `UPDATE knowledge_units
+           SET superseded_at = ?
+         WHERE id = ?
+           AND superseded_at IS NULL`,
       );
       const txn = db.transaction((writes: ReviewWrite[]) => {
         for (const w of writes) {

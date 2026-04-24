@@ -208,4 +208,72 @@ describe('Brain miniapp — feedback POST endpoints', () => {
       .get() as { id: string } | undefined;
     expect(row?.id).toBe('K_soft');
   });
+
+  // --- Idempotency: double-click / race-guard behavior -------------------
+  it('double-reject preserves the original superseded_at (audit trail)', async () => {
+    seedKu(brainDb, 'K_doublereject', { needs_review: 0 });
+    await request(app).post('/api/brain/ku/K_doublereject/reject');
+    await new Promise((r) => setTimeout(r, 120));
+    const firstTs = (
+      brainDb
+        .prepare(
+          `SELECT superseded_at FROM knowledge_units WHERE id = 'K_doublereject'`,
+        )
+        .get() as { superseded_at: string }
+    ).superseded_at;
+    expect(firstTs).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 10));
+    await request(app).post('/api/brain/ku/K_doublereject/reject');
+    await new Promise((r) => setTimeout(r, 120));
+    const secondTs = (
+      brainDb
+        .prepare(
+          `SELECT superseded_at FROM knowledge_units WHERE id = 'K_doublereject'`,
+        )
+        .get() as { superseded_at: string }
+    ).superseded_at;
+    expect(secondTs).toBe(firstTs);
+  });
+
+  it('approve after reject is a no-op (does not un-reject or reset confidence)', async () => {
+    seedKu(brainDb, 'K_rejectedThenApprove', { needs_review: 1, confidence: 0.6 });
+    await request(app).post('/api/brain/ku/K_rejectedThenApprove/reject');
+    await new Promise((r) => setTimeout(r, 120));
+    const afterReject = brainDb
+      .prepare(
+        `SELECT needs_review, confidence, superseded_at FROM knowledge_units WHERE id = 'K_rejectedThenApprove'`,
+      )
+      .get() as { needs_review: number; confidence: number; superseded_at: string | null };
+    expect(afterReject.superseded_at).toBeTruthy();
+    expect(afterReject.confidence).toBe(0.6); // unchanged by reject
+    expect(afterReject.needs_review).toBe(1); // unchanged by reject
+
+    await request(app).post('/api/brain/ku/K_rejectedThenApprove/approve');
+    await new Promise((r) => setTimeout(r, 120));
+    const afterApprove = brainDb
+      .prepare(
+        `SELECT needs_review, confidence, superseded_at FROM knowledge_units WHERE id = 'K_rejectedThenApprove'`,
+      )
+      .get() as { needs_review: number; confidence: number; superseded_at: string | null };
+    // Approve must NOT fire because superseded_at is set — audit-trail intact,
+    // confidence not clobbered back to 1.0.
+    expect(afterApprove.superseded_at).toBe(afterReject.superseded_at);
+    expect(afterApprove.confidence).toBe(0.6);
+    expect(afterApprove.needs_review).toBe(1);
+  });
+
+  it('double-approve is idempotent (no-op on second call)', async () => {
+    seedKu(brainDb, 'K_doubleapprove', { needs_review: 1, confidence: 0.5 });
+    await request(app).post('/api/brain/ku/K_doubleapprove/approve');
+    await new Promise((r) => setTimeout(r, 120));
+    await request(app).post('/api/brain/ku/K_doubleapprove/approve');
+    await new Promise((r) => setTimeout(r, 120));
+    const row = brainDb
+      .prepare(
+        `SELECT needs_review, confidence FROM knowledge_units WHERE id = 'K_doubleapprove'`,
+      )
+      .get() as { needs_review: number; confidence: number };
+    expect(row.needs_review).toBe(0);
+    expect(row.confidence).toBe(1.0);
+  });
 });
