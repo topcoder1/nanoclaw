@@ -35,6 +35,8 @@ import { STORE_DIR } from '../config.js';
 import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
+import { embedText, getEmbeddingModelVersion } from './embed.js';
+import { upsertKu } from './qdrant.js';
 import { newId } from './ulid.js';
 
 export interface MigrationReport {
@@ -44,6 +46,8 @@ export interface MigrationReport {
   legacyRowsSkippedEmpty: number;
   alreadyMigrated: number;
   inserted: number;
+  qdrantWritten: number;
+  qdrantFailed: number;
   startedAt: string;
   finishedAt: string;
   errors: string[];
@@ -74,9 +78,9 @@ interface LegacyRow {
  *   for throughput.
  * - Dry-run: counts and returns but does not insert.
  */
-export function migrateKnowledgeFacts(
+export async function migrateKnowledgeFacts(
   opts: MigrateOptions = {},
-): MigrationReport {
+): Promise<MigrationReport> {
   const dryRun = opts.dryRun ?? false;
   const legacyPath = opts.legacyDbPath ?? path.join(STORE_DIR, 'messages.db');
   const startedAt = new Date().toISOString();
@@ -89,6 +93,8 @@ export function migrateKnowledgeFacts(
     legacyRowsSkippedEmpty: 0,
     alreadyMigrated: 0,
     inserted: 0,
+    qdrantWritten: 0,
+    qdrantFailed: 0,
     startedAt,
     finishedAt: startedAt,
     errors,
@@ -216,11 +222,30 @@ export function migrateKnowledgeFacts(
       }
     });
 
+    // Track the KU rows that made it to SQLite so we can embed + upsert
+    // them to Qdrant below. Each entry = [kuId, text, sourceType, createdAt].
+    const insertedKus: Array<{
+      kuId: string;
+      text: string;
+      sourceType: string;
+      validFrom: string;
+      recordedAt: string;
+    }> = [];
+
     for (let i = 0; i < pending.length; i += BATCH) {
       const slice = pending.slice(i, i + BATCH);
       try {
         doInsert(slice);
         report.inserted += slice.length;
+        for (const row of slice) {
+          insertedKus.push({
+            kuId: row[0],
+            text: row[1],
+            sourceType: row[2],
+            validFrom: row[4],
+            recordedAt: row[5],
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`batch ${i}/${pending.length}: ${msg}`);
@@ -229,6 +254,70 @@ export function migrateKnowledgeFacts(
           'migrateKnowledgeFacts: batch failed — continuing',
         );
       }
+    }
+
+    // Phase B of the migration (design §4): re-embed each inserted KU and
+    // push the vector to Qdrant so recall's semantic leg can find migrated
+    // rows. A Qdrant failure follows the same contract as ingest.ts:217-242
+    // — warn, keep the SQLite row, bump qdrantFailed.
+    //
+    // Bounded concurrency: we run at most CONCURRENCY embeds in flight so
+    // we don't starve CPU on the local Nomic model. Inline gate rather than
+    // a new dep.
+    const CONCURRENCY = 4;
+    const PROGRESS_EVERY = 100;
+    const total = insertedKus.length;
+    let cursor = 0;
+    let done = 0;
+    const modelVersion = getEmbeddingModelVersion();
+
+    async function worker(): Promise<void> {
+      for (;;) {
+        const idx = cursor;
+        cursor++;
+        if (idx >= insertedKus.length) return;
+        const ku = insertedKus[idx];
+        try {
+          const vec = await embedText(ku.text, 'document');
+          await upsertKu({
+            kuId: ku.kuId,
+            vector: vec,
+            payload: {
+              account: 'work',
+              scope: null,
+              model_version: modelVersion,
+              valid_from: ku.validFrom,
+              recorded_at: ku.recordedAt,
+              source_type: ku.sourceType,
+            },
+          });
+          report.qdrantWritten++;
+        } catch (err) {
+          report.qdrantFailed++;
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err), kuId: ku.kuId },
+            'Qdrant upsert failed during migration',
+          );
+        }
+        done++;
+        if (done % PROGRESS_EVERY === 0 || done === total) {
+          logger.info(
+            {
+              done,
+              total,
+              embedded: done,
+              qdrantWritten: report.qdrantWritten,
+              qdrantFailed: report.qdrantFailed,
+            },
+            'migration progress',
+          );
+        }
+      }
+    }
+
+    if (total > 0) {
+      const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker());
+      await Promise.all(workers);
     }
   } finally {
     legacy.close();
@@ -241,6 +330,8 @@ export function migrateKnowledgeFacts(
       inserted: report.inserted,
       alreadyMigrated: report.alreadyMigrated,
       skippedEmpty: report.legacyRowsSkippedEmpty,
+      qdrantWritten: report.qdrantWritten,
+      qdrantFailed: report.qdrantFailed,
       errors: report.errors.length,
       dryRun: report.dryRun,
     },

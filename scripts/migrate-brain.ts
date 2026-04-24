@@ -13,7 +13,7 @@ import { migrateKnowledgeFacts } from '../src/brain/migrate-knowledge-facts.js';
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 
-const report = migrateKnowledgeFacts({ dryRun });
+const report = await migrateKnowledgeFacts({ dryRun });
 /* eslint-disable no-console */
 console.log('--- migrate-brain report ---');
 console.log(`mode:                  ${dryRun ? 'DRY RUN' : 'APPLY'}`);
@@ -22,6 +22,8 @@ console.log(`legacyRowsTotal:       ${report.legacyRowsTotal}`);
 console.log(`alreadyMigrated:       ${report.alreadyMigrated}`);
 console.log(`inserted${dryRun ? ' (planned)' : ''}:           ${report.inserted}`);
 console.log(`skippedEmpty:          ${report.legacyRowsSkippedEmpty}`);
+console.log(`qdrantWritten:         ${report.qdrantWritten}`);
+console.log(`qdrantFailed:          ${report.qdrantFailed}`);
 console.log(`errors:                ${report.errors.length}`);
 if (report.errors.length > 0) {
   for (const e of report.errors) console.log(`  - ${e}`);
