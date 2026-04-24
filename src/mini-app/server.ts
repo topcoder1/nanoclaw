@@ -18,7 +18,7 @@ import { logger } from '../logger.js';
 import type { TaskStep, TaskLog } from './templates/task-detail.js';
 import { PendingSendRegistry } from './pending-send.js';
 import { createActionsRouter } from './actions.js';
-import { createBrainRoutes } from './brain-routes.js';
+import { createBrainRoutes, createBrainApiRoutes } from './brain-routes.js';
 import {
   detectSignUrl,
   isSignInvite,
@@ -58,8 +58,11 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     }),
   );
   // Brain miniapp — read/feedback UI over brain.db. Sub-router keeps the
-  // 1130-line main server.ts uncluttered.
+  // 1130-line main server.ts uncluttered. The `/api/brain/*` JSON
+  // endpoints live on a parallel router because express scopes each
+  // router to a single mount path.
   app.use('/brain', createBrainRoutes({ brainDb: opts.brainDb }));
+  app.use('/api/brain', createBrainApiRoutes({ brainDb: opts.brainDb }));
 
   // Lightweight queue fingerprint for polling refresh. Returns sorted IDs so
   // the client can detect any add/remove/resolve without re-rendering HTML.

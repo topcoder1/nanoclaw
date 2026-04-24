@@ -102,4 +102,106 @@ describe('Brain miniapp — skeleton', () => {
     const res = await request(app).get('/brain');
     expect(res.text).toContain('<span class="count">(2)</span>');
   });
+
+  it('home page renders the search form posting to /brain/search', async () => {
+    const res = await request(app).get('/brain');
+    expect(res.text).toMatch(
+      /<form class="searchbox" action="\/brain\/search" method="get">/,
+    );
+    expect(res.text).toContain('name="q"');
+  });
+
+  it('home page renders stats: KU live, superseded, entities, raw 24h, cost', async () => {
+    const nowIso = new Date().toISOString();
+    brainDb
+      .prepare(
+        `INSERT INTO knowledge_units
+           (id, text, source_type, account, valid_from, recorded_at,
+            confidence, superseded_at)
+         VALUES
+           ('a', 't', 'email', 'work', ?, ?, 1.0, NULL),
+           ('b', 't', 'email', 'work', ?, ?, 1.0, NULL),
+           ('c', 't', 'email', 'work', ?, ?, 1.0, ?)`,
+      )
+      .run(nowIso, nowIso, nowIso, nowIso, nowIso, nowIso, nowIso);
+    brainDb
+      .prepare(
+        `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
+         VALUES ('e1', 'person', ?, ?)`,
+      )
+      .run(nowIso, nowIso);
+    brainDb
+      .prepare(
+        `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
+         VALUES ('r1', 'email', 'thread-1', X'', ?)`,
+      )
+      .run(nowIso);
+    const today = nowIso.slice(0, 10);
+    brainDb
+      .prepare(
+        `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
+         VALUES ('c1', ?, 'openai', 'embed', 100, 0.12, ?)`,
+      )
+      .run(today, nowIso);
+
+    const res = await request(app).get('/brain');
+    expect(res.text).toContain('2 KUs live');
+    expect(res.text).toContain('1 superseded');
+    expect(res.text).toContain('1 entity');
+    expect(res.text).toContain('1 raw event');
+    expect(res.text).toContain('$0.12 MTD');
+  });
+
+  it('home page recent-activity section lists raw_events newest first', async () => {
+    const older = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const newer = new Date().toISOString();
+    brainDb
+      .prepare(
+        `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
+         VALUES ('r_old', 'email', 'thread-OLDER', X'', ?),
+                ('r_new', 'gong', 'call-NEWER', X'', ?)`,
+      )
+      .run(older, newer);
+
+    const res = await request(app).get('/brain');
+    const idxNewer = res.text.indexOf('call-NEWER');
+    const idxOlder = res.text.indexOf('thread-OLDER');
+    expect(idxNewer).toBeGreaterThan(-1);
+    expect(idxOlder).toBeGreaterThan(-1);
+    expect(idxNewer).toBeLessThan(idxOlder);
+  });
+
+  it('home page escapes user-supplied source_ref', async () => {
+    brainDb
+      .prepare(
+        `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
+         VALUES ('x', 'email', ?, X'', ?)`,
+      )
+      .run('<script>alert(1)</script>', new Date().toISOString());
+
+    const res = await request(app).get('/brain');
+    expect(res.text).not.toContain('<script>alert(1)</script>');
+    expect(res.text).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('GET /api/brain/status returns JSON fingerprint', async () => {
+    const nowIso = new Date().toISOString();
+    brainDb
+      .prepare(
+        `INSERT INTO knowledge_units
+           (id, text, source_type, account, valid_from, recorded_at, confidence)
+         VALUES ('k1', 't', 'email', 'work', ?, ?, 1.0)`,
+      )
+      .run(nowIso, nowIso);
+
+    const res = await request(app).get('/api/brain/status');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('json');
+    expect(res.body).toEqual({
+      ku: 1,
+      entities: 0,
+      review: 0,
+      recent: [],
+    });
+  });
 });
