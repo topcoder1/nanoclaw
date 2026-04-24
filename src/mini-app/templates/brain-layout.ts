@@ -109,12 +109,28 @@ export function brainShell(
   return `<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>${SHARED_CSS}</style>
 </head><body>
 ${renderNav(opts)}
 <main>
 ${body}
 </main>
+<script>
+// Telegram WebApp: request full viewport + disable vertical swipes so the
+// sheet doesn't collapse when scrolling long lists. Safe no-op outside
+// Telegram (tg is undefined).
+(function(){
+  try {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    tg.ready();
+    tg.expand();
+    if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+    if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
+  } catch(_) { /* non-Telegram context */ }
+})();
+</script>
 </body></html>`;
 }
 
