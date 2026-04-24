@@ -104,6 +104,7 @@ import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
 import { startProviderProbe } from './brain/provider-probe.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
+import { handleBrainStreamCommand } from './brain/stream-command.js';
 import { startReconcileSchedule } from './brain/reconcile.js';
 import {
   collectWeeklyDigest,
@@ -1440,6 +1441,25 @@ async function main(): Promise<void> {
             logger.error({ err, chatJid }, '/brainhealth handler crashed');
           }
         })().catch((err) => logger.error({ err }, '/brainhealth error'));
+        return;
+      }
+
+      // Brain /brainstream command — ingestion transparency (last 24h).
+      // Intercepts here so the agent container is never invoked.
+      if (trimmed === '/brainstream' || trimmed.startsWith('/brainstream ')) {
+        (async () => {
+          const args = trimmed.slice('/brainstream'.length);
+          try {
+            // TODO(P2): derive account from chatJid once personal ingestion lands.
+            const reply = await handleBrainStreamCommand(args, {
+              account: 'work',
+            });
+            const ch = findChannel(channels, chatJid);
+            if (ch) await ch.sendMessage(chatJid, reply);
+          } catch (err) {
+            logger.error({ err, chatJid }, '/brainstream handler crashed');
+          }
+        })().catch((err) => logger.error({ err }, '/brainstream error'));
         return;
       }
 
