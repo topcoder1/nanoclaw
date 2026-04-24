@@ -10,6 +10,17 @@ vi.mock('../../logger.js', () => ({
   },
 }));
 
+// Force QDRANT_URL undefined so getClient() returns null when no fake is
+// injected. Without this mock, the "Qdrant client unavailable" test flakes
+// in dev envs where Qdrant is running locally: _setQdrantClientForTest(null)
+// clears the cached client, but getClient() then instantiates a fresh one
+// against the live URL and calls hit Qdrant for real.
+vi.mock('../../config.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../../config.js')>('../../config.js');
+  return { ...actual, QDRANT_URL: '' };
+});
+
 // Fake Qdrant client used across tests.
 function makeFakeClient() {
   return {
