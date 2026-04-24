@@ -814,7 +814,308 @@ ${filtersHtml}
     );
   });
 
+  // --- GET /brain/review — needs_review queue --------------------------
+  router.get('/review', (_req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const rows = db
+      .prepare(
+        `SELECT id, text, source_type, source_ref, recorded_at, confidence
+           FROM knowledge_units
+          WHERE needs_review = 1 AND superseded_at IS NULL
+          ORDER BY confidence ASC, recorded_at DESC
+          LIMIT 200`,
+      )
+      .all() as Array<{
+      id: string;
+      text: string;
+      source_type: string;
+      source_ref: string | null;
+      recorded_at: string;
+      confidence: number;
+    }>;
+
+    const listHtml = rows.length
+      ? `<ul>${rows.map(renderReviewRow).join('')}</ul>`
+      : '<p class="empty">Nothing to review — the brain is tidy.</p>';
+
+    const body = `
+<h1>Review queue (${rows.length})</h1>
+<div class="card">${listHtml}</div>
+<script>
+(function(){
+  async function post(id,path){
+    const r=await fetch('/api/brain/ku/'+encodeURIComponent(id)+path,{method:'POST',headers:{'content-type':'application/json'}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }
+  document.querySelectorAll('li.review-row').forEach(row=>{
+    const id=row.dataset.kuId;
+    const msg=row.querySelector('.msg');
+    row.querySelector('.btn-approve')?.addEventListener('click',async e=>{
+      e.preventDefault();const b=e.currentTarget;b.disabled=true;msg.textContent='';
+      try{await post(id,'/approve');row.style.display='none';}catch(err){msg.textContent=err.message;b.disabled=false;}
+    });
+    row.querySelector('.btn-reject')?.addEventListener('click',async e=>{
+      e.preventDefault();const b=e.currentTarget;
+      if(!confirm('Reject this KU?'))return;
+      b.disabled=true;msg.textContent='';
+      try{await post(id,'/reject');row.style.display='none';}catch(err){msg.textContent=err.message;b.disabled=false;}
+    });
+  });
+  // Poll — reload when the queue shrinks/grows from other tabs.
+  const initialIds=${JSON.stringify(rows.map((r) => r.id))};
+  let inFlight=false;
+  async function check(){
+    if(inFlight||document.hidden)return;
+    inFlight=true;
+    try{
+      const r=await fetch('/api/brain/status',{cache:'no-store'});
+      if(!r.ok)return;
+      const j=await r.json();
+      if(j.review!==initialIds.length)location.reload();
+    }catch(_){}finally{inFlight=false;}
+  }
+  setInterval(check,15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});
+  window.addEventListener('focus',check);
+})();
+</script>`;
+    res.type('html').send(
+      brainShell('Review — Brain', body, {
+        activeNav: 'review',
+        reviewCount,
+      }),
+    );
+  });
+
+  // --- GET /brain/timeline — expanded /brainstream --------------------
+  router.get('/timeline', (req, res) => {
+    const db = getDb();
+    const reviewCount = getReviewCount(db);
+    const source = typeof req.query.source === 'string' ? req.query.source : '';
+    const fromStr = typeof req.query.from === 'string' ? req.query.from : '';
+    const toStr = typeof req.query.to === 'string' ? req.query.to : '';
+    const rawPage =
+      typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+    const PAGE_SIZE = 50;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    if (source) {
+      filters.push('source_type = ?');
+      params.push(source);
+    }
+    if (fromStr) {
+      filters.push('received_at >= ?');
+      params.push(fromStr);
+    }
+    if (toStr) {
+      filters.push('received_at <= ?');
+      params.push(toStr);
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const total = (
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM raw_events ${whereClause}`)
+        .get(...params) as { n: number }
+    ).n;
+
+    const events = db
+      .prepare(
+        `SELECT id, source_type, source_ref, received_at, processed_at, process_error
+           FROM raw_events
+           ${whereClause}
+          ORDER BY received_at DESC
+          LIMIT ? OFFSET ?`,
+      )
+      .all(...params, PAGE_SIZE, offset) as Array<{
+      id: string;
+      source_type: string;
+      source_ref: string;
+      received_at: string;
+      processed_at: string | null;
+      process_error: string | null;
+    }>;
+
+    // Correlate KUs by source_ref for each event on the page so we can
+    // render snippets inline (same pattern as /brainstream).
+    const kusByRef = new Map<
+      string,
+      Array<{ id: string; text: string; confidence: number; needs_review: number }>
+    >();
+    if (events.length > 0) {
+      const refs = events.map((e) => e.source_ref);
+      const placeholders = refs.map(() => '?').join(',');
+      const kuRows = db
+        .prepare(
+          `SELECT id, text, source_ref, confidence, needs_review
+             FROM knowledge_units
+            WHERE source_ref IN (${placeholders})`,
+        )
+        .all(...refs) as Array<{
+        id: string;
+        text: string;
+        source_ref: string;
+        confidence: number;
+        needs_review: number;
+      }>;
+      for (const k of kuRows) {
+        const arr = kusByRef.get(k.source_ref) ?? [];
+        arr.push(k);
+        kusByRef.set(k.source_ref, arr);
+      }
+    }
+
+    const filterForm = `
+<div class="card">
+  <form action="/brain/timeline" method="get" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px">
+    <label>source
+      <select name="source">
+        <option value=""${source === '' ? ' selected' : ''}>any</option>
+        <option value="email"${source === 'email' ? ' selected' : ''}>email</option>
+        <option value="gong"${source === 'gong' ? ' selected' : ''}>gong</option>
+        <option value="hubspot"${source === 'hubspot' ? ' selected' : ''}>hubspot</option>
+        <option value="tracked_item"${source === 'tracked_item' ? ' selected' : ''}>tracked_item</option>
+        <option value="manual"${source === 'manual' ? ' selected' : ''}>manual</option>
+        <option value="attachment"${source === 'attachment' ? ' selected' : ''}>attachment</option>
+        <option value="browser"${source === 'browser' ? ' selected' : ''}>browser</option>
+      </select>
+    </label>
+    <label>from <input type="date" name="from" value="${escapeHtml(fromStr)}"></label>
+    <label>to <input type="date" name="to" value="${escapeHtml(toStr)}"></label>
+    <button type="submit">Apply</button>
+  </form>
+</div>`;
+
+    const rowsHtml = events.length
+      ? `<ul>${events
+          .map((e) => renderTimelineRow(e, kusByRef.get(e.source_ref) ?? []))
+          .join('')}</ul>`
+      : '<p class="empty">No events match this filter.</p>';
+
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const qs = (p: number) => {
+      const ps = new URLSearchParams();
+      if (source) ps.set('source', source);
+      if (fromStr) ps.set('from', fromStr);
+      if (toStr) ps.set('to', toStr);
+      ps.set('page', String(p));
+      return ps.toString();
+    };
+    const pager =
+      totalPages > 1
+        ? `<p class="meta">Page ${page} of ${totalPages} · ` +
+          (page > 1 ? `<a href="?${qs(page - 1)}">← prev</a>` : '') +
+          (page > 1 && page < totalPages ? ' · ' : '') +
+          (page < totalPages ? `<a href="?${qs(page + 1)}">next →</a>` : '') +
+          '</p>'
+        : '';
+
+    const recentIdsForFingerprint = events.slice(0, 10).map((e) => e.id);
+
+    const body = `
+<h1>Timeline (${total})</h1>
+${filterForm}
+<div class="card">${rowsHtml}</div>
+${pager}
+<script>
+(function(){
+  const initialRecent=${JSON.stringify(recentIdsForFingerprint)};
+  let inFlight=false;
+  async function check(){
+    if(inFlight||document.hidden)return;
+    inFlight=true;
+    try{
+      const r=await fetch('/api/brain/status',{cache:'no-store'});
+      if(!r.ok)return;
+      const j=await r.json();
+      if(JSON.stringify(j.recent)!==JSON.stringify(initialRecent))location.reload();
+    }catch(_){}finally{inFlight=false;}
+  }
+  setInterval(check,15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});
+  window.addEventListener('pageshow',check);
+})();
+</script>`;
+    res.type('html').send(
+      brainShell('Timeline — Brain', body, {
+        activeNav: 'timeline',
+        reviewCount,
+      }),
+    );
+  });
+
   return router;
+}
+
+function renderReviewRow(row: {
+  id: string;
+  text: string;
+  source_type: string;
+  source_ref: string | null;
+  recorded_at: string;
+  confidence: number;
+}): string {
+  const snippet = row.text.length > 120 ? row.text.slice(0, 120) + '…' : row.text;
+  return `<li class="review-row" data-ku-id="${escapeHtml(row.id)}">
+    <div>
+      <a href="/brain/ku/${escapeHtml(row.id)}"><strong>${escapeHtml(snippet)}</strong></a>
+    </div>
+    <div class="meta">
+      <span class="pill source">${escapeHtml(row.source_type)}</span>
+      ${confidenceBar(row.confidence)}
+      <span>confidence ${row.confidence.toFixed(2)}</span>
+      <span>· ${formatAge(row.recorded_at)}</span>
+    </div>
+    <div style="margin-top:6px">
+      <button class="feedback-btn approve btn-approve">🟢 Approve</button>
+      <button class="feedback-btn reject btn-reject">🔴 Reject</button>
+      <span class="msg meta" style="margin-left:10px"></span>
+    </div>
+  </li>`;
+}
+
+function renderTimelineRow(
+  event: {
+    id: string;
+    source_type: string;
+    source_ref: string;
+    received_at: string;
+    processed_at: string | null;
+    process_error: string | null;
+  },
+  kus: Array<{ id: string; text: string; confidence: number; needs_review: number }>,
+): string {
+  const kuList = kus.length
+    ? `<ul style="margin-top:6px">${kus
+        .map((k) => {
+          const snippet = k.text.length > 80 ? k.text.slice(0, 80) + '…' : k.text;
+          return `<li style="padding:4px 0;border:none">
+            <a href="/brain/ku/${escapeHtml(k.id)}">${escapeHtml(snippet)}</a>
+            <span class="meta">· conf ${k.confidence.toFixed(2)}${k.needs_review ? ' · needs_review' : ''}</span>
+          </li>`;
+        })
+        .join('')}</ul>`
+    : '';
+  const status = event.process_error
+    ? `<span class="pill">error</span>`
+    : event.processed_at
+      ? `<span class="pill">processed</span>`
+      : `<span class="pill">pending</span>`;
+
+  return `<li>
+    <div>
+      <span class="age">${formatAge(event.received_at)}</span>
+      <span class="pill source">${escapeHtml(event.source_type)}</span>
+      <code>${escapeHtml(event.source_ref)}</code>
+      ${status}
+    </div>
+    ${kuList}
+  </li>`;
 }
 
 function renderSearchFiltersForm(params: {
