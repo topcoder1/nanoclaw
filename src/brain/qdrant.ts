@@ -1,0 +1,158 @@
+/**
+ * Brain-specific Qdrant client (v2 §3, §11).
+ *
+ * Separate from `src/memory/knowledge-store.ts` — that module owns the
+ * legacy `nanoclaw_knowledge` collection (1536d / OpenAI). This module
+ * owns the new brain collection `ku_nomic-embed-text-v1.5_768`. The two
+ * exist in parallel during the P0→P2 migration window.
+ *
+ * Every upsert/search MUST include the `model_version` filter (design
+ * §3.3) so we never mix embeddings from different models.
+ */
+
+import { QdrantClient } from '@qdrant/js-client-rest';
+
+import { QDRANT_URL } from '../config.js';
+import { logger } from '../logger.js';
+
+import { EMBEDDING_DIMS, getEmbeddingModelVersion } from './embed.js';
+
+// Collection name: `ku_<model>_<dim>`. Underscores separate parts; hyphens
+// inside the model tag are allowed by Qdrant (verified in docs) but we
+// keep the form close to the design. Example:
+//   ku_nomic-embed-text-v1.5_768
+export const BRAIN_COLLECTION = `ku_nomic-embed-text-v1.5_${EMBEDDING_DIMS}`;
+
+export interface KuPayload {
+  account: 'personal' | 'work';
+  scope?: string[] | null;
+  model_version: string;
+  valid_from: string;
+  recorded_at: string;
+  source_type: string;
+  // Free-form additions: topic_key, tags, etc. are fine — Qdrant stores the
+  // whole object.
+  [extra: string]: unknown;
+}
+
+export interface UpsertKuInput {
+  kuId: string;
+  vector: number[];
+  payload: KuPayload;
+}
+
+export interface SearchFilter {
+  account?: 'personal' | 'work';
+  scope?: string; // single tag — an OR across the JSON array. Simple case for P1.
+  modelVersion: string; // REQUIRED — non-negotiable per design §3.3
+}
+
+export interface BrainSearchHit {
+  id: string;
+  score: number;
+  payload: KuPayload;
+}
+
+let client: QdrantClient | null = null;
+
+/** @internal — swap the cached client for tests. */
+export function _setQdrantClientForTest(c: QdrantClient | null): void {
+  client = c;
+}
+
+function getClient(): QdrantClient | null {
+  if (client) return client;
+  if (!QDRANT_URL) return null;
+  client = new QdrantClient({ url: QDRANT_URL });
+  return client;
+}
+
+/**
+ * Ensure the brain collection exists with 768d cosine vectors and default
+ * HNSW settings. No-op if QDRANT_URL is not set. Safe to call repeatedly.
+ */
+export async function ensureBrainCollection(): Promise<void> {
+  const c = getClient();
+  if (!c) {
+    logger.info('QDRANT_URL not set — skipping ensureBrainCollection');
+    return;
+  }
+  try {
+    const exists = await c.collectionExists(BRAIN_COLLECTION);
+    if (exists.exists) return;
+    await c.createCollection(BRAIN_COLLECTION, {
+      vectors: { size: EMBEDDING_DIMS, distance: 'Cosine' },
+    });
+    logger.info({ collection: BRAIN_COLLECTION }, 'Brain Qdrant collection created');
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'ensureBrainCollection failed (non-fatal)',
+    );
+  }
+}
+
+/**
+ * Upsert a single KU vector to Qdrant. The payload MUST carry model_version
+ * so retrieval can filter by it. We default it from `getEmbeddingModelVersion()`
+ * if the caller forgets — cheaper than silently writing an unfilterable point.
+ */
+export async function upsertKu(input: UpsertKuInput): Promise<void> {
+  const c = getClient();
+  if (!c) return;
+  const payload: KuPayload = {
+    ...input.payload,
+    model_version: input.payload.model_version ?? getEmbeddingModelVersion(),
+  };
+  await c.upsert(BRAIN_COLLECTION, {
+    wait: true,
+    points: [
+      {
+        id: input.kuId,
+        vector: input.vector,
+        payload: payload as Record<string, unknown>,
+      },
+    ],
+  });
+}
+
+/**
+ * Semantic search against the brain collection. `filter.modelVersion` is
+ * required — callers should pass `getEmbeddingModelVersion()`. Returns
+ * a flat list of hits, each with a string id matching the KU row.
+ */
+export async function searchSemantic(
+  queryVector: number[],
+  filter: SearchFilter,
+  topK: number,
+): Promise<BrainSearchHit[]> {
+  const c = getClient();
+  if (!c) return [];
+  const must: Array<Record<string, unknown>> = [
+    { key: 'model_version', match: { value: filter.modelVersion } },
+  ];
+  if (filter.account) {
+    must.push({ key: 'account', match: { value: filter.account } });
+  }
+  if (filter.scope) {
+    must.push({ key: 'scope', match: { value: filter.scope } });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const results = (await c.search(BRAIN_COLLECTION, {
+    vector: queryVector,
+    limit: topK,
+    filter: { must },
+    with_payload: true,
+  })) as Array<{
+    id: string | number;
+    score: number;
+    payload?: Record<string, unknown> | null;
+  }>;
+
+  return results.map((r) => ({
+    id: String(r.id),
+    score: r.score,
+    payload: (r.payload ?? {}) as KuPayload,
+  }));
+}
