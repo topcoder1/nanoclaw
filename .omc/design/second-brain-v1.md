@@ -83,22 +83,37 @@ Ship a `claw know <query>` subcommand that performs an on-demand walk:
 
 **Why this first**: it proves whether the merged-output format works before we commit infra. If the merge is noisy or confusing, we fix it in CLI only. No wasted daemon work.
 
-### v1 — repo indexer (the big piece)
+### v1.0 — on-demand repo indexer (shipped 2026-04-24)
 
-Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw:
-- Watches a list of paths from `~/.claw/repos.yaml` via `fswatch`
-- Debounces changes, re-indexes modified files only
-- Honors `.gitignore` + optional `.clawignore`
-- Content-hashed: skips re-embed for unchanged files
-- Stores `git_sha` on each KU for provenance + drift detection
-- Writes into the same brain.db with `source_type='repo'`
+`claw sync [--repo NAME | --all]` subcommand in the existing `claw` CLI.
 
-File-level KU granularity for v1 (one KU per file, title = path, text = content). Claim-level extraction deferred.
+- Uses `git ls-files` per repo so `.gitignore` is honored for free; falls back to a filesystem walk with a hardcoded skip-list for non-git dirs
+- Indexes `.md`, `.mdx`, and root-level README/CHANGELOG/CONTRIBUTING/LICENSE files only (code files deferred to v1.1)
+- Skips binaries (null-byte sniff) and files larger than 64 KB
+- Deterministic KU id (`repo-<sha256(source_ref)[:24]>`) so re-syncing the same file upserts in place instead of churning FTS
+- `source_ref` format: `<repo_name>:<relative_path>`
+- `source_type='repo'`; `account` pulled from `~/.claw/repos.yaml` per-repo (default `work`); `tags` array copied through
+- Writes directly to brain.db via Python `sqlite3` — no Node subprocess, no embeddings (FTS-only retrieval for now)
+- FTS5 picks up new rows via the existing `ku_fts_ai` trigger; no extra plumbing
 
-**Success criteria**:
-- Initial index of ~40k files completes in <10 min
-- Steady-state: a saved file shows up in `claw know` within <30s
-- `claw know` latency stays <100ms across email + code at this scale
+Shipped with **1,136 files indexed across 32 repos in ~5s** (initial full sync).
+
+Deliberate v1.0 non-features:
+- No `fswatch` daemon. Sync is on-demand (`claw sync`) or via cron (user-configured).
+- No code file indexing.
+- No embeddings (semantic search stays email-only until v1.1).
+- No `git_sha` provenance (metadata stores mtime + file_size; that's enough to start).
+
+### v1.1 — semantic + code files (planned)
+
+Two upgrades that matter most once v1.0 is in use:
+
+1. **Embed repo KUs with the same Nomic 768-d model used for emails.** Adds ~5ms per file; initial 1,136-file sync → ~6s. Unlocks semantic queries like "where is auth handled" matching files that don't contain "auth" literally.
+2. **Index source code files.** Opt-in per repo (`scope: docs+code` in repos.yaml). Chunk by symbol boundaries for `.ts` / `.py` / `.go`; fall back to 4KB rolling windows. Adds potentially 5–50× more KUs — worth it only if v1.0's doc-only coverage proves too narrow.
+
+### v1.2 — fswatch daemon (planned)
+
+Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watching paths from `~/.claw/repos.yaml` via `fswatch`. Debounces changes, re-indexes modified files only. Deferred until (a) v1.0 + v1.1 retrieval is felt-to-be-useful and (b) manual `claw sync` + nightly cron becomes annoying. Likely trigger: team grows beyond one person, or you want "saved a file → searchable within 30s" latency.
 
 ### v2 — journals + user capture inbox
 
@@ -143,6 +158,8 @@ Two additions, both writes:
 - **2026-04-24**: SP KB backend is **ChromaDB** (not Qdrant as in the brain). Relevant only if we ever want to unify vector infra; for v1 it's opaque behind the HTTP boundary.
 - **2026-04-24**: v0 CLI uses FTS5-only against brain.db. No Node subprocess, no new HTTP endpoint. Upgrade path: add `/api/brain/recall` HTTP wrapper when BM25 ranking proves insufficient.
 - **2026-04-24**: `~/.claw/repos.yaml` is the canonical repo inventory for the indexer. 31 tracked to start.
+- **2026-04-24**: v1.0 repo indexer shipped — 1,136 markdown/README files across 32 repos, ~5s initial sync, upserts by deterministic id, FTS-only retrieval for now.
+- **2026-04-24**: `claw sync` is Python (not Node) so it has zero subprocess startup cost and can write to brain.db directly. Schema compatibility risk: if nanoclaw adds a NOT NULL column to `knowledge_units`, the sync will fail loudly until the column gets a DEFAULT or we add it to the Python INSERT.
 
 ## What this doc is NOT yet
 

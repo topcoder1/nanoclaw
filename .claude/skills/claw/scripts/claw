@@ -19,11 +19,17 @@ Brain / second-brain subcommands:
   claw know "Q4 renewal" --brain-only       # skip SP lookup
   claw know "Q4 renewal" --kb-only          # skip local brain
   claw know "alice mentioned" --json        # raw JSON output
+
+Repo indexing (v1.0 — markdown + READMEs only; code files in v1.1):
+  claw sync                                 # index all tracked repos from ~/.claw/repos.yaml
+  claw sync --repo nanoclaw                 # just one repo (by name or path)
+  claw sync --dry-run                       # report what would change without writing
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -34,6 +40,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Globals ─────────────────────────────────────────────────────────────────
@@ -359,10 +366,17 @@ def _query_brain(query: str, limit: int, project: str | None) -> list[dict]:
     out = []
     for row in rows:
         ku_id, text, src_type, src_ref, account, bm25 = row
+        # For repo files, the source_ref (e.g. "nanoclaw:docs/README.md") is a
+        # much better title than the file's first line — which is often
+        # boilerplate like `<p align="center">` or `---`.
+        if src_type == "repo" and src_ref:
+            title = src_ref
+        else:
+            title = (text or "").split("\n", 1)[0][:140]
         out.append({
             "source": "brain",
             "id": ku_id,
-            "title": (text or "").split("\n", 1)[0][:140],
+            "title": title,
             "score": _normalize_bm25(bm25),
             "meta": {
                 "source_type": src_type,
@@ -413,7 +427,16 @@ def _query_superpilot(query: str, limit: int, tags: str | None,
 
 
 def _render_hit(hit: dict, width: int) -> str:
-    tag = "🧠 brain" if hit["source"] == "brain" else "📚 kb   "
+    src_type = (hit.get("meta") or {}).get("source_type")
+    if hit["source"] == "brain":
+        if src_type == "repo":
+            tag = "📄 repo "
+        elif src_type == "email":
+            tag = "✉️  email"
+        else:
+            tag = "🧠 brain"
+    else:
+        tag = "📚 kb   "
     score = f"{hit['score']:.2f}"
     title = hit["title"].replace("\n", " ")
     if len(title) > width:
@@ -489,9 +512,287 @@ def cmd_know(argv: list[str]) -> int:
     return 0
 
 
+# ── `claw sync` — repo → brain.db indexer (v1.0 markdown + README only) ────
+
+_REPOS_YAML = Path.home() / ".claw" / "repos.yaml"
+_MAX_FILE_BYTES = 64 * 1024      # skip files larger than this
+_TEXT_SNIFF_BYTES = 512          # bytes read to check for binary content
+
+
+def _load_repos_config() -> dict:
+    if not _REPOS_YAML.exists():
+        sys.exit(f"error: {_REPOS_YAML} not found. Create it with a `repos:` "
+                 f"list — see second-brain-v1.md design doc.")
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        sys.exit("error: PyYAML required for `claw sync`. Install with "
+                 "`pip3 install pyyaml` or `brew install pyyaml`.")
+    with _REPOS_YAML.open() as f:
+        cfg = yaml.safe_load(f) or {}
+    return cfg
+
+
+def _is_indexable_name(path: Path) -> bool:
+    """v1.0 indexing rules: markdown files and root-level READMEs/etc.
+    Code files deferred to v1.1."""
+    suffix = path.suffix.lower()
+    if suffix in (".md", ".mdx"):
+        return True
+    name_lower = path.name.lower()
+    if name_lower in ("readme", "changelog", "contributing", "license"):
+        return True
+    if any(name_lower.startswith(p) for p in (
+        "readme.", "changelog.", "contributing.", "license.",
+    )):
+        return True
+    return False
+
+
+def _looks_binary(path: Path) -> bool:
+    try:
+        with path.open("rb") as f:
+            chunk = f.read(_TEXT_SNIFF_BYTES)
+        return b"\x00" in chunk
+    except OSError:
+        return True
+
+
+def _git_tracked_files(root: Path) -> list[Path] | None:
+    """Use `git ls-files` so we automatically respect .gitignore. Returns None
+    if the dir is not a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root, capture_output=True, check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    names = [n for n in result.stdout.decode("utf-8", "replace").split("\0") if n]
+    return [root / n for n in names]
+
+
+def _walk_filesystem(root: Path) -> list[Path]:
+    """Fallback when a repo isn't a git checkout — walk the tree, skip obvious
+    junk dirs."""
+    skip_dirs = {".git", "node_modules", ".venv", "__pycache__", "dist",
+                 "build", ".next", ".claude", "coverage"}
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs
+                       and not d.startswith(".")]
+        for f in filenames:
+            out.append(Path(dirpath) / f)
+    return out
+
+
+def _read_file_safely(path: Path) -> str | None:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size == 0 or size > _MAX_FILE_BYTES:
+        return None
+    if _looks_binary(path):
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _repo_ku_id(source_ref: str) -> str:
+    """Deterministic id per (source_type='repo', source_ref) so re-syncing
+    updates in place instead of creating new rows (and churning FTS)."""
+    h = hashlib.sha256(f"repo:{source_ref}".encode("utf-8")).hexdigest()
+    return f"repo-{h[:24]}"
+
+
+def _upsert_repo_ku(
+    conn: sqlite3.Connection,
+    *,
+    source_ref: str,
+    text: str,
+    account: str,
+    tags: list[str],
+    metadata: dict,
+    now_iso: str,
+) -> str:
+    """Replace-by-id upsert. FTS5 trigger handles the text re-index."""
+    if account not in ("personal", "work"):
+        account = "work"
+    ku_id = _repo_ku_id(source_ref)
+    tags_json = json.dumps(tags) if tags else None
+    metadata_json = json.dumps(metadata, sort_keys=True) if metadata else None
+    conn.execute(
+        """INSERT OR REPLACE INTO knowledge_units
+             (id, text, source_type, source_ref, account, scope, confidence,
+              valid_from, recorded_at, topic_key, tags, extracted_by,
+              extraction_chain, metadata, needs_review, important)
+           VALUES (?, ?, 'repo', ?, ?, NULL, 1.0, ?, ?, NULL, ?, 'claw-sync',
+                   NULL, ?, 0, 0)""",
+        (ku_id, text, source_ref, account, now_iso, now_iso,
+         tags_json, metadata_json),
+    )
+    return ku_id
+
+
+def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool
+                   ) -> dict:
+    path_raw = repo_cfg.get("path")
+    if not path_raw:
+        return {"ok": False, "reason": "no-path"}
+    root = Path(os.path.expanduser(path_raw)).resolve()
+    if not root.is_dir():
+        return {"ok": False, "reason": "not-found", "path": str(root)}
+
+    files = _git_tracked_files(root) or _walk_filesystem(root)
+    files = [f for f in files if _is_indexable_name(f)]
+
+    account = repo_cfg.get("account", "work")
+    tags = list(repo_cfg.get("tags") or [])
+    repo_name = root.name
+
+    indexed = 0
+    skipped_binary = 0
+    skipped_large = 0
+    now_iso = datetime.now(timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+
+    for fpath in files:
+        content = _read_file_safely(fpath)
+        if content is None:
+            # Figure out why for accurate counters.
+            try:
+                size = fpath.stat().st_size
+                if size > _MAX_FILE_BYTES:
+                    skipped_large += 1
+                else:
+                    skipped_binary += 1
+            except OSError:
+                skipped_binary += 1
+            continue
+        try:
+            rel = fpath.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        source_ref = f"{repo_name}:{rel}"
+        try:
+            mtime = datetime.fromtimestamp(fpath.stat().st_mtime,
+                                           timezone.utc).isoformat(
+                timespec="seconds").replace("+00:00", "Z")
+        except OSError:
+            mtime = now_iso
+        metadata = {
+            "repo": repo_name,
+            "repo_path": str(root),
+            "rel_path": rel,
+            "file_size": len(content),
+            "modified_at": mtime,
+        }
+        if not dry_run:
+            _upsert_repo_ku(
+                conn,
+                source_ref=source_ref,
+                text=content,
+                account=account,
+                tags=tags,
+                metadata=metadata,
+                now_iso=now_iso,
+            )
+        indexed += 1
+
+    return {
+        "ok": True,
+        "repo": repo_name,
+        "path": str(root),
+        "files_seen": len(files),
+        "indexed": indexed,
+        "skipped_binary": skipped_binary,
+        "skipped_large": skipped_large,
+    }
+
+
+def cmd_sync(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="claw sync",
+        description="Index tracked repos (from ~/.claw/repos.yaml) into brain.db.")
+    p.add_argument("--repo", help="Sync a single repo by name (last path "
+                                  "segment, e.g. 'nanoclaw') or by absolute path")
+    p.add_argument("--all", action="store_true",
+                   help="Sync every tracked repo (the default when --repo is omitted)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Walk + count, but do not write")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Debug info on stderr")
+    args = p.parse_args(argv)
+
+    global VERBOSE
+    VERBOSE = args.verbose
+
+    if not _BRAIN_DB_PATH.exists():
+        sys.exit(f"error: brain.db not found at {_BRAIN_DB_PATH}. "
+                 f"Start nanoclaw at least once so the schema is applied.")
+
+    cfg = _load_repos_config()
+    all_repos = cfg.get("repos") or []
+    if not all_repos:
+        sys.exit("error: no repos listed in ~/.claw/repos.yaml")
+
+    # Filter by --repo if provided; otherwise use every entry with `tracked: true`
+    # (treat missing `tracked` as true).
+    if args.repo:
+        target = args.repo
+        target_abs = Path(os.path.expanduser(target)).resolve()
+        repos = [
+            r for r in all_repos
+            if (Path(os.path.expanduser(r.get("path", ""))).resolve() == target_abs
+                or Path(os.path.expanduser(r.get("path", ""))).name == target)
+        ]
+        if not repos:
+            sys.exit(f"error: no repo matching {target!r} in repos.yaml")
+    else:
+        repos = [r for r in all_repos if r.get("tracked", True)]
+
+    conn = sqlite3.connect(_BRAIN_DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    total_indexed = 0
+    total_files = 0
+    print(f"{'repo':<28} {'files':>6} {'indexed':>8} {'skipped':>8}",
+          file=sys.stderr)
+    print("-" * 54, file=sys.stderr)
+    try:
+        for repo_cfg in repos:
+            result = _sync_one_repo(conn, repo_cfg, args.dry_run)
+            if not result["ok"]:
+                print(f"{repo_cfg.get('path', '?'):<28} "
+                      f"SKIPPED ({result['reason']})", file=sys.stderr)
+                continue
+            skipped = result["skipped_binary"] + result["skipped_large"]
+            print(f"{result['repo']:<28} {result['files_seen']:>6} "
+                  f"{result['indexed']:>8} {skipped:>8}", file=sys.stderr)
+            total_indexed += result["indexed"]
+            total_files += result["files_seen"]
+        if not args.dry_run:
+            conn.commit()
+    finally:
+        conn.close()
+
+    verb = "would-index" if args.dry_run else "indexed"
+    print(f"\n{verb} {total_indexed} file(s) across {len(repos)} repo(s) "
+          f"({total_files} walked)",
+          file=sys.stderr)
+    if args.dry_run:
+        print("(dry-run — no writes committed)", file=sys.stderr)
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-_SUBCOMMANDS = {"know"}
+_SUBCOMMANDS = {"know", "sync"}
 
 
 def main():
@@ -502,6 +803,8 @@ def main():
         sub = argv[0]
         if sub == "know":
             sys.exit(cmd_know(argv[1:]))
+        if sub == "sync":
+            sys.exit(cmd_sync(argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="claw",
