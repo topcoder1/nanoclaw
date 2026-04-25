@@ -70,11 +70,20 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   // Cloudflare Access in front. Flip in launchd plist once CF Access
   // is retired.
   if (TELEGRAM_INITDATA_REQUIRED) {
+    // Two instances: /brain HTML pages keep strict auth (so the page
+    // knows who's logged in); /api/brain bypasses for loopback so local
+    // tooling (claw know, vscode-brain) can hit recall() without faking
+    // initData. Service-token bypass still works on both for non-local
+    // first-party callers.
     const tgAuth = createTelegramAuthMiddleware({
       getBotToken: getTelegramBotToken,
     });
+    const tgAuthApi = createTelegramAuthMiddleware({
+      getBotToken: getTelegramBotToken,
+      bypassLoopback: true,
+    });
     app.use('/brain', tgAuth);
-    app.use('/api/brain', tgAuth);
+    app.use('/api/brain', tgAuthApi);
   }
   app.use('/brain', createBrainRoutes({ brainDb: opts.brainDb }));
   app.use('/api/brain', createBrainApiRoutes({ brainDb: opts.brainDb }));

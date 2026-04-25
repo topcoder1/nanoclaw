@@ -208,6 +208,38 @@ describe('createTelegramAuthMiddleware', () => {
       .query({ tgWebAppData: raw });
     expect(res.status).toBe(200);
   });
+
+  describe('bypassLoopback option', () => {
+    function buildBypassApp(): express.Express {
+      const app = express();
+      app.use(
+        createTelegramAuthMiddleware({
+          getBotToken: () => BOT_TOKEN,
+          bypassLoopback: true,
+        }),
+      );
+      app.get('/ok', (req, res) =>
+        res.json({ ok: true, user: req.telegramUser }),
+      );
+      return app;
+    }
+
+    it('lets unauthenticated loopback requests through with telegramUser=null', async () => {
+      // supertest opens a real socket on 127.0.0.1, so req.ip is loopback.
+      const res = await request(buildBypassApp())
+        .get('/ok')
+        .set('Accept', 'application/json');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true, user: null });
+    });
+
+    it('still 401s on loopback when bypassLoopback is off (default)', async () => {
+      const res = await request(buildApp())
+        .get('/ok')
+        .set('Accept', 'application/json');
+      expect(res.status).toBe(401);
+    });
+  });
 });
 
 describe('TELEGRAM_INITDATA_REQUIRED wiring', () => {

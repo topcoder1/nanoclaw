@@ -134,7 +134,19 @@ export interface TelegramAuthOptions {
   maxAgeSec?: number;
   /** Clock override for tests. */
   nowFn?: () => number;
+  /**
+   * Skip Telegram initData verification entirely for requests originating
+   * from loopback (127.0.0.1, ::1). Loopback by definition cannot carry
+   * real Telegram client traffic — it can only come from local processes
+   * (claw CLI, vscode-brain extension, curl during debugging). Sets
+   * `req.telegramUser = null` and calls `next()`, mirroring what the
+   * service-token bypass does. Default: false (off — preserve strict
+   * auth on all routes).
+   */
+  bypassLoopback?: boolean;
 }
+
+const LOOPBACK_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', '']);
 
 // Express request augmentation — kept scoped to this middleware so it
 // doesn't leak onto every request type project-wide.
@@ -210,7 +222,22 @@ export function createTelegramAuthMiddleware(
 ): express.RequestHandler {
   const maxAgeSec = opts.maxAgeSec ?? DEFAULT_INITDATA_MAX_AGE_SEC;
   const nowFn = opts.nowFn ?? (() => Date.now());
+  const bypassLoopback = opts.bypassLoopback === true;
   return (req, res, next) => {
+    // Loopback bypass (opt-in). Wired on for /api/brain only — same-host
+    // tooling (claw know, vscode-brain, future first-party extensions)
+    // can hit the brain API without faking Telegram initData or shipping
+    // the service token. Loopback can't carry real Telegram traffic, so
+    // this can't accidentally let a real WebApp through unauthenticated.
+    if (bypassLoopback) {
+      const ip = req.ip ?? req.socket.remoteAddress ?? '';
+      if (LOOPBACK_IPS.has(ip)) {
+        req.telegramUser = null;
+        next();
+        return;
+      }
+    }
+
     // Service-token bypass. Any request carrying a valid `x-service-token`
     // matching NANOCLAW_SERVICE_TOKEN skips Telegram initData verification
     // entirely. This is how the local `claw know` CLI (and any future
