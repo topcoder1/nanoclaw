@@ -62,7 +62,7 @@ function toAccountBucket(raw?: string): 'personal' | 'work' {
 
 // --- Raw event capture (P0, preserved) ------------------------------------
 
-interface RawEventRow {
+export interface RawEventRow {
   id: string;
   source_type: string;
   source_ref: string;
@@ -72,7 +72,7 @@ interface RawEventRow {
   parsedEmail: ParsedEmail | null;
 }
 
-interface ParsedEmail {
+export interface ParsedEmail {
   thread_id: string;
   account?: string;
   subject?: string;
@@ -150,7 +150,17 @@ function flushRawEvents(
 
 // --- P1: extraction pipeline ----------------------------------------------
 
-async function runExtractionPipeline(
+/**
+ * Run the full P1 extract → entity-resolve → KU-insert → embed pipeline
+ * for a single parsed email. Exported so backfill scripts can re-process
+ * raw_events that were skipped under a stale filter (e.g. the post-Triage-
+ * v1.1 `classification='digest'` over-skip; see transactional-filter.ts).
+ *
+ * Idempotency note: this function inserts new KUs every call. Callers must
+ * ensure they don't double-process the same raw_event or duplicate KUs
+ * will result.
+ */
+export async function runExtractionPipeline(
   db: Database.Database,
   row: RawEventRow,
 ): Promise<void> {
