@@ -47,6 +47,13 @@ export function matchTransactionalHeuristic(email: {
  * Check nanoclaw's `tracked_items` for a classification that says "don't
  * waste extraction on this". Returns null if no matching row, or if the
  * classification is still pending (triage hasn't run yet).
+ *
+ * Reads `queue` only. Triage v1.1 (db.ts) repurposed `classification` as a
+ * default catch-all (post-migration ~all rows are `classification='digest'`),
+ * so the meaningful state moved to `queue` (`attention` / `archive_candidate`
+ * / `action` / `ignore`). Skip only the two queues that explicitly signal
+ * low-value: `archive_candidate` (newsletters/digests) and `ignore`
+ * (auto-resolved noise).
  */
 export function matchLowValueClassification(
   nanoclawDb: Database.Database,
@@ -55,17 +62,16 @@ export function matchLowValueClassification(
   try {
     const row = nanoclawDb
       .prepare(
-        `SELECT classification, queue FROM tracked_items
+        `SELECT queue FROM tracked_items
          WHERE thread_id = ?
          ORDER BY detected_at DESC
          LIMIT 1`,
       )
-      .get(threadId) as
-      | { classification: string | null; queue: string | null }
-      | undefined;
+      .get(threadId) as { queue: string | null } | undefined;
     if (!row) return null;
-    if (row.queue === 'archive_candidate') return 'classification_digest';
-    if (row.classification === 'digest') return 'classification_digest';
+    if (row.queue === 'archive_candidate' || row.queue === 'ignore') {
+      return 'classification_digest';
+    }
     return null;
   } catch (err) {
     logger.debug(

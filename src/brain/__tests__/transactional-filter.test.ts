@@ -89,25 +89,49 @@ describe('matchLowValueClassification', () => {
     const db = seedDb();
     db.prepare(
       `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
-       VALUES ('x1', 't1', 'push', 'archive_candidate', 1)`,
+       VALUES ('x1', 't1', 'digest', 'archive_candidate', 1)`,
     ).run();
     expect(matchLowValueClassification(db, 't1')).toBe('classification_digest');
   });
 
-  it('returns classification_digest when classification is digest', () => {
+  it('returns classification_digest when queue is ignore', () => {
+    const db = seedDb();
+    db.prepare(
+      `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
+       VALUES ('x1', 't1', 'digest', 'ignore', 1)`,
+    ).run();
+    expect(matchLowValueClassification(db, 't1')).toBe('classification_digest');
+  });
+
+  it('does NOT skip when queue is attention (triage v1.1 regression guard)', () => {
+    // Post-Triage-v1.1, ~all rows have classification='digest' as a
+    // catch-all default. Reading classification would skip everything;
+    // queue='attention' must always extract.
+    const db = seedDb();
+    db.prepare(
+      `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
+       VALUES ('x1', 't1', 'digest', 'attention', 1)`,
+    ).run();
+    expect(matchLowValueClassification(db, 't1')).toBeNull();
+  });
+
+  it('does NOT skip when queue is action (triage v1.1 regression guard)', () => {
+    const db = seedDb();
+    db.prepare(
+      `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
+       VALUES ('x1', 't1', 'digest', 'action', 1)`,
+    ).run();
+    expect(matchLowValueClassification(db, 't1')).toBeNull();
+  });
+
+  it('does NOT skip when classification=digest but queue is NULL (legacy untagged)', () => {
+    // Legacy digest rows that went through the v1.1 migration get
+    // queue='archive_candidate' (db.ts:425). A null queue today means
+    // the row predates the meaningful classification, so don't skip on it.
     const db = seedDb();
     db.prepare(
       `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
        VALUES ('x1', 't1', 'digest', NULL, 1)`,
-    ).run();
-    expect(matchLowValueClassification(db, 't1')).toBe('classification_digest');
-  });
-
-  it('returns null for push-classified threads', () => {
-    const db = seedDb();
-    db.prepare(
-      `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
-       VALUES ('x1', 't1', 'push', 'attention', 1)`,
     ).run();
     expect(matchLowValueClassification(db, 't1')).toBeNull();
   });
@@ -121,8 +145,8 @@ describe('matchLowValueClassification', () => {
     const db = seedDb();
     db.prepare(
       `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
-       VALUES ('older', 't1', 'digest', NULL, 1),
-              ('newer', 't1', 'push', 'attention', 2)`,
+       VALUES ('older', 't1', 'digest', 'archive_candidate', 1),
+              ('newer', 't1', 'digest', 'attention', 2)`,
     ).run();
     expect(matchLowValueClassification(db, 't1')).toBeNull();
   });
@@ -148,7 +172,7 @@ describe('shouldSkipBrainExtraction', () => {
       );
     `);
     db.prepare(
-      `INSERT INTO tracked_items VALUES ('x', 't1', 'digest', NULL, 1)`,
+      `INSERT INTO tracked_items VALUES ('x', 't1', 'digest', 'archive_candidate', 1)`,
     ).run();
     expect(
       shouldSkipBrainExtraction(db, {
