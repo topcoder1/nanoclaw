@@ -42,7 +42,11 @@ function seedAgentAutoQuery(db: Database.Database, queryText: string): void {
     `INSERT INTO ku_queries (id, query_text, caller, account, scope,
                              result_count, duration_ms, recorded_at)
      VALUES (?, ?, 'agent-auto', NULL, NULL, 0, 5, ?)`,
-  ).run(`Q-${Math.random().toString(36).slice(2, 10)}`, queryText, new Date().toISOString());
+  ).run(
+    `Q-${Math.random().toString(36).slice(2, 10)}`,
+    queryText,
+    new Date().toISOString(),
+  );
 }
 
 describe('Brain miniapp — auto-recall mutes', () => {
@@ -67,7 +71,9 @@ describe('Brain miniapp — auto-recall mutes', () => {
     expect(res.headers.location).toBe('/brain/queries');
 
     const row = brainDb
-      .prepare('SELECT pattern, reason FROM auto_recall_mutes WHERE pattern = ?')
+      .prepare(
+        'SELECT pattern, reason FROM auto_recall_mutes WHERE pattern = ?',
+      )
       .get('sentry alerts') as { pattern: string; reason: string | null };
     expect(row.pattern).toBe('sentry alerts');
     expect(row.reason).toBeNull();

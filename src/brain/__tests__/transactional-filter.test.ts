@@ -12,18 +12,18 @@ describe('matchTransactionalHeuristic', () => {
     expect(
       matchTransactionalHeuristic({ sender: 'no-reply@anthropic.com' }),
     ).toBe('sender_pattern');
-    expect(
-      matchTransactionalHeuristic({ sender: 'noreply@stripe.com' }),
-    ).toBe('sender_pattern');
+    expect(matchTransactionalHeuristic({ sender: 'noreply@stripe.com' })).toBe(
+      'sender_pattern',
+    );
     expect(
       matchTransactionalHeuristic({ sender: 'do-not-reply@foo.com' }),
     ).toBe('sender_pattern');
   });
 
   it('flags billing / receipts / notifications senders', () => {
-    expect(matchTransactionalHeuristic({ sender: 'billing@anthropic.com' })).toBe(
-      'sender_pattern',
-    );
+    expect(
+      matchTransactionalHeuristic({ sender: 'billing@anthropic.com' }),
+    ).toBe('sender_pattern');
     expect(matchTransactionalHeuristic({ sender: 'receipts@foo.com' })).toBe(
       'sender_pattern',
     );
@@ -91,9 +91,7 @@ describe('matchLowValueClassification', () => {
       `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
        VALUES ('x1', 't1', 'push', 'archive_candidate', 1)`,
     ).run();
-    expect(matchLowValueClassification(db, 't1')).toBe(
-      'classification_digest',
-    );
+    expect(matchLowValueClassification(db, 't1')).toBe('classification_digest');
   });
 
   it('returns classification_digest when classification is digest', () => {
@@ -102,9 +100,7 @@ describe('matchLowValueClassification', () => {
       `INSERT INTO tracked_items (id, thread_id, classification, queue, detected_at)
        VALUES ('x1', 't1', 'digest', NULL, 1)`,
     ).run();
-    expect(matchLowValueClassification(db, 't1')).toBe(
-      'classification_digest',
-    );
+    expect(matchLowValueClassification(db, 't1')).toBe('classification_digest');
   });
 
   it('returns null for push-classified threads', () => {
