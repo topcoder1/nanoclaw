@@ -27,8 +27,11 @@ import {
   attachAlias,
   createCompanyFromDomain,
   createPersonFromEmail,
+  createProjectFromRepoSlug,
+  parseRepoSlugFromSourceRef,
   resolveByDomain,
   resolveByEmail,
+  resolveByRepoSlug,
 } from '../entities.js';
 
 describe('brain/entities', () => {
@@ -118,6 +121,73 @@ describe('brain/entities', () => {
       )
       .get(e.entity_id) as { c: number };
     expect(n.c).toBe(1);
+  });
+
+  it('createProjectFromRepoSlug creates a project + repo_slug alias', async () => {
+    const e = await createProjectFromRepoSlug('NanoClaw');
+    expect(e.entity_type).toBe('project');
+    expect(e.canonical).toMatchObject({
+      name: 'nanoclaw',
+      repo_slug: 'nanoclaw',
+    });
+
+    const db = getBrainDb();
+    const alias = db
+      .prepare(
+        `SELECT entity_id, field_value, source_type, confidence
+           FROM entity_aliases WHERE field_name = 'repo_slug'`,
+      )
+      .get() as {
+      entity_id: string;
+      field_value: string;
+      source_type: string;
+      confidence: number;
+    };
+    expect(alias.field_value).toBe('nanoclaw');
+    expect(alias.source_type).toBe('repo');
+    expect(alias.entity_id).toBe(e.entity_id);
+    expect(alias.confidence).toBe(1.0);
+  });
+
+  it('createProjectFromRepoSlug is idempotent across case variants', async () => {
+    const a = await createProjectFromRepoSlug('inbox_superpilot');
+    const b = await createProjectFromRepoSlug('Inbox_Superpilot');
+    const c = await createProjectFromRepoSlug('INBOX_SUPERPILOT');
+    expect(b.entity_id).toBe(a.entity_id);
+    expect(c.entity_id).toBe(a.entity_id);
+
+    const db = getBrainDb();
+    const n = db
+      .prepare(`SELECT COUNT(*) as n FROM entities WHERE entity_type='project'`)
+      .get() as { n: number };
+    expect(n.n).toBe(1);
+  });
+
+  it('createProjectFromRepoSlug rejects empty slugs', async () => {
+    await expect(createProjectFromRepoSlug('   ')).rejects.toThrow(/empty/i);
+  });
+
+  it('resolveByRepoSlug returns null for unknown, entity for known', async () => {
+    expect(resolveByRepoSlug('never-synced')).toBeNull();
+    const created = await createProjectFromRepoSlug('finsight');
+    const resolved = resolveByRepoSlug('finsight');
+    expect(resolved!.entity_id).toBe(created.entity_id);
+  });
+
+  it('parseRepoSlugFromSourceRef handles claw-sync ref formats', () => {
+    expect(parseRepoSlugFromSourceRef('nanoclaw:src/index.ts')).toBe(
+      'nanoclaw',
+    );
+    expect(
+      parseRepoSlugFromSourceRef('asm-v2:asm-core-v2/cmd/api/main.go#L1-L118'),
+    ).toBe('asm-v2');
+    expect(parseRepoSlugFromSourceRef('inbox_superpilot:README.md')).toBe(
+      'inbox_superpilot',
+    );
+    expect(parseRepoSlugFromSourceRef(null)).toBeNull();
+    expect(parseRepoSlugFromSourceRef('')).toBeNull();
+    expect(parseRepoSlugFromSourceRef(':leading-colon')).toBeNull();
+    expect(parseRepoSlugFromSourceRef('no-colon-at-all')).toBeNull();
   });
 
   it('attachAlias adds a new identifier to an existing entity', async () => {

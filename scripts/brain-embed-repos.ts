@@ -24,6 +24,11 @@ import { QDRANT_URL } from '../src/config.js';
 import { getBrainDb } from '../src/brain/db.js';
 import { embedText, getEmbeddingModelVersion } from '../src/brain/embed.js';
 import {
+  _shutdownEntityQueue,
+  createProjectFromRepoSlug,
+  parseRepoSlugFromSourceRef,
+} from '../src/brain/entities.js';
+import {
   BRAIN_COLLECTION,
   ensureBrainCollection,
   kuPointId,
@@ -231,6 +236,41 @@ async function main(): Promise<void> {
     `Done: ${done} embedded, ${failed} failed, ${truncated} truncated, ` +
       `${totalS}s total (${(done / parseFloat(totalS || '1')).toFixed(1)} docs/s)`,
   );
+
+  // Repo → project entity wiring. claw sync writes KUs but doesn't touch
+  // the entities table; we close the loop here so the /brain/entities
+  // Projects tab stays populated. Idempotent — both calls short-circuit
+  // when the project / link already exists.
+  const slugToKuIds = new Map<string, string[]>();
+  for (const r of rows) {
+    const slug = parseRepoSlugFromSourceRef(r.source_ref);
+    if (!slug) continue;
+    const list = slugToKuIds.get(slug);
+    if (list) list.push(r.id);
+    else slugToKuIds.set(slug, [r.id]);
+  }
+  if (slugToKuIds.size > 0) {
+    const linkStmt = db.prepare(
+      `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role)
+         VALUES (?, ?, 'subject')`,
+    );
+    let linked = 0;
+    for (const [slug, kuIds] of slugToKuIds) {
+      const project = await createProjectFromRepoSlug(slug);
+      const txn = db.transaction((ids: string[]) => {
+        for (const id of ids) {
+          const result = linkStmt.run(id, project.entity_id);
+          if (result.changes > 0) linked++;
+        }
+      });
+      txn(kuIds);
+    }
+    await _shutdownEntityQueue();
+    console.log(
+      `Project entities: ${slugToKuIds.size} repo slug(s), ` +
+        `${linked} new ku_entities link(s)`,
+    );
+  }
 }
 
 main()

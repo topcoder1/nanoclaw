@@ -72,6 +72,27 @@ function normalizeDomain(domain: string): string {
     .replace(/^www\./, '');
 }
 
+/** Normalize a repo slug. Lowercase + trim. Slug format mirrors the
+ *  `claw sync` source_ref prefix (e.g. `nanoclaw`, `inbox_superpilot`). */
+function normalizeRepoSlug(slug: string): string {
+  return slug.trim().toLowerCase();
+}
+
+/**
+ * Extract the repo slug from a `source_type='repo'` source_ref. claw sync
+ * writes refs as `<slug>:<path>[#L<a>-L<b>]`, so the slug is everything
+ * before the first colon. Returns null for malformed inputs.
+ */
+export function parseRepoSlugFromSourceRef(
+  sourceRef: string | null | undefined,
+): string | null {
+  if (!sourceRef) return null;
+  const idx = sourceRef.indexOf(':');
+  if (idx <= 0) return null;
+  const slug = sourceRef.slice(0, idx).trim();
+  return slug || null;
+}
+
 function readEntity(
   db: Database.Database,
   entityId: string,
@@ -134,6 +155,17 @@ export function resolveByDomain(domain: string): Entity | null {
   const normalized = normalizeDomain(domain);
   const db = getBrainDb();
   const existingId = findEntityIdByAlias(db, 'domain', normalized);
+  if (!existingId) return null;
+  return readEntity(db, existingId) ?? null;
+}
+
+/**
+ * Resolve a project by repo slug. Same contract as resolveByEmail.
+ */
+export function resolveByRepoSlug(slug: string): Entity | null {
+  const normalized = normalizeRepoSlug(slug);
+  const db = getBrainDb();
+  const existingId = findEntityIdByAlias(db, 'repo_slug', normalized);
   if (!existingId) return null;
   return readEntity(db, existingId) ?? null;
 }
@@ -218,6 +250,51 @@ export async function createCompanyFromDomain(domain: string): Promise<Entity> {
   const final = resolveByDomain(normalized);
   if (!final) {
     throw new Error(`createCompanyFromDomain: failed to persist ${normalized}`);
+  }
+  return final;
+}
+
+/**
+ * Idempotent: if a project with this repo slug already exists, returns it.
+ * Otherwise creates a new project entity + repo_slug alias. Stores the slug
+ * as `canonical.name` so the entities directory renderer (which falls back
+ * to `name → domain → email`) shows the slug as the entity's display name.
+ */
+export async function createProjectFromRepoSlug(slug: string): Promise<Entity> {
+  const existing = resolveByRepoSlug(slug);
+  if (existing) return existing;
+
+  const normalized = normalizeRepoSlug(slug);
+  if (!normalized) {
+    throw new Error('createProjectFromRepoSlug: empty slug');
+  }
+  const entityId = newId();
+  const aliasId = newId();
+  const now = new Date().toISOString();
+  const canonical = JSON.stringify({ name: normalized, repo_slug: normalized });
+
+  await getWriteQueue().enqueue({
+    run: (db) => {
+      const existingId = findEntityIdByAlias(db, 'repo_slug', normalized);
+      if (existingId) return;
+      db.prepare(
+        `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+         VALUES (?, 'project', ?, ?, ?)`,
+      ).run(entityId, canonical, now, now);
+      db.prepare(
+        `INSERT INTO entity_aliases
+           (alias_id, entity_id, source_type, source_ref, field_name,
+            field_value, valid_from, valid_until, confidence)
+         VALUES (?, ?, 'repo', NULL, 'repo_slug', ?, ?, NULL, 1.0)`,
+      ).run(aliasId, entityId, normalized, now);
+    },
+  });
+
+  const final = resolveByRepoSlug(normalized);
+  if (!final) {
+    throw new Error(
+      `createProjectFromRepoSlug: failed to persist ${normalized}`,
+    );
   }
   return final;
 }
