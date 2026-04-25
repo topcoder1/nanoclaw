@@ -1,0 +1,68 @@
+{
+  "name": "vscode-brain",
+  "displayName": "Brain (NanoClaw)",
+  "description": "Query the NanoClaw second-brain from inside VS Code: recall on the symbol under the cursor, on the current selection, or jump to the current repo's journal.",
+  "version": "0.1.0",
+  "publisher": "topcoder1",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "brain.recallSymbol",
+        "title": "Brain: recall this symbol"
+      },
+      {
+        "command": "brain.recallSelection",
+        "title": "Brain: recall selection"
+      },
+      {
+        "command": "brain.openJournal",
+        "title": "Brain: open this repo's journal"
+      }
+    ],
+    "configuration": {
+      "title": "Brain",
+      "properties": {
+        "brain.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:3847/api/brain",
+          "description": "Base URL of the NanoClaw brain miniapp's HTTP API."
+        },
+        "brain.serviceTokenPath": {
+          "type": "string",
+          "default": "~/.claw/token",
+          "description": "Path to a file containing NANOCLAW_SERVICE_TOKEN. Loopback requests work without a token; this is only needed if you set BRAIN_API_URL to a non-localhost address."
+        },
+        "brain.limit": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Number of recall hits to fetch per query."
+        },
+        "brain.scoreFloor": {
+          "type": "number",
+          "default": 0.2,
+          "description": "Drop hits whose finalScore is below this (0..1). Lower than agent auto-recall's 0.25 since the user is asking explicitly here — they'd rather see borderline hits than a blank panel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
