@@ -143,8 +143,12 @@ describe('Brain miniapp — /brain/ku/:id', () => {
     expect(clean.text).not.toContain('id="btn-approve"');
     expect(dirty.text).toContain('id="btn-approve"');
     // The "needs_review" status pill also only appears on the dirty one.
-    expect(clean.text).not.toContain('>needs_review<');
-    expect(dirty.text).toContain('>needs_review<');
+    // Match the exact pill markup — bare `>needs_review<` would also hit
+    // the literal `<code>needs_review</code>` in the page's help text and
+    // false-positive on clean rows.
+    const pill = '<span class="pill">needs_review</span>';
+    expect(clean.text).not.toContain(pill);
+    expect(dirty.text).toContain(pill);
   });
 
   it('reject button is disabled when KU already superseded', async () => {
