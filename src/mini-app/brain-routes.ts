@@ -1206,6 +1206,22 @@ ${pager}
       .prepare(`SELECT COUNT(*) AS n FROM ku_queries ${whereSql}`)
       .get(...whereParams) as { n: number };
 
+    // Pull current mutes so we can render the "Mute" button only when the
+    // pattern isn't already muted, plus a panel of existing mutes with
+    // unmute buttons.
+    const muteRows = db
+      .prepare(
+        'SELECT pattern, reason, created_at FROM auto_recall_mutes ORDER BY created_at DESC',
+      )
+      .all() as Array<{
+      pattern: string;
+      reason: string | null;
+      created_at: string;
+    }>;
+    const mutePatternsLower = new Set(
+      muteRows.map((m) => m.pattern.toLowerCase()),
+    );
+
     const now = Date.now();
     const rowsHtml = rows.length
       ? rows
@@ -1217,9 +1233,23 @@ ${pager}
             const acctPill = r.account
               ? `<span class="pill">${escapeHtml(r.account)}</span>`
               : '';
+            // Only agent-auto rows get a Mute button — manual /recall calls
+            // and miniapp searches aren't subject to auto-recall noise.
+            // Suggest the first 40 chars of the query as the mute pattern;
+            // the user can edit before submitting.
+            const muteBtn =
+              r.caller === 'agent-auto' &&
+              !mutePatternsLower.has(
+                r.query_text.trim().toLowerCase().slice(0, 40),
+              )
+                ? `<form method="post" action="/brain/auto-recall/mutes" class="inline-form" onclick="event.stopPropagation()">
+                     <input type="hidden" name="pattern" value="${escapeHtml(r.query_text.trim().slice(0, 40))}">
+                     <button type="submit" class="mute-btn" title="Skip auto-recall on future prompts containing this substring">mute</button>
+                   </form>`
+                : '';
             return `<li>
               <a class="row-link" href="/brain/queries/${escapeHtml(r.id)}">
-                <div><strong>${escapeHtml(r.query_text)}</strong></div>
+                <div><strong>${escapeHtml(r.query_text)}</strong>${muteBtn}</div>
                 <div class="meta">
                   ${callerPill}${acctPill}
                   <span>${r.result_count} hit${r.result_count === 1 ? '' : 's'}</span>
@@ -1236,20 +1266,47 @@ ${pager}
       ? `<p class="meta">Filtered by caller <code>${escapeHtml(callerFilter)}</code> · <a href="/brain/queries">clear</a></p>`
       : '';
 
+    const mutesHtml = muteRows.length
+      ? `<ul class="mute-list">${muteRows
+          .map(
+            (m) => `<li>
+              <code>${escapeHtml(m.pattern)}</code>
+              <span class="meta">muted ${formatAge(m.created_at, now)}</span>
+              <form method="post" action="/brain/auto-recall/mutes/delete" class="inline-form">
+                <input type="hidden" name="pattern" value="${escapeHtml(m.pattern)}">
+                <button type="submit" class="mute-btn">unmute</button>
+              </form>
+            </li>`,
+          )
+          .join('')}</ul>`
+      : '<p class="empty">No mutes yet — click <strong>mute</strong> on any noisy <code>agent-auto</code> row above.</p>';
+
     const body = `
 <h1>Retrieval log <span class="meta" style="font-weight:400">(${totalRow.n} total)</span></h1>
 ${filterBar}
 <div class="card">
   <ul>${rowsHtml}</ul>
 </div>
+
+<h2 style="margin-top:24px">Auto-recall mutes</h2>
+<div class="card">${mutesHtml}</div>
+
 <aside class="kb-help">
   <h3>What this shows</h3>
   <ul>
     <li>Every <code>recall()</code> call — whether from the agent, the <code>/recall</code> chat command, or this miniapp's search — writes one row here.</li>
     <li>Click a row to see the full top-N, each KU's final score, and the rank/recency/access/important components that produced it.</li>
     <li>This is <strong>post-hoc</strong> audit: what the agent <em>saw</em>. It does not tell you which parts of a reply were grounded in which KU.</li>
+    <li><strong>Mute</strong> a noisy <code>agent-auto</code> pattern to skip auto-recall whenever the user prompt contains that substring (case-insensitive). Manual <code>/recall</code> calls always run — mutes only affect the silent prelude.</li>
   </ul>
-</aside>`;
+</aside>
+<style>
+.inline-form { display:inline; margin-left:8px; }
+.mute-btn { font-size:11px; padding:2px 8px; cursor:pointer; background:#f3f3f3; border:1px solid #ccc; border-radius:4px; }
+.mute-btn:hover { background:#e8e8e8; }
+.mute-list li { padding:6px 0; border-bottom:1px solid #eee; display:flex; align-items:center; gap:10px; }
+.mute-list code { background:#f6f8fa; padding:2px 6px; border-radius:3px; }
+</style>`;
     res.type('html').send(
       brainShell('Queries — Brain', body, {
         activeNav: 'queries',
@@ -1396,6 +1453,39 @@ ${filterBar}
         reviewCount,
       }),
     );
+  });
+
+  // --- POST /brain/auto-recall/mutes — add a substring mute -------------
+  // Backed by the auto_recall_mutes table from schema.sql §5.7. The button
+  // on /brain/queries posts here, then we 303-redirect back so the page
+  // reflects the new state on reload — classic post/redirect/get.
+  router.post('/auto-recall/mutes', (req, res) => {
+    const db = getDb();
+    const pattern =
+      typeof req.body?.pattern === 'string' ? req.body.pattern.trim() : '';
+    if (!pattern) {
+      res.status(400).send('missing pattern');
+      return;
+    }
+    const reason =
+      typeof req.body?.reason === 'string' ? req.body.reason.trim() : null;
+    db.prepare(
+      `INSERT OR REPLACE INTO auto_recall_mutes (pattern, reason, created_at)
+         VALUES (?, ?, ?)`,
+    ).run(pattern, reason, new Date().toISOString());
+    res.redirect(303, '/brain/queries');
+  });
+
+  router.post('/auto-recall/mutes/delete', (req, res) => {
+    const db = getDb();
+    const pattern =
+      typeof req.body?.pattern === 'string' ? req.body.pattern.trim() : '';
+    if (!pattern) {
+      res.status(400).send('missing pattern');
+      return;
+    }
+    db.prepare('DELETE FROM auto_recall_mutes WHERE pattern = ?').run(pattern);
+    res.redirect(303, '/brain/queries');
   });
 
   return router;
@@ -1614,12 +1704,13 @@ export function createBrainApiRoutes(
     const tokenOk =
       suppliedToken.length > 0 && expectedTokens.includes(suppliedToken);
     if (!isLocal && !tokenOk) {
-      res.status(401).json({ error: 'recall: localhost or service token required' });
+      res
+        .status(401)
+        .json({ error: 'recall: localhost or service token required' });
       return;
     }
 
-    const q =
-      typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (!q) {
       res.status(400).json({ error: 'missing query parameter `q`' });
       return;
@@ -1628,9 +1719,8 @@ export function createBrainApiRoutes(
     const limit = Number.isFinite(limitRaw)
       ? Math.min(50, Math.max(1, limitRaw))
       : 10;
-    const accountRaw = typeof req.query.account === 'string'
-      ? req.query.account
-      : undefined;
+    const accountRaw =
+      typeof req.query.account === 'string' ? req.query.account : undefined;
     const account: 'personal' | 'work' | undefined =
       accountRaw === 'personal' || accountRaw === 'work'
         ? accountRaw

@@ -23,6 +23,7 @@
 
 import { logger } from '../logger.js';
 
+import { getBrainDb } from './db.js';
 import { recall, type RecallResult } from './retrieve.js';
 
 /** Minimum user-message length to trigger auto-recall. Short messages
@@ -58,6 +59,30 @@ export interface AutoRecallOptions {
   maxChars?: number;
   /** Override the recall function (tests). */
   recallFn?: typeof recall;
+  /** Override the mute lookup (tests). Returns the matching pattern or
+   * null if the prompt isn't muted. */
+  isMutedFn?: (prompt: string) => string | null;
+}
+
+/** Look up `auto_recall_mutes` and return the first pattern that matches
+ * the prompt (case-insensitive substring), or null. Read-only / no throw —
+ * if the table is missing or the DB isn't reachable we treat as "no mutes". */
+function defaultIsMuted(prompt: string): string | null {
+  try {
+    const db = getBrainDb();
+    const rows = db
+      .prepare('SELECT pattern FROM auto_recall_mutes')
+      .all() as Array<{ pattern: string }>;
+    if (rows.length === 0) return null;
+    const lower = prompt.toLowerCase();
+    for (const r of rows) {
+      const p = r.pattern.toLowerCase();
+      if (p.length > 0 && lower.includes(p)) return r.pattern;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function shouldSkip(prompt: string): string | null {
@@ -98,12 +123,23 @@ export async function maybeInjectBrainContext(
 ): Promise<string> {
   const envFlag = process.env.BRAIN_AUTO_RECALL;
   const enabled =
-    opts.enabled ?? (envFlag === undefined || !['0', 'false', ''].includes(envFlag));
+    opts.enabled ??
+    (envFlag === undefined || !['0', 'false', ''].includes(envFlag));
   if (!enabled) return rawPrompt;
 
   const skipReason = shouldSkip(rawPrompt);
   if (skipReason) {
     logger.debug({ skipReason }, 'brain auto-recall: skipped');
+    return rawPrompt;
+  }
+
+  const isMutedFn = opts.isMutedFn ?? defaultIsMuted;
+  const mutedPattern = isMutedFn(rawPrompt);
+  if (mutedPattern) {
+    logger.debug(
+      { mutedPattern },
+      'brain auto-recall: skipped (matched mute pattern)',
+    );
     return rawPrompt;
   }
 

@@ -175,6 +175,20 @@ CREATE INDEX IF NOT EXISTS idx_ku_retrievals_ku    ON ku_retrievals(ku_id);
 CREATE INDEX IF NOT EXISTS idx_ku_retrievals_query ON ku_retrievals(query_id, rank);
 
 -- -------------------------------------------------------------------------
+-- 5.7 Auto-recall mutes — patterns the agent should NOT auto-recall on
+-- -------------------------------------------------------------------------
+-- Populated from the miniapp Queries tab when the user spots a noisy
+-- agent-auto recall. `pattern` is matched as a case-insensitive substring
+-- against the user's prompt; if any mute matches, auto-recall is skipped
+-- for that turn. Manual `/recall` calls always run regardless.
+
+CREATE TABLE IF NOT EXISTS auto_recall_mutes (
+  pattern     TEXT PRIMARY KEY,
+  reason      TEXT,
+  created_at  TEXT NOT NULL
+);
+
+-- -------------------------------------------------------------------------
 -- 5.5 FTS5 index over knowledge_units.text
 -- -------------------------------------------------------------------------
 
