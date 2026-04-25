@@ -45,6 +45,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -691,6 +692,107 @@ def _chunk_by_lines(text: str, chunk_lines: int, overlap: int
     return out
 
 
+# Symbol-boundary regexes per language. Each pattern matches the START of a
+# top-level declaration (function / class / impl / etc.) so we can split a
+# file on natural seams. Less precise than a tree-sitter parse, but zero
+# native-build dependency and good enough for the languages we index most.
+_SYMBOL_PATTERNS = {
+    '.py': re.compile(r'^(?:async\s+)?(?:def|class)\s+(\w+)', re.MULTILINE),
+    '.pyi': re.compile(r'^(?:async\s+)?(?:def|class)\s+(\w+)', re.MULTILINE),
+    '.ts': re.compile(
+        r'^(?:export\s+(?:default\s+)?)?'
+        r'(?:async\s+)?(?:function|class|interface|type|enum)\s+(\w+)|'
+        r'^(?:export\s+(?:default\s+)?)?const\s+(\w+)\s*[:=]\s*',
+        re.MULTILINE),
+    '.tsx': None,  # filled below — same as .ts
+    '.js': None, '.jsx': None, '.mjs': None, '.cjs': None,
+    '.go': re.compile(
+        r'^func\s+(?:\([^)]+\)\s+)?(\w+)|^type\s+(\w+)\s+', re.MULTILINE),
+    '.rs': re.compile(
+        r'^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?'
+        r'(?:fn|struct|enum|trait|impl|mod)\s+(?:<[^>]+>\s+)?(\w+)?',
+        re.MULTILINE),
+    '.java': re.compile(
+        r'^\s*(?:public|private|protected)\s+(?:static\s+)?'
+        r'(?:abstract\s+|final\s+)?(?:class|interface|enum|\w+)\s+(\w+)',
+        re.MULTILINE),
+    '.swift': re.compile(
+        r'^(?:public|private|internal|fileprivate|open)?\s*'
+        r'(?:func|class|struct|enum|protocol|extension)\s+(\w+)',
+        re.MULTILINE),
+}
+for _alias in ('.tsx', '.js', '.jsx', '.mjs', '.cjs'):
+    _SYMBOL_PATTERNS[_alias] = _SYMBOL_PATTERNS['.ts']
+
+
+def _chunk_by_symbols(text: str, suffix: str, max_lines: int
+                      ) -> list[tuple[int, int, str, str | None]]:
+    """v1.3b: split `text` at top-level symbol boundaries, then group adjacent
+    symbols into chunks ≤ `max_lines`. Returns
+    (start_line, end_line, chunk_text, symbol_label).
+
+    Falls back to line-window chunking (returns symbol_label=None) when:
+      - the language has no pattern, OR
+      - the file has zero detected symbols (e.g. a flat config-as-code file).
+
+    Symbol-aware chunks improve retrieval precision: a hit on a single
+    function shows just that function, not 200 unrelated lines around it."""
+    pattern = _SYMBOL_PATTERNS.get(suffix.lower())
+    lines = text.splitlines()
+    n = len(lines)
+    if n == 0:
+        return []
+    if pattern is None:
+        return [(s, e, t, None)
+                for s, e, t in _chunk_by_lines(text, max_lines, 0)]
+
+    # Find symbol start lines. Walk char offsets → line numbers.
+    starts: list[tuple[int, str]] = []
+    for m in pattern.finditer(text):
+        line_no = text.count('\n', 0, m.start()) + 1
+        # Pull the first non-None capture group as the label.
+        name = next((g for g in m.groups() if g), None)
+        starts.append((line_no, name or '?'))
+
+    if not starts:
+        return [(s, e, t, None)
+                for s, e, t in _chunk_by_lines(text, max_lines, 0)]
+
+    # First chunk implicitly starts at line 1 (preamble: imports, license).
+    if starts[0][0] > 1:
+        starts.insert(0, (1, '<preamble>'))
+
+    out: list[tuple[int, int, str, str | None]] = []
+    i = 0
+    while i < len(starts):
+        chunk_start, first_label = starts[i]
+        labels = [first_label]
+        j = i + 1
+        # Greedily absorb subsequent symbols until adding the next would
+        # push the chunk past max_lines.
+        while j < len(starts):
+            next_start = starts[j][0]
+            if next_start - chunk_start >= max_lines:
+                break
+            labels.append(starts[j][1])
+            j += 1
+        chunk_end = (starts[j][0] - 1) if j < len(starts) else n
+        # Hard cap: a single huge symbol that exceeds max_lines gets sliced
+        # back into line-windows so retrieval stays bounded.
+        if chunk_end - chunk_start + 1 > max_lines:
+            chunk_text = '\n'.join(lines[chunk_start - 1:chunk_end])
+            label = ','.join(labels[:3])[:80]
+            for ws, we, wt in _chunk_by_lines(chunk_text, max_lines, 0):
+                out.append((chunk_start + ws - 1, chunk_start + we - 1, wt,
+                            label))
+        else:
+            chunk_text = '\n'.join(lines[chunk_start - 1:chunk_end])
+            label = ','.join(labels[:3])[:80]
+            out.append((chunk_start, chunk_end, chunk_text, label))
+        i = j
+    return out
+
+
 def _looks_binary(path: Path) -> bool:
     try:
         with path.open("rb") as f:
@@ -752,6 +854,40 @@ def _repo_ku_id(source_ref: str) -> str:
     return f"repo-{h[:24]}"
 
 
+def _content_hash(text: str) -> str:
+    """SHA-256 hex of raw file content. Stored in metadata.content_hash so
+    re-syncing an unchanged file is a no-op (no SQL write, no FTS churn,
+    no Qdrant re-embed). Required before `claw sync --code --all` becomes
+    a routine cron job."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _existing_file_hash(conn: sqlite3.Connection, *, ku_id: str | None,
+                        like_pattern: str | None) -> str | None:
+    """Return the metadata.content_hash recorded for this file, or None.
+    For doc files we look up by exact ku_id; for code files we sample the
+    first chunk row (all chunks share the file-level content_hash)."""
+    if ku_id is not None:
+        row = conn.execute(
+            "SELECT metadata FROM knowledge_units WHERE id = ?",
+            (ku_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT metadata FROM knowledge_units "
+            "WHERE source_type='repo' AND source_ref LIKE ? LIMIT 1",
+            (like_pattern,),
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        meta = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    val = meta.get("content_hash")
+    return val if isinstance(val, str) else None
+
+
 def _upsert_repo_ku(
     conn: sqlite3.Connection,
     *,
@@ -804,6 +940,7 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
 
     indexed_docs = 0
     indexed_code_chunks = 0
+    unchanged_files = 0
     skipped_binary = 0
     skipped_large = 0
     now_iso = datetime.now(timezone.utc).isoformat(
@@ -832,6 +969,7 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
                 timespec="seconds").replace("+00:00", "Z")
         except OSError:
             mtime = now_iso
+        file_hash = _content_hash(content)
         base_meta = {
             "repo": repo_name,
             "repo_path": str(root),
@@ -839,11 +977,17 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
             "file_size": len(content),
             "modified_at": mtime,
             "kind": kind,
+            "content_hash": file_hash,
         }
 
         if kind == 'doc':
             source_ref = f"{repo_name}:{rel}"
             if not dry_run:
+                existing = _existing_file_hash(
+                    conn, ku_id=_repo_ku_id(source_ref), like_pattern=None)
+                if existing == file_hash:
+                    unchanged_files += 1
+                    continue
                 _upsert_repo_ku(
                     conn,
                     source_ref=source_ref,
@@ -856,35 +1000,47 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
             indexed_docs += 1
             continue
 
-        # kind == 'code' — chunk by line count so retrieval hits the relevant
-        # region, not the whole file.
-        chunks = _chunk_by_lines(content, _CODE_CHUNK_LINES, _CODE_CHUNK_OVERLAP)
+        # kind == 'code' — v1.3b: split at symbol boundaries when we know
+        # the language; fall back to line-windows when we don't. Either way
+        # each chunk becomes its own KU so retrieval can hit a single
+        # function instead of a 200-line slab.
+        suffix = fpath.suffix.lower()
+        chunks = _chunk_by_symbols(content, suffix, _CODE_CHUNK_LINES)
         if not chunks:
             continue
         chunk_prefix = f"{repo_name}:{rel}#L"
         if not dry_run:
+            existing = _existing_file_hash(
+                conn, ku_id=None, like_pattern=chunk_prefix + "%")
+            if existing == file_hash:
+                unchanged_files += 1
+                continue
             # Drop any stale chunks from a previous sync — covers file
-            # shrinkage (fewer chunks now than before).
+            # shrinkage (fewer chunks now than before) and also handles the
+            # symbol-set changing between runs (chunk boundaries shift).
             conn.execute(
                 "DELETE FROM knowledge_units "
                 "WHERE source_type='repo' AND source_ref LIKE ?",
                 (chunk_prefix + "%",),
             )
-        for start, end, chunk_text in chunks:
+        for start, end, chunk_text, symbols in chunks:
             source_ref = f"{chunk_prefix}{start}-L{end}"
             if not dry_run:
+                chunk_meta = {
+                    **base_meta,
+                    "chunk_start_line": start,
+                    "chunk_end_line": end,
+                    "chunk_total_lines": end - start + 1,
+                }
+                if symbols:
+                    chunk_meta["symbols"] = symbols
                 _upsert_repo_ku(
                     conn,
                     source_ref=source_ref,
                     text=chunk_text,
                     account=account,
-                    tags=tags + ["kind:code", f"ext:{fpath.suffix.lower().lstrip('.')}"],
-                    metadata={
-                        **base_meta,
-                        "chunk_start_line": start,
-                        "chunk_end_line": end,
-                        "chunk_total_lines": end - start + 1,
-                    },
+                    tags=tags + ["kind:code", f"ext:{suffix.lstrip('.')}"],
+                    metadata=chunk_meta,
                     now_iso=now_iso,
                 )
             indexed_code_chunks += 1
@@ -897,6 +1053,7 @@ def _sync_one_repo(conn: sqlite3.Connection, repo_cfg: dict, dry_run: bool,
         "indexed": indexed_docs + indexed_code_chunks,
         "indexed_docs": indexed_docs,
         "indexed_code_chunks": indexed_code_chunks,
+        "unchanged_files": unchanged_files,
         "skipped_binary": skipped_binary,
         "skipped_large": skipped_large,
     }
@@ -959,11 +1116,12 @@ def cmd_sync(argv: list[str]) -> int:
     total_docs = 0
     total_code = 0
     total_files = 0
+    total_unchanged = 0
     mode_hdr = "docs + code" if args.code else "docs only"
     print(f"sync mode: {mode_hdr}", file=sys.stderr)
-    print(f"{'repo':<28} {'files':>6} {'docs':>6} {'chunks':>7} {'skipped':>8}",
-          file=sys.stderr)
-    print("-" * 61, file=sys.stderr)
+    print(f"{'repo':<28} {'files':>6} {'docs':>6} {'chunks':>7} "
+          f"{'unchg':>6} {'skipped':>8}", file=sys.stderr)
+    print("-" * 68, file=sys.stderr)
     try:
         for repo_cfg in repos:
             result = _sync_one_repo(conn, repo_cfg, args.dry_run, args.code)
@@ -975,11 +1133,13 @@ def cmd_sync(argv: list[str]) -> int:
             print(f"{result['repo']:<28} {result['files_seen']:>6} "
                   f"{result['indexed_docs']:>6} "
                   f"{result['indexed_code_chunks']:>7} "
+                  f"{result.get('unchanged_files', 0):>6} "
                   f"{skipped:>8}", file=sys.stderr)
             total_indexed += result["indexed"]
             total_docs += result["indexed_docs"]
             total_code += result["indexed_code_chunks"]
             total_files += result["files_seen"]
+            total_unchanged += result.get("unchanged_files", 0)
         if not args.dry_run:
             conn.commit()
     finally:
@@ -988,6 +1148,7 @@ def cmd_sync(argv: list[str]) -> int:
     verb = "would-index" if args.dry_run else "indexed"
     print(f"\n{verb} {total_indexed} KU(s) across {len(repos)} repo(s) "
           f"({total_docs} doc + {total_code} code chunks; "
+          f"{total_unchanged} unchanged files skipped; "
           f"{total_files} files eligible)",
           file=sys.stderr)
     if args.dry_run:
@@ -1265,9 +1426,72 @@ def cmd_journal(argv: list[str]) -> int:
     return 0
 
 
+# ── `claw install-indexer` — wire up the v1.4 launchctl daemon ─────────────
+
+def cmd_install_indexer(argv: list[str]) -> int:
+    """Render `com.claw.code-indexer.plist` from the template, drop it into
+    `~/Library/LaunchAgents/`, and load it. Idempotent — re-running replaces
+    the agent and re-loads it. macOS only (Linux users wire systemd by hand,
+    see the daemon script — same behavior, different launcher)."""
+    p = argparse.ArgumentParser(prog="claw install-indexer",
+        description="Install the v1.4 fswatch daemon as a launchctl agent.")
+    p.add_argument("--uninstall", action="store_true",
+                   help="Unload + remove the agent instead of installing it.")
+    args = p.parse_args(argv)
+
+    if sys.platform != "darwin":
+        sys.exit("error: install-indexer is macOS-only. On Linux, invoke "
+                 "claw-indexer-daemon.py directly under systemd.")
+
+    skill_root = Path(__file__).resolve().parent.parent
+    template = skill_root / "launchd" / "com.claw.code-indexer.plist"
+    daemon = skill_root / "scripts" / "claw-indexer-daemon.py"
+    if not template.exists() or not daemon.exists():
+        sys.exit(f"error: missing template ({template}) or daemon ({daemon})")
+
+    target = Path.home() / "Library" / "LaunchAgents" / "com.claw.code-indexer.plist"
+
+    # Always unload the old version first — launchctl rejects load-while-loaded
+    # and would otherwise leak a stale process across reinstalls.
+    subprocess.run(["launchctl", "unload", str(target)],
+                   capture_output=True, check=False)
+
+    if args.uninstall:
+        if target.exists():
+            target.unlink()
+            print(f"removed {target}", file=sys.stderr)
+        else:
+            print("(nothing to remove)", file=sys.stderr)
+        return 0
+
+    log_dir = Path.home() / "Library" / "Logs" / "claw"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    rendered = template.read_text() \
+        .replace("{{PYTHON_PATH}}", sys.executable) \
+        .replace("{{DAEMON_PATH}}", str(daemon)) \
+        .replace("{{HOME}}", str(Path.home())) \
+        .replace("{{LOG_DIR}}", str(log_dir))
+    target.write_text(rendered)
+    print(f"wrote {target}", file=sys.stderr)
+
+    result = subprocess.run(["launchctl", "load", str(target)],
+                            capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        sys.exit(f"launchctl load failed: {result.stderr.strip()}")
+    print("loaded com.claw.code-indexer", file=sys.stderr)
+    if not shutil.which("fswatch"):
+        print("note: `fswatch` not on PATH — daemon will run in polling mode "
+              "(5min). Install with `brew install fswatch` for low-latency.",
+              file=sys.stderr)
+    print(f"logs: {log_dir}/claw-indexer.log", file=sys.stderr)
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-_SUBCOMMANDS = {"know", "sync", "save", "journal"}
+_SUBCOMMANDS = {"know", "sync", "save", "journal", "install-indexer"}
 
 
 def main():
@@ -1284,6 +1508,8 @@ def main():
             sys.exit(cmd_save(argv[1:]))
         if sub == "journal":
             sys.exit(cmd_journal(argv[1:]))
+        if sub == "install-indexer":
+            sys.exit(cmd_install_indexer(argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="claw",
