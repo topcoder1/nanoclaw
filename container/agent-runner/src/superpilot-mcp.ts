@@ -15,6 +15,73 @@ import { z } from 'zod';
 const API_URL = process.env.SUPERPILOT_API_URL || 'https://app.inboxsuperpilot.com/api';
 const SERVICE_TOKEN = process.env.NANOCLAW_SERVICE_TOKEN || '';
 
+// Brain miniapp lives on the host. Container-to-host reach varies by
+// runtime: Docker Desktop / Apple Container both expose host.docker.internal.
+// Fall through to localhost (works under host network) and finally to "off"
+// when the env var is set to an empty string — useful for tests / when the
+// brain isn't running.
+const BRAIN_API_URL =
+  process.env.BRAIN_API_URL ?? 'http://host.docker.internal:3847/api/brain';
+
+interface BrainHit {
+  ku_id: string;
+  text: string;
+  source_type: string;
+  source_ref: string | null;
+  finalScore: number;
+}
+
+/**
+ * Pull top-K brain hits for a draft prompt. Used by `compose_draft` to layer
+ * brain.db context (emails + repo docs + user notes) on top of SuperPilot's
+ * built-in SP-KB grounding. Mirrors the agent-side auto-recall thresholds so
+ * what the agent "knows" matches what the drafter sees.
+ *
+ * Returns "" on any failure — drafting must never fail because the brain is
+ * unavailable. The SuperPilot side still grounds via SP KB and contact memory.
+ */
+async function fetchBrainContext(query: string, limit = 5): Promise<string> {
+  if (!BRAIN_API_URL || query.trim().length < 8) return '';
+  try {
+    const url = new URL(`${BRAIN_API_URL}/recall`);
+    url.searchParams.set('q', query.slice(0, 500));
+    url.searchParams.set('limit', String(limit));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    const res = await fetch(url.toString(), {
+      headers: { 'X-Service-Token': SERVICE_TOKEN },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return '';
+    const data = (await res.json()) as { results?: BrainHit[] };
+    const hits = (data.results ?? []).filter((h) => h.finalScore >= 0.25);
+    if (hits.length === 0) return '';
+    const lines = hits.slice(0, limit).map((h) => {
+      const tag =
+        h.source_type === 'email'
+          ? '✉️'
+          : h.source_type === 'repo'
+            ? '📄'
+            : h.source_type === 'note'
+              ? '📝'
+              : '🧠';
+      const label =
+        h.source_type === 'repo' && h.source_ref
+          ? h.source_ref
+          : h.text.split('\n', 1)[0].slice(0, 110);
+      const body = h.text.split('\n').slice(0, 3).join(' ').slice(0, 220);
+      return `- ${tag} ${label}: ${body}`;
+    });
+    return (
+      `<brain_context>\nRelevant items the brain surfaced for this draft. ` +
+      `Use only if useful; do not quote verbatim.\n${lines.join('\n')}\n</brain_context>\n\n`
+    );
+  } catch {
+    return '';
+  }
+}
+
 async function apiGet(path: string, params?: Record<string, string>): Promise<any> {
   const url = new URL(`${API_URL}${path}`);
   if (params) {
@@ -280,16 +347,35 @@ server.tool(
 
 server.tool(
   'compose_draft',
-  'Generate an email draft using SuperPilot AI — uses contact memory, voice profile, and email context for personalized drafts.',
+  'Generate an email draft using SuperPilot AI — uses contact memory, voice profile, SuperPilot KB, AND brain.db (emails + repo docs + user notes) for personalized drafts.',
   {
     thread_id: z.string().optional().describe('Thread ID to reply to (omit for new email)'),
     to: z.string().describe('Recipient email address'),
     subject: z.string().optional().describe('Email subject (for new emails)'),
     instructions: z.string().describe('What the email should say/accomplish'),
+    use_brain: z
+      .boolean()
+      .optional()
+      .describe('Inject brain.db context into the instructions (default true). Set false for sensitive drafts where you do not want past notes/emails surfaced.'),
   },
   async (args) => {
     try {
-      const data = await apiPost('/compose/draft', args);
+      const useBrain = args.use_brain !== false;
+      let instructions = args.instructions;
+      if (useBrain) {
+        // Query the brain on (subject + instructions) so a reply about
+        // "renewal" surfaces the past renewal thread + any notes you saved.
+        const queryParts = [args.subject, args.instructions]
+          .filter((s): s is string => typeof s === 'string' && s.length > 0);
+        const brainBlock = await fetchBrainContext(queryParts.join(' — '));
+        if (brainBlock) instructions = brainBlock + instructions;
+      }
+      const data = await apiPost('/compose/draft', {
+        thread_id: args.thread_id,
+        to: args.to,
+        subject: args.subject,
+        instructions,
+      });
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
       };
