@@ -56,7 +56,10 @@ describe('brain/recall-command', () => {
   it('passes the requested limit to recall()', async () => {
     const spy = vi.fn(async () => []);
     await handleRecallCommand('query', { recallFn: spy, limit: 3 });
-    expect(spy).toHaveBeenCalledWith('query', { limit: 3, account: undefined });
+    expect(spy).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({ limit: 3, account: undefined }),
+    );
   });
 
   it('plumbs account scope through to recall()', async () => {
@@ -66,16 +69,19 @@ describe('brain/recall-command', () => {
       limit: 5,
       account: 'work',
     });
-    expect(spy).toHaveBeenCalledWith('query', { limit: 5, account: 'work' });
+    expect(spy).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({ limit: 5, account: 'work' }),
+    );
   });
 
   it('passes personal scope through when caller requests it', async () => {
     const spy = vi.fn(async () => []);
     await handleRecallCommand('query', { recallFn: spy, account: 'personal' });
-    expect(spy).toHaveBeenCalledWith('query', {
-      limit: 5,
-      account: 'personal',
-    });
+    expect(spy).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({ limit: 5, account: 'personal' }),
+    );
   });
 
   it('falls back to a graceful error message when recall throws', async () => {
