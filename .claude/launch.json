@@ -32,6 +32,13 @@
       "cwd": "/Users/topcoder1/dev/nanoclaw/.claude/worktrees/laughing-newton-2c85bc"
     },
     {
+      "name": "brain-preview",
+      "description": "Mini-app preview pointing at the production brain.db with Telegram auth disabled. Used to verify /brain/* UI changes against real data. The script chdirs to the main repo at startup so STORE_DIR resolves to the production store/ directory.",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "scripts/preview-brain.ts"],
+      "port": 3849
+    },
+    {
       "name": "miniapp-tunnel",
       "description": "Cloudflare tunnel exposing localhost:3847 as https://miniapp.inboxsuperpilot.com.",
       "runtimeExecutable": "cloudflared",
