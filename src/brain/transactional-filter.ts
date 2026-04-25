@@ -14,6 +14,14 @@
  *    done upstream. Tolerant of timing — if classification isn't set yet
  *    (race between triage + brain), this check is a no-op and the heuristic
  *    filter above still applies.
+ *
+ * **Override:** subjects matching `SHARED_DOC_OVERRIDE_RE` (Google Drive /
+ * Docs share notifications like "Presentation shared with you", "invited
+ * you to edit") bypass both checks. Senders are typically `drive-shares-dm-
+ * noreply@google.com`, which would otherwise match the no-reply rule, but
+ * the share itself is high-signal — a real human chose to share something
+ * with you. The subject pattern is narrow enough that random marketing
+ * emails won't trip it.
  */
 import type Database from 'better-sqlite3';
 
@@ -25,15 +33,23 @@ const TRANSACTIONAL_SENDER_RE =
 const TRANSACTIONAL_SUBJECT_RE =
   /\b(receipt|invoice|statement|order\s+(confirmation|#|number|placed)|payment\s+(received|confirmation|failed|successful)|subscription\s+(renewal|renewed|cancelled)|your\s+order|thanks?\s+for\s+your\s+(purchase|order|payment|subscription)|shipment|shipped|tracking\s+number|billing|auto-?submitted|unsubscribe)\b/i;
 
+const SHARED_DOC_OVERRIDE_RE =
+  /\b(shared\s+(with\s+you|a\s+(recording|presentation|document|spreadsheet|file|folder|video))|invited\s+you\s+to\s+(edit|comment|view))\b/i;
+
 export type TransactionalSkipReason =
   | 'sender_pattern'
   | 'subject_pattern'
   | 'classification_digest';
 
+export function isSharedDocNotification(email: { subject?: string }): boolean {
+  return !!email.subject && SHARED_DOC_OVERRIDE_RE.test(email.subject);
+}
+
 export function matchTransactionalHeuristic(email: {
   sender?: string;
   subject?: string;
 }): TransactionalSkipReason | null {
+  if (isSharedDocNotification(email)) return null;
   if (email.sender && TRANSACTIONAL_SENDER_RE.test(email.sender.trim())) {
     return 'sender_pattern';
   }
@@ -80,6 +96,7 @@ export function shouldSkipBrainExtraction(
   nanoclawDb: Database.Database | null,
   email: { thread_id: string; sender?: string; subject?: string },
 ): TransactionalSkipReason | null {
+  if (isSharedDocNotification(email)) return null;
   const heuristic = matchTransactionalHeuristic(email);
   if (heuristic) return heuristic;
   if (nanoclawDb) {

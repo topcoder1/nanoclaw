@@ -67,6 +67,42 @@ describe('matchTransactionalHeuristic', () => {
       }),
     ).toBeNull();
   });
+
+  it('lets shared-document notifications through despite no-reply sender', () => {
+    expect(
+      matchTransactionalHeuristic({
+        sender: 'drive-shares-dm-noreply@google.com',
+        subject: 'Presentation shared with you: "tokio-marine-orphan-vpn-exec"',
+      }),
+    ).toBeNull();
+    expect(
+      matchTransactionalHeuristic({
+        sender: 'drive-shares-dm-noreply@google.com',
+        subject: 'Document shared with you: "ATX compilation of tech"',
+      }),
+    ).toBeNull();
+    expect(
+      matchTransactionalHeuristic({
+        sender: 'noreply@google.com',
+        subject: 'Alexandre Francois shared a recording with you',
+      }),
+    ).toBeNull();
+    expect(
+      matchTransactionalHeuristic({
+        sender: 'do-not-reply@google.com',
+        subject: 'Ed Gibbs invited you to edit a presentation',
+      }),
+    ).toBeNull();
+  });
+
+  it('still blocks unrelated no-reply emails', () => {
+    expect(
+      matchTransactionalHeuristic({
+        sender: 'no-reply@anthropic.com',
+        subject: 'Your usage report for April',
+      }),
+    ).toBe('sender_pattern');
+  });
 });
 
 describe('matchLowValueClassification', () => {
@@ -172,6 +208,26 @@ describe('shouldSkipBrainExtraction', () => {
         thread_id: 't1',
         sender: 'cliu@stellarcyber.ai',
         subject: 'Data Licensing Discussion',
+      }),
+    ).toBeNull();
+  });
+
+  it('shared-doc subject overrides archive_candidate classification', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tracked_items (
+        id TEXT PRIMARY KEY, thread_id TEXT, classification TEXT,
+        queue TEXT, detected_at INTEGER
+      );
+    `);
+    db.prepare(
+      `INSERT INTO tracked_items VALUES ('x', 't1', 'digest', 'archive_candidate', 1)`,
+    ).run();
+    expect(
+      shouldSkipBrainExtraction(db, {
+        thread_id: 't1',
+        sender: 'drive-shares-dm-noreply@google.com',
+        subject: 'Presentation shared with you: "tokio-marine-orphan-vpn-exec"',
       }),
     ).toBeNull();
   });
