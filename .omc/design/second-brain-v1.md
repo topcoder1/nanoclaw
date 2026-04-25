@@ -138,13 +138,36 @@ Indexing rules:
 
 Smoke run on nanoclaw: 669 eligible files → 155 doc + **795 code chunks**. Initial embedding ~13 min at ~1 doc/s. Future v1.3 will replace line-count chunking with symbol-boundary chunking via tree-sitter once v1.2's coverage proves noisy in practice.
 
-### v1.3 — symbol-aware chunking + content-hash incremental (planned)
+### v1.3a — content-hash incremental sync (shipped 2026-04-24)
 
-Replace the line-count windows with tree-sitter symbol boundaries (function / class / module level). Add a `content_hash` column on `knowledge_units` so re-syncing a file with unchanged hash is a no-op (no FTS churn, no Qdrant churn). Required when `claw sync --code --all` becomes a routine cron job.
+`metadata.content_hash` (SHA-256 of file content) stamped on every repo KU. Before each upsert `_existing_file_hash()` checks for a match — if equal, the entire file is a no-op (no SQL write, no FTS churn, no Qdrant re-embed). For code files the lookup samples the first chunk row since all chunks of a file share the same `content_hash`. New `unchanged_files` counter surfaces in the per-repo sync table so you can see how much work was actually skipped.
 
-### v1.4 — fswatch daemon (planned)
+Bypassed tree-sitter (regex shipped instead in v1.3b) — content-hash by itself is the load-bearing prerequisite for `claw sync --code --all` becoming a routine cron job.
 
-Central launchctl agent (`com.claw.code-indexer`), separate from nanoclaw, watching paths from `~/.claw/repos.yaml` via `fswatch`. Debounces changes, re-indexes modified files only. Deferred until (a) v1.0 + v1.1 retrieval is felt-to-be-useful and (b) manual `claw sync` + nightly cron becomes annoying. Likely trigger: team grows beyond one person, or you want "saved a file → searchable within 30s" latency.
+### v1.3b — symbol-aware chunking via regex (shipped 2026-04-24)
+
+Replaced the v1.2 line-count windows with `_chunk_by_symbols()`. Per-language regexes detect top-level declarations:
+
+- Python / Pyi — `def` / `class` / `async def`
+- TS / TSX / JS / JSX / MJS / CJS — `function` / `class` / `interface` / `type` / `enum` / top-level `const X =`
+- Go — `func` / `type X struct`
+- Rust — `fn` / `struct` / `enum` / `trait` / `impl` / `mod` (with optional `pub`)
+- Java, Swift — class / func / struct / interface / extension
+
+Symbols are greedily grouped into ≤200-line chunks; a single huge symbol that exceeds the cap falls back to line-window slicing within itself. First chunk gets a synthetic `<preamble>` label to capture imports / license headers. Chunk metadata gains a `symbols` field listing the names in that chunk.
+
+Deferred (not shipped today): the actual tree-sitter integration. Regex is good enough until users surface wrong boundaries in real retrieval. Tree-sitter would be a real native-build dependency — not worth it preemptively.
+
+### v1.4 — fswatch daemon (shipped 2026-04-24)
+
+`.claude/skills/claw/scripts/claw-indexer-daemon.py` — a standalone background process that reads `~/.claw/repos.yaml`, watches every tracked path, and triggers `claw sync --code --no-embed` on debounced batches. Two modes picked at startup:
+
+- **fswatch mode** (preferred) — spawns `fswatch --latency 5 --batch-marker --one-per-batch --recursive` over all repo roots. One sync per debounce window.
+- **Polling mode** (fallback) — runs `claw sync` every 5 minutes when `fswatch` is missing from PATH. Higher latency, zero dependencies.
+
+Installed as `com.claw.code-indexer` launchctl agent via `claw install-indexer` (idempotent — re-running replaces and reloads). Plist template at `.claude/skills/claw/launchd/com.claw.code-indexer.plist`. Logs to `~/Library/Logs/claw/`. Uninstall with `claw install-indexer --uninstall`.
+
+Deliberately runs as a separate launchctl agent, not inside nanoclaw — nanoclaw restarts on every code change; the indexer must be stable. Embedding intentionally deferred to a follow-up `claw sync` invocation rather than running per debounce: the daemon's job is "keep brain.db + FTS5 fresh," not "drive Nomic on every save."
 
 ### v2 — journals + user capture inbox (shipped 2026-04-24)
 
@@ -169,12 +192,31 @@ Gated via `BRAIN_AUTO_RECALL` env var (default: on; set to `0`/`false` to disabl
 
 Net effect: the agent can now answer "what did Ryo say?" or "what's our Orphan VPN status?" without the user having to type `/recall` first — the relevant KUs are already in context. Closes the loop between the ingestion/storage layer and the expression surface.
 
+Test coverage added 2026-04-24: `src/brain/__tests__/auto-recall.test.ts` (17 tests) covering env gating, short-prompt and trigger-prefix skips, score floor, char cap, source_type formatting, mute-pattern matching, and error safety.
+
+### v3.1 — per-query auto-recall mute (shipped 2026-04-24)
+
+New `auto_recall_mutes(pattern, reason, created_at)` table (schema §5.7). The miniapp's `/brain/queries` page now renders a `mute` button on every `agent-auto` row whose query text isn't already muted; the form posts to `/brain/auto-recall/mutes` and the page redirects back. A separate "Auto-recall mutes" section lists active mutes with an `unmute` button each.
+
+Inside `maybeInjectBrainContext`, after the trigger-prefix skip and before calling `recall()`, we look up `auto_recall_mutes` and skip the turn if any pattern is a case-insensitive substring of the prompt. Manual `/recall` calls are unaffected — mutes only suppress the silent prelude.
+
+`AutoRecallOptions` gained an `isMutedFn` hook so tests can inject deterministic mute behavior without touching brain.db.
+
+### v3.2 — `compose_draft` brain.db grounding (shipped 2026-04-24)
+
+`container/agent-runner/src/superpilot-mcp.ts` — `compose_draft` now layers brain.db context on top of SuperPilot's existing SP-KB grounding. Before posting to `/compose/draft`, it queries the localhost `/api/brain/recall` endpoint with `(subject + instructions)`, filters hits ≥ 0.25 (same threshold as agent auto-recall), and prepends a `<brain_context>` block to the `instructions` field SP receives.
+
+- `BRAIN_API_URL` env var (default `http://host.docker.internal:3847/api/brain`) addresses host-from-container reach.
+- 2s timeout via `AbortController`; soft-fails to plain instructions if the brain is unreachable. Drafting must never fail because the brain is down.
+- New `use_brain` boolean argument (default `true`) lets the agent opt out for sensitive drafts.
+
+Effect: a draft about "Stellar Cyber renewal" now sees both SP KB hits AND your saved notes + the actual past renewal email thread, without requiring SP to know about brain.db.
+
 ### Future work (not yet scoped)
 
-- `generate_reply` grounding extended to brain.db, not just SP KB.
 - More inputs: Slack, voice memos, PDFs, web reads (Readwise-style?), meeting transcripts.
-- Editor integration (VS Code command palette: "brain: what do I know about this symbol?").
-- Per-query toggle in the miniapp Queries tab to disable auto-recall for specific patterns (noise control).
+- Editor integration (VS Code command palette: "brain: what do I know about this symbol?"). Now that v1.3b chunks carry `symbols` metadata, a symbol-name query should hit cleanly.
+- Tree-sitter swap of v1.3b's regex chunker once real-world retrieval surfaces wrong boundaries.
 
 ## Open questions
 
@@ -208,6 +250,11 @@ Net effect: the agent can now answer "what did Ryo say?" or "what's our Orphan V
 - **2026-04-24**: v1.0 repo indexer shipped — 1,136 markdown/README files across 32 repos, ~5s initial sync, upserts by deterministic id, FTS-only retrieval for now.
 - **2026-04-24**: `claw sync` is Python (not Node) so it has zero subprocess startup cost and can write to brain.db directly. Schema compatibility risk: if nanoclaw adds a NOT NULL column to `knowledge_units`, the sync will fail loudly until the column gets a DEFAULT or we add it to the Python INSERT.
 - **2026-04-24**: v1.1a embeddings shipped — `scripts/brain-embed-repos.ts` auto-chains off `claw sync` (skippable with `--no-embed`). Repo KUs now feed the same Qdrant collection as email KUs, so miniapp search + future `recall()` callers get hybrid retrieval over the whole corpus. CLI stays FTS-only pending v1.1b HTTP wrapper.
+- **2026-04-24**: v1.3a content-hash incremental sync shipped. Stored in `metadata.content_hash` (no schema change). Verified end-to-end: re-syncing an unchanged repo reports `unchanged_files == files_eligible` and writes zero rows; modifying one file re-indexes only that file; for code, file shrinkage still triggers stale-chunk DELETE before re-insert.
+- **2026-04-24**: v1.3b shipped with regex symbol detection, NOT tree-sitter. Rationale: tree-sitter requires per-language compiled grammars and a native build; a pragmatic regex covers the seven highest-volume languages with zero new dependencies. Chunk metadata now carries a `symbols` field (comma-joined list) so retrieval can later filter or re-rank by symbol presence. Tree-sitter swap remains an option once regex boundaries are observed to be wrong in practice.
+- **2026-04-24**: v1.4 daemon shipped as `claw-indexer-daemon.py` + `com.claw.code-indexer.plist` + `claw install-indexer` subcommand. fswatch mode preferred (5s debounce, batch-marker for one sync per burst); polling mode (5min interval) is a zero-dep fallback. Daemon calls `claw sync --code --no-embed` — embedding stays a separate concern, run on user demand or via cron, so debounced bursts don't flood the Nomic queue.
+- **2026-04-24**: v3.2 — `compose_draft` brain.db grounding shipped client-side (in the container's MCP wrapper), NOT server-side in SuperPilot. Rationale: keeps SuperPilot agnostic of nanoclaw's local brain; the wrapper just enriches the `instructions` argument before forwarding. `BRAIN_API_URL` env-driven so the same MCP server works whether the brain miniapp is reachable at `host.docker.internal:3847`, on `localhost`, or unreachable (graceful no-op).
+- **2026-04-24**: v3.1 mute table is one-row-per-pattern with case-insensitive substring matching, NOT regex. Rationale: substring is safer (no ReDoS, no regex syntax footgun in the UI), matches user intuition ("mute prompts containing 'sentry'"), and avoids the question of where the mute boundary should anchor. If pattern-collision becomes an issue later, we can layer a `pattern_kind = 'substring' | 'regex'` column.
 
 ## What this doc is NOT yet
 
