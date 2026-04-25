@@ -102,6 +102,12 @@ export function detectActions(
             callbackData: `answer:${aid}:no`,
             style: 'destructive-safe',
           },
+          {
+            label: '✓ Already handled',
+            callbackData: `answer:${aid}:handled`,
+            style: 'secondary',
+            row: 1,
+          },
         ],
       });
     }
@@ -122,6 +128,12 @@ export function detectActions(
           label: '❌ Decline',
           callbackData: `rsvp:${aid}:declined`,
           style: 'destructive-safe',
+        },
+        {
+          label: '✓ Already handled',
+          callbackData: `answer:${aid}:handled`,
+          style: 'secondary',
+          row: 1,
         },
       ],
     });

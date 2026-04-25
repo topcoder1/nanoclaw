@@ -2298,6 +2298,25 @@ async function main(): Promise<void> {
       }
       await channel.sendMessage(jid, formatted);
     },
+    sendNotificationWithActions: async (jid, text, actions) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'sendNotificationWithActions: no channel found');
+        return undefined;
+      }
+      const withActions = channel as Channel & {
+        sendMessageWithActions?: (
+          j: string,
+          t: string,
+          a: typeof actions,
+        ) => Promise<number>;
+      };
+      if (typeof withActions.sendMessageWithActions === 'function') {
+        return await withActions.sendMessageWithActions(jid, text, actions);
+      }
+      await channel.sendMessage(jid, text);
+      return undefined;
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

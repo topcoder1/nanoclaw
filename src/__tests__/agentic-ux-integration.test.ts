@@ -28,8 +28,9 @@ describe('Agentic UX Integration', () => {
     expect(result.meta.urgency).toBe('action-required');
     expect(result.meta.questionType).toBe('financial-confirm');
     expect(result.text).toContain('💰');
-    expect(result.meta.actions).toHaveLength(3);
+    expect(result.meta.actions).toHaveLength(4);
     expect(result.meta.actions[0].label).toBe('Yes, all expected');
+    expect(result.meta.actions[3].label).toBe('✓ Already handled');
   });
 
   it('batcher collects auto-handled items and flushes', () => {

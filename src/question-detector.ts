@@ -62,6 +62,12 @@ export function detectQuestion(text: string): DetectedQuestion | null {
           callbackData: `answer:${qid}:details`,
           style: 'secondary',
         },
+        {
+          label: '✓ Already handled',
+          callbackData: `answer:${qid}:handled`,
+          style: 'secondary',
+          row: 1,
+        },
       ],
     };
   }
@@ -87,6 +93,12 @@ export function detectQuestion(text: string): DetectedQuestion | null {
           label: '⏳ Let me think…',
           callbackData: `answer:${qid}:defer`,
           style: 'secondary',
+        },
+        {
+          label: '✓ Already handled',
+          callbackData: `answer:${qid}:handled`,
+          style: 'secondary',
+          row: 1,
         },
       ],
     };

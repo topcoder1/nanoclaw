@@ -60,6 +60,9 @@ describe('detectActions', () => {
         /^forward_person:[^:]+:Philip%20Ye$/,
       );
       expect(fwd!.actions[1].callbackData).toMatch(/^answer:[^:]+:no$/);
+      expect(fwd!.actions[2].label).toBe('✓ Already handled');
+      expect(fwd!.actions[2].callbackData).toMatch(/^answer:[^:]+:handled$/);
+      expect(fwd!.actions[2].row).toBe(1);
     });
 
     it('email-address forward takes priority over person-name forward', () => {
@@ -93,8 +96,16 @@ describe('detectActions', () => {
         expect.arrayContaining([
           expect.objectContaining({ label: '✅ RSVP Yes' }),
           expect.objectContaining({ label: '❌ Decline' }),
+          expect.objectContaining({
+            label: '✓ Already handled',
+            row: 1,
+          }),
         ]),
       );
+      const handled = rsvp!.actions.find(
+        (a) => a.label === '✓ Already handled',
+      );
+      expect(handled!.callbackData).toMatch(/^answer:[^:]+:handled$/);
     });
 
     it('detects "want to attend" pattern', () => {

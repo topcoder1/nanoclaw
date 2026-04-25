@@ -124,6 +124,18 @@ describe('handleCallback', () => {
     expect(injectUserReply).not.toHaveBeenCalled();
   });
 
+  it('answer:handled tells agent to stop and clears pending item', async () => {
+    const deps = makeDeps();
+    const injectUserReply = vi.fn().mockReturnValue(true);
+    deps.injectUserReply = injectUserReply;
+    await handleCallback(makeQuery('answer:q_abc:handled'), deps);
+    expect(injectUserReply).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringMatching(/already handled.*stop this task.*resolved/i),
+    );
+    expect(deps.statusBar.removePendingItem).toHaveBeenCalledWith('q_abc');
+  });
+
   it('expand fetches body and edits message with preview', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('expand:msg1:personal'), deps);
