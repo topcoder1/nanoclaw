@@ -11,7 +11,9 @@ import {
 } from './procedures-markdown.js';
 
 const globalProcDir = path.join(STORE_DIR, 'procedures');
-const groupId = 'main';
+// Unique per-file groupId so parallel test files don't clobber each other
+// in groups/<id>/procedures/ on the real fs.
+const groupId = 'procedures_markdown_test';
 const groupProcDir = path.join(GROUPS_DIR, groupId, 'procedures');
 const groupMdPath = path.join(GROUPS_DIR, groupId, 'PROCEDURES.md');
 

@@ -13,7 +13,9 @@ import {
 } from './consolidator.js';
 
 const globalProcDir = path.join(STORE_DIR, 'procedures');
-const groupId = 'main';
+// Unique per-file groupId so parallel test files don't clobber each other
+// in groups/<id>/procedures/ on the real fs.
+const groupId = 'consolidator_test';
 const groupProcDir = path.join(GROUPS_DIR, groupId, 'procedures');
 const reportsDir = path.join(STORE_DIR, 'consolidation-reports');
 const candidatesRoot = path.join(STORE_DIR, 'consolidation-candidates');
