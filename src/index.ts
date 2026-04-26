@@ -155,6 +155,7 @@ import { handleWebhookEvent } from './webhook-consumer.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { initLearningSystem, buildRulesBlock } from './learning/index.js';
+import { startProceduresMarkdownSchedule } from './learning/procedures-markdown.js';
 import { handleMessageWithProcedureCheck } from './learning/procedure-match-integration.js';
 import { captureTaskOutcome } from './knowledge-ingestion.js';
 import { resolveModel, getEscalationModel } from './llm/provider.js';
@@ -2663,6 +2664,13 @@ async function main(): Promise<void> {
     },
     24 * 60 * 60 * 1000,
   );
+
+  // Daily PROCEDURES.md export per group with active learned procedures.
+  // Runs once at startup so files are fresh for any agent that boots, then
+  // every 24h. Discovery is on-disk (no dependency on registeredGroups
+  // shape), so groups created after startup still get exported on the next
+  // tick.
+  startProceduresMarkdownSchedule();
 
   // Initialize email trigger debouncer — buffers rapid-fire SSE triggers
   // into a single merged IPC file to prevent duplicate agent runs

@@ -95,3 +95,94 @@ export function writeProceduresMarkdown(
   );
   return filePath;
 }
+
+/**
+ * Discover every group with at least one non-deprecated procedure on disk
+ * and return its folder name. Independent of registered-group state so the
+ * scheduler doesn't depend on JID/folder normalization.
+ */
+export function discoverGroupsWithProcedures(): string[] {
+  if (!fs.existsSync(GROUPS_DIR)) return [];
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(GROUPS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const procDir = path.join(GROUPS_DIR, entry.name, 'procedures');
+    if (!fs.existsSync(procDir)) continue;
+    const hasActive = fs
+      .readdirSync(procDir)
+      .some((f) => f.endsWith('.json') && !f.endsWith('.deprecated.json'));
+    if (hasActive) found.push(entry.name);
+  }
+  return found;
+}
+
+export interface WriteAllResult {
+  written: { groupId: string; filePath: string }[];
+  failed: { groupId: string; error: string }[];
+}
+
+/**
+ * Write PROCEDURES.md for every group with active procedures. Errors per
+ * group are caught and reported, never thrown — one bad group must not stop
+ * the rest.
+ */
+export function writeAllProceduresMarkdown(
+  opts: Omit<ExportOptions, 'groupId'> = {},
+): WriteAllResult {
+  const result: WriteAllResult = { written: [], failed: [] };
+  for (const groupId of discoverGroupsWithProcedures()) {
+    try {
+      const filePath = writeProceduresMarkdown(groupId, opts);
+      result.written.push({ groupId, filePath });
+    } catch (err) {
+      result.failed.push({
+        groupId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return result;
+}
+
+export interface ScheduleOptions {
+  intervalMs?: number;
+  runImmediately?: boolean;
+  exportOpts?: Omit<ExportOptions, 'groupId'>;
+}
+
+const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Start a recurring writer. Returns a stop() function for tests + graceful
+ * shutdown. Errors inside the callback are logged, never propagated, so the
+ * timer keeps firing.
+ */
+export function startProceduresMarkdownSchedule(
+  opts: ScheduleOptions = {},
+): () => void {
+  const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
+
+  const tick = (): void => {
+    try {
+      const r = writeAllProceduresMarkdown(opts.exportOpts);
+      if (r.written.length > 0 || r.failed.length > 0) {
+        logger.info(
+          { written: r.written.length, failed: r.failed.length },
+          'PROCEDURES.md schedule tick',
+        );
+      }
+      for (const f of r.failed) {
+        logger.warn(f, 'PROCEDURES.md export failed for group');
+      }
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'PROCEDURES.md schedule tick failed',
+      );
+    }
+  };
+
+  if (opts.runImmediately !== false) tick();
+  const handle = setInterval(tick, intervalMs);
+  return () => clearInterval(handle);
+}

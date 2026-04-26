@@ -2,17 +2,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR, STORE_DIR } from '../config.js';
+import { GROUPS_DIR } from '../config.js';
 import { saveProcedure, type Procedure } from '../memory/procedure-store.js';
 import {
+  discoverGroupsWithProcedures,
   exportProceduresMarkdown,
   rankProcedures,
+  startProceduresMarkdownSchedule,
+  writeAllProceduresMarkdown,
   writeProceduresMarkdown,
 } from './procedures-markdown.js';
 
-const globalProcDir = path.join(STORE_DIR, 'procedures');
-// Unique per-file groupId so parallel test files don't clobber each other
-// in groups/<id>/procedures/ on the real fs.
+// Unique per-file groupId so parallel test files don't clobber each other.
+// We deliberately do NOT touch STORE_DIR/procedures (the global procedure
+// scope) because it's shared with src/memory/procedure-store.test.ts and
+// cleaning it from here races their assertions.
 const groupId = 'procedures_markdown_test';
 const groupProcDir = path.join(GROUPS_DIR, groupId, 'procedures');
 const groupMdPath = path.join(GROUPS_DIR, groupId, 'PROCEDURES.md');
@@ -41,15 +45,12 @@ function makeProc(overrides: Partial<Procedure> = {}): Procedure {
 }
 
 beforeEach(() => {
-  fs.mkdirSync(globalProcDir, { recursive: true });
   fs.mkdirSync(groupProcDir, { recursive: true });
-  cleanDir(globalProcDir);
   cleanDir(groupProcDir);
   if (fs.existsSync(groupMdPath)) fs.unlinkSync(groupMdPath);
 });
 
 afterEach(() => {
-  cleanDir(globalProcDir);
   cleanDir(groupProcDir);
   if (fs.existsSync(groupMdPath)) fs.unlinkSync(groupMdPath);
 });
@@ -85,8 +86,11 @@ describe('rankProcedures', () => {
 });
 
 describe('exportProceduresMarkdown', () => {
-  it('returns empty placeholder when no procedures exist', () => {
-    const md = exportProceduresMarkdown();
+  it('returns empty placeholder when no procedures qualify', () => {
+    // listProcedures merges in globals, which the parallel
+    // procedure-store.test.ts churns. Force an empty result via a high
+    // minRuns floor so the placeholder branch fires deterministically.
+    const md = exportProceduresMarkdown({ minRuns: 1_000_000 });
     expect(md).toMatch(/# Learned Procedures/);
     expect(md).toMatch(/No procedures recorded yet/);
   });
@@ -115,25 +119,11 @@ describe('exportProceduresMarkdown', () => {
     expect(md).toMatch(/`paste_link`/);
   });
 
-  it('only includes group + global, ranked', () => {
-    saveProcedure(
-      makeProc({ name: 'global_low', success_count: 1, failure_count: 0 }),
-    );
-    saveProcedure(
-      makeProc({
-        name: 'group_high',
-        success_count: 9,
-        failure_count: 0,
-        groupId,
-      }),
-    );
-    const md = exportProceduresMarkdown({ groupId });
-    const groupIdx = md.indexOf('group_high');
-    const globalIdx = md.indexOf('global_low');
-    expect(groupIdx).toBeGreaterThan(0);
-    expect(globalIdx).toBeGreaterThan(0);
-    expect(groupIdx).toBeLessThan(globalIdx);
-  });
+  // Note: the previous "group + global, ranked" test was removed because
+  // src/memory/procedure-store.test.ts wholesale-cleans the global procedures
+  // dir between its own runs, which races any global write made here.
+  // listProcedures' group+global merging is exercised in procedure-store.test;
+  // this file just calls listProcedures, so further coverage here is redundant.
 });
 
 describe('writeProceduresMarkdown', () => {
@@ -143,5 +133,84 @@ describe('writeProceduresMarkdown', () => {
     expect(filePath).toBe(groupMdPath);
     const written = fs.readFileSync(filePath, 'utf-8');
     expect(written).toMatch(/## p1/);
+  });
+});
+
+describe('discoverGroupsWithProcedures', () => {
+  it('lists groups whose procedures dir contains an active .json file', () => {
+    saveProcedure(makeProc({ name: 'p1', success_count: 1, groupId }));
+    const found = discoverGroupsWithProcedures();
+    expect(found).toContain(groupId);
+  });
+
+  it('skips groups with only .deprecated.json files', () => {
+    // Write directly so deprecated state is the only artifact
+    const onlyDeprecatedGroup = `${groupId}_only_dep`;
+    const dir = path.join(GROUPS_DIR, onlyDeprecatedGroup, 'procedures');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'old.deprecated.json'), '{}');
+    try {
+      const found = discoverGroupsWithProcedures();
+      expect(found).not.toContain(onlyDeprecatedGroup);
+    } finally {
+      fs.rmSync(path.join(GROUPS_DIR, onlyDeprecatedGroup), {
+        recursive: true,
+        force: true,
+      });
+    }
+  });
+});
+
+describe('writeAllProceduresMarkdown', () => {
+  it('writes one PROCEDURES.md per discovered group', () => {
+    saveProcedure(makeProc({ name: 'p1', success_count: 1, groupId }));
+    const r = writeAllProceduresMarkdown();
+    const ours = r.written.find((w) => w.groupId === groupId);
+    expect(ours).toBeDefined();
+    expect(ours!.filePath).toBe(groupMdPath);
+    expect(fs.existsSync(groupMdPath)).toBe(true);
+  });
+});
+
+describe('startProceduresMarkdownSchedule', () => {
+  it('runs immediately by default and writes the file', () => {
+    saveProcedure(makeProc({ name: 'p_sched', success_count: 1, groupId }));
+    const stop = startProceduresMarkdownSchedule({
+      intervalMs: 60_000_000, // big enough that the interval never fires in test
+    });
+    try {
+      expect(fs.existsSync(groupMdPath)).toBe(true);
+      const md = fs.readFileSync(groupMdPath, 'utf-8');
+      expect(md).toMatch(/## p_sched/);
+    } finally {
+      stop();
+    }
+  });
+
+  it('does not run immediately when runImmediately=false', () => {
+    saveProcedure(
+      makeProc({ name: 'p_no_immediate', success_count: 1, groupId }),
+    );
+    const stop = startProceduresMarkdownSchedule({
+      intervalMs: 60_000_000,
+      runImmediately: false,
+    });
+    try {
+      expect(fs.existsSync(groupMdPath)).toBe(false);
+    } finally {
+      stop();
+    }
+  });
+
+  it('stop() halts the timer (no further writes after stop)', async () => {
+    const stop = startProceduresMarkdownSchedule({
+      intervalMs: 50,
+      runImmediately: false,
+    });
+    stop();
+    if (fs.existsSync(groupMdPath)) fs.unlinkSync(groupMdPath);
+    saveProcedure(makeProc({ name: 'p_after_stop', success_count: 1, groupId }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(fs.existsSync(groupMdPath)).toBe(false);
   });
 });
