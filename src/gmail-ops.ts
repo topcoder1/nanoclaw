@@ -85,6 +85,16 @@ export interface GmailOps {
     messageId: string,
     input: ModifyLabelsInput,
   ): Promise<void>;
+  /**
+   * Resolve an account alias (e.g. "personal", "whoisxml") or full email
+   * to the actual mailbox email address. Returns null if the alias isn't
+   * registered, or if the channel hasn't reported an emailAddress yet.
+   *
+   * Used by callers that need the real address for Gmail deep-links —
+   * the `u/<email>` and `/a/<domain>/` URL forms only work with the
+   * actual address, not the local alias name.
+   */
+  emailAddressForAlias(account: string): string | null;
 }
 
 export interface GmailOpsProvider {
@@ -279,6 +289,37 @@ export class GmailOpsRouter implements GmailOps {
       );
     }
     return ch.getMessageHeaders(messageId, headerNames);
+  }
+
+  emailAddressForAlias(account: string): string | null {
+    if (!account) return null;
+    const key = account.toLowerCase();
+
+    // Already a full email — return as-is if it matches a registered
+    // channel, so callers can pass either alias or address.
+    if (this.emailToAlias.has(key)) return key;
+
+    // Look up the channel via the same resolution chain as getChannel
+    // (alias → email → local-part) and read its emailAddress.
+    const tryAliases = [account, key];
+    for (const a of tryAliases) {
+      const ch = this.channels.get(a);
+      if (ch?.emailAddress) return ch.emailAddress.toLowerCase();
+    }
+    const emailAlias = this.emailToAlias.get(key);
+    if (emailAlias) {
+      const ch = this.channels.get(emailAlias);
+      if (ch?.emailAddress) return ch.emailAddress.toLowerCase();
+    }
+    const localPart = deriveLocalPart(key);
+    if (localPart) {
+      const localAlias = this.localPartToAlias.get(localPart);
+      if (localAlias) {
+        const ch = this.channels.get(localAlias);
+        if (ch?.emailAddress) return ch.emailAddress.toLowerCase();
+      }
+    }
+    return null;
   }
 
   async modifyMessageLabels(

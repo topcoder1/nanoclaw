@@ -117,6 +117,59 @@ describe('GmailOpsRouter', () => {
     expect(personal.getMessageBody).not.toHaveBeenCalled();
   });
 
+  describe('emailAddressForAlias', () => {
+    it('resolves alias to the channel emailAddress (lowercased)', () => {
+      const router = new GmailOpsRouter();
+      const channel = makeMockChannel('attaxion');
+      (channel as any).emailAddress = 'Jonathan@Attaxion.com';
+      router.register('attaxion', channel as any);
+      expect(router.emailAddressForAlias('attaxion')).toBe(
+        'jonathan@attaxion.com',
+      );
+    });
+
+    it('returns the same email when given a registered email address', () => {
+      const router = new GmailOpsRouter();
+      const channel = makeMockChannel('personal');
+      (channel as any).emailAddress = 'topcoder1@gmail.com';
+      router.register('personal', channel as any);
+      expect(router.emailAddressForAlias('topcoder1@gmail.com')).toBe(
+        'topcoder1@gmail.com',
+      );
+    });
+
+    it('falls back via local-part when SSE sent the bare local-part', () => {
+      const router = new GmailOpsRouter();
+      const channel = makeMockChannel('personal');
+      (channel as any).emailAddress = 'topcoder1@gmail.com';
+      router.register('personal', channel as any);
+      expect(router.emailAddressForAlias('topcoder1')).toBe(
+        'topcoder1@gmail.com',
+      );
+    });
+
+    it('returns null for unknown alias', () => {
+      const router = new GmailOpsRouter();
+      const channel = makeMockChannel('personal');
+      (channel as any).emailAddress = 'topcoder1@gmail.com';
+      router.register('personal', channel as any);
+      expect(router.emailAddressForAlias('mystery')).toBeNull();
+    });
+
+    it('returns null for empty input', () => {
+      const router = new GmailOpsRouter();
+      expect(router.emailAddressForAlias('')).toBeNull();
+    });
+
+    it('returns null when channel has no emailAddress yet', () => {
+      const router = new GmailOpsRouter();
+      const channel = makeMockChannel('personal');
+      // No emailAddress property
+      router.register('personal', channel as any);
+      expect(router.emailAddressForAlias('personal')).toBeNull();
+    });
+  });
+
   it('handles channel without emailAddress gracefully', async () => {
     const router = new GmailOpsRouter();
     const channel = makeMockChannel('personal');

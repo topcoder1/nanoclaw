@@ -188,15 +188,20 @@ describe('Brain miniapp — /brain/ku/:id', () => {
     expect(after.last_accessed_at).not.toBeNull();
   });
 
-  it('email source renders a gmail deep link', async () => {
+  it('email source falls back to a bare gmail deep link without gmailOps', async () => {
     seedFullKu(brainDb, 'K_email', {
       source_type: 'email',
       source_ref: 'thread-abcd1234',
     });
     const res = await request(app).get('/brain/ku/K_email');
+    // Without gmailOps wired, we still render a link — but it must not
+    // hardcode `u/0` (which picks the wrong account on multi-account
+    // browsers) and must use #all/ so archived threads still open.
     expect(res.text).toContain(
-      'https://mail.google.com/mail/u/0/#inbox/thread-abcd1234',
+      'https://mail.google.com/mail/#all/thread-abcd1234',
     );
+    expect(res.text).not.toContain('/u/0/');
+    expect(res.text).not.toContain('#inbox/');
   });
 
   it('non-email source does not render a source deep link', async () => {
@@ -206,5 +211,121 @@ describe('Brain miniapp — /brain/ku/:id', () => {
     });
     const res = await request(app).get('/brain/ku/K_other');
     expect(res.text).not.toContain('Open source →');
+  });
+});
+
+describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
+  let brainDb: Database.Database;
+
+  function seedRawEvent(
+    db: Database.Database,
+    threadId: string,
+    alias: string,
+  ): void {
+    const payload = JSON.stringify({
+      thread_id: threadId,
+      account: alias,
+      subject: 'subject',
+      sender: 's@example.com',
+    });
+    db.prepare(
+      `INSERT INTO raw_events
+         (id, source_type, source_ref, payload, received_at)
+       VALUES (?, 'email', ?, ?, ?)`,
+    ).run(`re-${threadId}`, threadId, Buffer.from(payload, 'utf8'), '2026-04-01T00:00:00Z');
+  }
+
+  beforeEach(() => {
+    brainDb = makeBrainDb();
+  });
+
+  afterEach(() => {
+    return new Promise((r) => setTimeout(r, 100));
+  });
+
+  it('uses /mail/u/<email>/#all/ for personal gmail.com accounts', async () => {
+    seedFullKu(brainDb, 'K_personal', {
+      source_type: 'email',
+      source_ref: 'thread-personal',
+    });
+    seedRawEvent(brainDb, 'thread-personal', 'personal');
+    const app = createMiniAppServer({
+      port: 0,
+      db: makeMessagesDb(),
+      brainDb,
+      gmailOps: {
+        emailAddressForAlias: (alias: string) =>
+          alias === 'personal' ? 'topcoder1@gmail.com' : null,
+      } as never,
+    });
+    const res = await request(app).get('/brain/ku/K_personal');
+    expect(res.text).toContain(
+      'https://mail.google.com/mail/u/topcoder1%40gmail.com/#all/thread-personal',
+    );
+    expect(res.text).not.toContain('/u/0/');
+    expect(res.text).not.toContain('#inbox/');
+  });
+
+  it('uses /a/<domain>/#all/ for Google Workspace accounts', async () => {
+    seedFullKu(brainDb, 'K_work', {
+      source_type: 'email',
+      source_ref: 'thread-work',
+    });
+    seedRawEvent(brainDb, 'thread-work', 'attaxion');
+    const app = createMiniAppServer({
+      port: 0,
+      db: makeMessagesDb(),
+      brainDb,
+      gmailOps: {
+        emailAddressForAlias: (alias: string) =>
+          alias === 'attaxion' ? 'jonathan@attaxion.com' : null,
+      } as never,
+    });
+    const res = await request(app).get('/brain/ku/K_work');
+    expect(res.text).toContain(
+      'https://mail.google.com/a/attaxion.com/#all/thread-work',
+    );
+    expect(res.text).not.toContain('/u/0/');
+    expect(res.text).not.toContain('/mail/u/');
+  });
+
+  it('falls back to bare URL when alias does not resolve', async () => {
+    seedFullKu(brainDb, 'K_unknown', {
+      source_type: 'email',
+      source_ref: 'thread-unknown',
+    });
+    seedRawEvent(brainDb, 'thread-unknown', 'mystery-alias');
+    const app = createMiniAppServer({
+      port: 0,
+      db: makeMessagesDb(),
+      brainDb,
+      gmailOps: {
+        emailAddressForAlias: () => null,
+      } as never,
+    });
+    const res = await request(app).get('/brain/ku/K_unknown');
+    expect(res.text).toContain(
+      'https://mail.google.com/mail/#all/thread-unknown',
+    );
+  });
+
+  it('falls back gracefully when raw_events row is missing', async () => {
+    seedFullKu(brainDb, 'K_orphan', {
+      source_type: 'email',
+      source_ref: 'thread-orphan',
+    });
+    // Note: no raw_events row.
+    const app = createMiniAppServer({
+      port: 0,
+      db: makeMessagesDb(),
+      brainDb,
+      gmailOps: {
+        emailAddressForAlias: () => 'should-not-be-called@gmail.com',
+      } as never,
+    });
+    const res = await request(app).get('/brain/ku/K_orphan');
+    expect(res.text).toContain(
+      'https://mail.google.com/mail/#all/thread-orphan',
+    );
   });
 });

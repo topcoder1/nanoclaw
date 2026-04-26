@@ -27,6 +27,7 @@ import { markImportant } from '../brain/important.js';
 import { EMAILS_SEEN_KEY } from '../brain/metrics.js';
 import { AsyncWriteQueue } from '../brain/queue.js';
 import { recall, type RecallResult } from '../brain/retrieve.js';
+import type { GmailOps } from '../gmail-ops.js';
 import { logger } from '../logger.js';
 
 import { escapeHtml } from './templates/escape.js';
@@ -50,6 +51,13 @@ export interface BrainRoutesOptions {
    * file, or use the singleton directly.
    */
   brainDb?: Database.Database;
+  /**
+   * Optional GmailOps handle. When provided, "Open source →" links for
+   * email KUs resolve the actual mailbox address from the alias stored
+   * in raw_events.payload, so the URL opens the correct Google account
+   * (instead of the hardcoded `u/0` first-session account).
+   */
+  gmailOps?: Pick<GmailOps, 'emailAddressForAlias'>;
 }
 
 /**
@@ -240,6 +248,8 @@ export function createBrainRoutes(
 ): express.Router {
   const router = express.Router();
   const getDb = (): Database.Database => opts.brainDb ?? getBrainDb();
+  const resolveAlias = (alias: string): string | null =>
+    opts.gmailOps?.emailAddressForAlias(alias) ?? null;
 
   // --- GET /brain — home dashboard --------------------------------------
   router.get('/', (_req, res) => {
@@ -686,7 +696,12 @@ ${pager}`;
     const needsReview = row.needs_review === 1;
     const isImportant = row.important === 1;
     const isSuperseded = row.superseded_at !== null;
-    const deepLink = sourceDeepLink(row.source_type, row.source_ref);
+    const deepLink = sourceDeepLink(
+      db,
+      row.source_type,
+      row.source_ref,
+      resolveAlias,
+    );
 
     const entityPills = linkedEntities.length
       ? linkedEntities
@@ -1897,18 +1912,73 @@ function makeReviewWriteQueue(
 }
 
 /**
+ * Build a Gmail deep-link URL for a thread, routed by account type.
+ *
+ * - Workspace domains (e.g. `@attaxion.com`) use `/a/<domain>/` — Gmail
+ *   resolves the signed-in user for that Workspace, or prompts sign-in
+ *   if none is in the browser session.
+ * - Personal `gmail.com` (or unknown) uses `/mail/u/<email>/` so Gmail
+ *   selects the right account picker slot regardless of which account
+ *   was logged in first.
+ * - Falls back to bare `/mail/` when no email is known.
+ *
+ * The fragment uses `#all/` rather than `#inbox/` because brain-ingested
+ * threads are usually already archived — `#inbox/<id>` would land on a
+ * "thread not in inbox" view even when the URL is otherwise correct.
+ */
+export function buildGmailDeepLink(
+  email: string | null,
+  threadId: string,
+): string {
+  const id = encodeURIComponent(threadId);
+  if (!email) return `https://mail.google.com/mail/#all/${id}`;
+  const domain = (email.split('@')[1] || '').toLowerCase();
+  if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
+    return `https://mail.google.com/a/${domain}/#all/${id}`;
+  }
+  return `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#all/${id}`;
+}
+
+/**
  * Best-effort deep link for a source_ref. Email threads open in Gmail;
  * other sources fall through (null) — UI hides the link when absent.
+ *
+ * For email KUs, the actual mailbox address is recovered by reading the
+ * alias from the raw_events.payload JSON and resolving it via
+ * `gmailOps.emailAddressForAlias`. Without that mapping we fall back to
+ * a bare Gmail URL — better than a wrong-account `u/0` link.
  */
 function sourceDeepLink(
+  db: Database.Database,
   sourceType: string,
   sourceRef: string | null,
+  resolveAlias: (alias: string) => string | null,
 ): string | null {
   if (!sourceRef) return null;
-  if (sourceType === 'email') {
-    // Gmail thread deep link. Works for both accounts since it's anchored
-    // by thread id; the user's active Gmail account resolves it.
-    return `https://mail.google.com/mail/u/0/#inbox/${encodeURIComponent(sourceRef)}`;
+  if (sourceType !== 'email') return null;
+
+  let email: string | null = null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT payload FROM raw_events
+          WHERE source_type = 'email' AND source_ref = ?
+          LIMIT 1`,
+      )
+      .get(sourceRef) as { payload: Buffer | string } | undefined;
+    if (row) {
+      const payloadStr =
+        typeof row.payload === 'string'
+          ? row.payload
+          : row.payload.toString('utf8');
+      const parsed = JSON.parse(payloadStr) as { account?: unknown };
+      const alias =
+        typeof parsed.account === 'string' ? parsed.account.trim() : '';
+      if (alias) email = resolveAlias(alias);
+    }
+  } catch {
+    /* missing row, malformed payload, or no resolver — fall through */
   }
-  return null;
+
+  return buildGmailDeepLink(email, sourceRef);
 }

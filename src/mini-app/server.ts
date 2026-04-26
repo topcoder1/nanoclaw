@@ -85,7 +85,10 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
     app.use('/brain', tgAuth);
     app.use('/api/brain', tgAuthApi);
   }
-  app.use('/brain', createBrainRoutes({ brainDb: opts.brainDb }));
+  app.use(
+    '/brain',
+    createBrainRoutes({ brainDb: opts.brainDb, gmailOps: opts.gmailOps }),
+  );
   app.use('/api/brain', createBrainApiRoutes({ brainDb: opts.brainDb }));
 
   // Lightweight queue fingerprint for polling refresh. Returns sorted IDs so
