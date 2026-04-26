@@ -232,7 +232,12 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
       `INSERT INTO raw_events
          (id, source_type, source_ref, payload, received_at)
        VALUES (?, 'email', ?, ?, ?)`,
-    ).run(`re-${threadId}`, threadId, Buffer.from(payload, 'utf8'), '2026-04-01T00:00:00Z');
+    ).run(
+      `re-${threadId}`,
+      threadId,
+      Buffer.from(payload, 'utf8'),
+      '2026-04-01T00:00:00Z',
+    );
   }
 
   beforeEach(() => {
@@ -266,7 +271,11 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
     expect(res.text).not.toContain('#inbox/');
   });
 
-  it('uses /a/<domain>/#all/ for Google Workspace accounts', async () => {
+  it('uses /mail/u/<email>/#all/ for Workspace accounts too', async () => {
+    // /a/<domain>/ used to be the Workspace-routing form, but Gmail's
+    // server-side redirect for that pattern strips the URL fragment,
+    // landing the user on a bare inbox view. /mail/u/<email>/ keeps
+    // the fragment intact and Gmail still resolves to the right slot.
     seedFullKu(brainDb, 'K_work', {
       source_type: 'email',
       source_ref: 'thread-work',
@@ -283,10 +292,10 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
     });
     const res = await request(app).get('/brain/ku/K_work');
     expect(res.text).toContain(
-      'https://mail.google.com/a/attaxion.com/#all/thread-work',
+      'https://mail.google.com/mail/u/jonathan%40attaxion.com/#all/thread-work',
     );
+    expect(res.text).not.toContain('/a/attaxion.com/');
     expect(res.text).not.toContain('/u/0/');
-    expect(res.text).not.toContain('/mail/u/');
   });
 
   it('falls back to bare URL when alias does not resolve', async () => {

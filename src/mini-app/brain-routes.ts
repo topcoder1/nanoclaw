@@ -1912,19 +1912,21 @@ function makeReviewWriteQueue(
 }
 
 /**
- * Build a Gmail deep-link URL for a thread, routed by account type.
+ * Build a Gmail deep-link URL for a thread.
  *
- * - Workspace domains (e.g. `@attaxion.com`) use `/a/<domain>/` — Gmail
- *   resolves the signed-in user for that Workspace, or prompts sign-in
- *   if none is in the browser session.
- * - Personal `gmail.com` (or unknown) uses `/mail/u/<email>/` so Gmail
- *   selects the right account picker slot regardless of which account
- *   was logged in first.
- * - Falls back to bare `/mail/` when no email is known.
+ * Uses the `/mail/u/<email>/#all/<id>` form for both personal and
+ * Workspace accounts — Gmail resolves the email to the active account
+ * slot client-side and preserves the fragment. The previous `/a/<domain>/`
+ * routing for Workspace strip-redirected the fragment server-side and
+ * landed users on a bare inbox view.
  *
- * The fragment uses `#all/` rather than `#inbox/` because brain-ingested
- * threads are usually already archived — `#inbox/<id>` would land on a
- * "thread not in inbox" view even when the URL is otherwise correct.
+ * `#all/` (not `#inbox/`) so archived threads still open — brain-ingested
+ * threads are typically already archived.
+ *
+ * Falls back to bare `/mail/#all/<id>` when no email is known. That form
+ * uses whichever account the browser has primary, which is wrong more
+ * often than not — but it's no worse than the previous hardcoded `u/0`,
+ * and we only hit this branch when alias resolution fails.
  */
 export function buildGmailDeepLink(
   email: string | null,
@@ -1932,10 +1934,6 @@ export function buildGmailDeepLink(
 ): string {
   const id = encodeURIComponent(threadId);
   if (!email) return `https://mail.google.com/mail/#all/${id}`;
-  const domain = (email.split('@')[1] || '').toLowerCase();
-  if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
-    return `https://mail.google.com/a/${domain}/#all/${id}`;
-  }
   return `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#all/${id}`;
 }
 
