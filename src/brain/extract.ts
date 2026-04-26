@@ -229,7 +229,28 @@ export function extractCheap(input: ExtractInput): CheapExtractionResult {
 
 // --- Tier 2: LLM extraction -----------------------------------------------
 
+/**
+ * Default daily Anthropic spend cap on `extract` operations. Set
+ * deliberately low because the original snippet-only ingest produced
+ * tiny prompts (~250 chars). With the full-body ingest, prompts grow to
+ * 1–4K input tokens, so high-velocity inboxes can blow this in <40
+ * emails. Override at deploy time via `BRAIN_LLM_DAILY_BUDGET_USD`.
+ */
 export const DAILY_LLM_BUDGET_USD = 0.05;
+
+/**
+ * Resolve today's effective LLM extract budget. Reads
+ * `BRAIN_LLM_DAILY_BUDGET_USD` from the environment (parsed as float)
+ * and falls back to `DAILY_LLM_BUDGET_USD` if unset, blank, non-numeric,
+ * or non-positive.
+ */
+export function getDailyLlmBudgetUsd(): number {
+  const raw = process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+  if (!raw) return DAILY_LLM_BUDGET_USD;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DAILY_LLM_BUDGET_USD;
+  return parsed;
+}
 
 /** Haiku 4.5 pricing — USD per 1M tokens, as of 2026-Q1. */
 const HAIKU_INPUT_PER_MILLION = 1.0;
@@ -375,9 +396,10 @@ export async function extractLLM(
   const day = opts.day ?? todayStr();
   if (opts.signalScore <= 0.3) return [];
   const spent = getTodaysExtractSpend(db, day);
-  if (spent >= DAILY_LLM_BUDGET_USD) {
+  const budget = getDailyLlmBudgetUsd();
+  if (spent >= budget) {
     logger.warn(
-      { spent, budget: DAILY_LLM_BUDGET_USD, day },
+      { spent, budget, day },
       'extractLLM: daily budget exceeded — skipping LLM tier',
     );
     return [];

@@ -28,14 +28,15 @@ vi.mock('../../config.js', () => ({
   },
 }));
 
-const { embedMock, qdrantUpsertMock } = vi.hoisted(() => ({
+const { embedMock, embedBatchMock, qdrantUpsertMock } = vi.hoisted(() => ({
   embedMock: vi.fn(),
+  embedBatchMock: vi.fn(),
   qdrantUpsertMock: vi.fn(),
 }));
 
 vi.mock('../embed.js', () => ({
   embedText: embedMock,
-  embedBatch: vi.fn(),
+  embedBatch: embedBatchMock,
   getEmbeddingModelVersion: () => 'nomic-embed-text-v1.5:768',
   EMBEDDING_DIMS: 768,
   _resetEmbeddingPipeline: () => {},
@@ -50,7 +51,11 @@ vi.mock('../qdrant.js', () => ({
 
 import { eventBus } from '../../event-bus.js';
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { startBrainIngest, stopBrainIngest } from '../ingest.js';
+import {
+  setBrainBodyFetcher,
+  startBrainIngest,
+  stopBrainIngest,
+} from '../ingest.js';
 import {
   EMAILS_SEEN_KEY,
   LAST_INGEST_EVENT_KEY,
@@ -87,16 +92,60 @@ describe('brain/ingest — P1 pipeline integration', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-p1-pipe-'));
     embedMock.mockReset();
+    embedBatchMock.mockReset();
     qdrantUpsertMock.mockReset();
-    embedMock.mockResolvedValue(Array.from({ length: 768 }, () => 0.01));
+    const fakeVec = Array.from({ length: 768 }, () => 0.01);
+    embedMock.mockResolvedValue(fakeVec);
+    // embedBatch returns one vector per input text. Default behaviour
+    // mirrors the production shape so any number of claims gets embedded.
+    embedBatchMock.mockImplementation(async (texts: string[]) =>
+      texts.map(() => fakeVec),
+    );
     qdrantUpsertMock.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
     await stopBrainIngest();
+    setBrainBodyFetcher(null);
     _closeBrainDb();
     eventBus.removeAllListeners();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses embedBatch (one model invocation) for multi-claim emails — falls back to per-claim on batch error', async () => {
+    // Force the batch path to fail so the fallback kicks in. Each
+    // per-claim call should still produce a vector and a Qdrant upsert.
+    embedBatchMock.mockRejectedValueOnce(new Error('batch model down'));
+
+    startBrainIngest();
+    emit(
+      'thread-batch-fallback',
+      'Multi-claim email',
+      'Quote $5,000 due Friday. Call +1 555 222 3333. See https://acme.co/x.',
+    );
+    await wait(1500);
+
+    // The batch path was attempted exactly once.
+    expect(embedBatchMock).toHaveBeenCalledTimes(1);
+    // Per-claim fallback ran once per claim — must be > 0.
+    expect(embedMock.mock.calls.length).toBeGreaterThan(0);
+    // Every successful per-claim embed produced a Qdrant upsert.
+    expect(qdrantUpsertMock).toHaveBeenCalled();
+  });
+
+  it('batches embeds in a single call when the model is healthy (no fallback)', async () => {
+    startBrainIngest();
+    emit(
+      'thread-batch-happy',
+      'Multi-claim healthy',
+      'Quote $7,000 due Monday. Call +1 555 444 5555. See https://acme.co/y.',
+    );
+    await wait(1500);
+
+    expect(embedBatchMock).toHaveBeenCalledTimes(1);
+    // No per-claim fallback when the batch path succeeds.
+    expect(embedMock).not.toHaveBeenCalled();
+    expect(qdrantUpsertMock).toHaveBeenCalled();
   });
 
   it('persists raw_events, runs cheap-rules extraction, creates KU + entities, and embeds to Qdrant', async () => {
@@ -139,8 +188,10 @@ describe('brain/ingest — P1 pipeline integration', () => {
       .all() as { ku_id: string; entity_id: string }[];
     expect(links.length).toBeGreaterThan(0);
 
-    // Embed + upsert both happened.
-    expect(embedMock).toHaveBeenCalled();
+    // Embed + upsert both happened. Happy-path uses embedBatch (one
+    // model invocation per email); per-claim embedText only runs as a
+    // fallback when batch fails.
+    expect(embedBatchMock).toHaveBeenCalled();
     expect(qdrantUpsertMock).toHaveBeenCalled();
     const firstUpsert = qdrantUpsertMock.mock.calls[0][0];
     expect(firstUpsert.payload.model_version).toBe('nomic-embed-text-v1.5:768');
@@ -169,6 +220,93 @@ describe('brain/ingest — P1 pipeline integration', () => {
 
     const last = getSystemState(LAST_INGEST_EVENT_KEY);
     expect(last).not.toBeNull();
+  });
+
+  it('uses full body from fetcher when SSE only carries snippet (the securenote-URL bug)', async () => {
+    const fullBody =
+      'Hi team, the credentials are at https://securenote.app/view/ABC123#xyz — please update CI by Friday. Quote: $4,200 for renewal.';
+    const fetcher = vi.fn(async () => fullBody);
+    setBrainBodyFetcher(fetcher);
+
+    startBrainIngest();
+    // SSE-style payload — only the truncated snippet is on the wire.
+    emit(
+      'thread-fullbody',
+      'CI credentials follow-up',
+      'Hi team, the credentials are at https://secur',
+    );
+    await wait(1500);
+
+    expect(fetcher).toHaveBeenCalledWith('work@example.com', 'thread-fullbody');
+
+    const db = getBrainDb();
+    const kus = db
+      .prepare(`SELECT text FROM knowledge_units WHERE source_ref = ?`)
+      .all('thread-fullbody') as { text: string }[];
+    expect(kus.length).toBeGreaterThan(0);
+    // Cheap-rules extracts URLs and currency amounts. The snippet alone
+    // would not include "$4,200" or the full URL — proves the fetcher
+    // body reached the extractor.
+    const blob = kus.map((k) => k.text).join('\n');
+    expect(blob).toMatch(/4,?200|\$4200/);
+  });
+
+  it('persists fetched body into raw_events.payload so reprocess sees full content', async () => {
+    const fullBody =
+      'Full body with key URL https://acme.co/secret and quote $3,750 inside.';
+    setBrainBodyFetcher(async () => fullBody);
+
+    startBrainIngest();
+    emit(
+      'thread-payload-persist',
+      'Body persistence test',
+      'truncated snippet only',
+    );
+    await wait(1500);
+
+    const db = getBrainDb();
+    const row = db
+      .prepare(
+        `SELECT payload FROM raw_events WHERE source_ref = 'thread-payload-persist'`,
+      )
+      .get() as { payload: Buffer };
+    const parsed = JSON.parse(row.payload.toString('utf8'));
+    // The pre-fix payload would only contain `snippet`. Post-fix, the
+    // fetched body is round-tripped into the payload BLOB so reprocess
+    // / export workflows see the full text.
+    expect(parsed.body).toBe(fullBody);
+    expect(parsed.snippet).toBe('truncated snippet only');
+  });
+
+  it('falls back to snippet when fetcher throws — does not break ingestion', async () => {
+    setBrainBodyFetcher(async () => {
+      throw new Error('gmail api 500');
+    });
+
+    startBrainIngest();
+    emit(
+      'thread-fetcher-fail',
+      'Quick note',
+      'Renewal quoted at $9,000 — confirm by EOW.',
+    );
+    await wait(1500);
+
+    const db = getBrainDb();
+    const raw = db
+      .prepare(
+        `SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-fetcher-fail'`,
+      )
+      .get() as { processed_at: string | null; process_error: string | null };
+    expect(raw.processed_at).not.toBeNull();
+    expect(raw.process_error).toBeNull();
+    const kuCount = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM knowledge_units WHERE source_ref = 'thread-fetcher-fail'`,
+        )
+        .get() as { n: number }
+    ).n;
+    expect(kuCount).toBeGreaterThan(0);
   });
 
   it('SQLite row survives even if Qdrant upsert throws', async () => {

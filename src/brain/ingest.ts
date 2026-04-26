@@ -23,7 +23,7 @@ import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
 import { ensureLegacyCutoverTombstone } from './drop-legacy-tombstone.js';
-import { embedText } from './embed.js';
+import { embedBatch, embedText } from './embed.js';
 import { kuPointId, BRAIN_COLLECTION } from './qdrant.js';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { QDRANT_URL } from '../config.js';
@@ -78,10 +78,46 @@ export interface ParsedEmail {
   subject?: string;
   sender?: string;
   snippet?: string;
+  /**
+   * Full plain-text body, when available. Populated lazily by
+   * `runExtractionPipeline` via the registered body fetcher (Gmail API).
+   * Not present on the SSE wire — `email-sse.ts` only forwards the snippet.
+   */
+  body?: string;
 }
+
+/**
+ * Fetches the full text body for a Gmail thread. Implemented in production
+ * by the GmailOpsRouter (see `src/index.ts`); left null in tests / before
+ * the router is wired so the pipeline degrades to the snippet.
+ *
+ * Returning null or throwing is safe — the pipeline falls back to whatever
+ * snippet text is on the SSE event.
+ */
+export type BrainBodyFetcher = (
+  account: string,
+  threadId: string,
+) => Promise<string | null>;
+
+/**
+ * Cap on full-body chars fed to the LLM extractor. ~16K chars ≈ 4–5K input
+ * tokens — large enough to cover real B2B threads without letting a
+ * pathological forwarded chain blow through the per-day Haiku budget.
+ */
+const MAX_BODY_CHARS = 16_000;
 
 let unsubscribe: (() => void) | null = null;
 let queue: AsyncWriteQueue<RawEventRow> | null = null;
+let bodyFetcher: BrainBodyFetcher | null = null;
+
+/**
+ * Register (or clear) the full-body fetcher. Wired from `src/index.ts`
+ * once the GmailOpsRouter is populated. Safe to call multiple times — the
+ * latest fetcher wins.
+ */
+export function setBrainBodyFetcher(fn: BrainBodyFetcher | null): void {
+  bodyFetcher = fn;
+}
 
 async function processRawEvent(
   db: Database.Database,
@@ -165,7 +201,61 @@ export async function runExtractionPipeline(
   row: RawEventRow,
 ): Promise<void> {
   const email = row.parsedEmail!;
-  const text = [email.subject, email.snippet ?? '', email.sender ?? '']
+
+  // Pull the full body via Gmail when a fetcher is registered. The SSE
+  // event payload only carries the Gmail snippet (≈250 chars), which
+  // truncates anything past the first paragraph — including links,
+  // credentials, action items, etc. Falling back to snippet on any
+  // failure keeps ingestion best-effort.
+  let bodyJustFetched = false;
+  if (!email.body && bodyFetcher && email.account && email.thread_id) {
+    try {
+      const fetched = await bodyFetcher(email.account, email.thread_id);
+      if (fetched && fetched.trim()) {
+        email.body =
+          fetched.length > MAX_BODY_CHARS
+            ? fetched.slice(0, MAX_BODY_CHARS)
+            : fetched;
+        bodyJustFetched = true;
+      }
+    } catch (err) {
+      logger.warn(
+        {
+          threadId: email.thread_id,
+          account: email.account,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'brain ingest: full-body fetch failed — falling back to snippet',
+      );
+    }
+  }
+
+  // Persist the fetched body back into raw_events.payload so reprocess /
+  // export / backup paths see the full content, not the truncated SSE
+  // snippet. Best-effort — a failure here doesn't block extraction.
+  if (bodyJustFetched && row.source_type && row.source_ref) {
+    try {
+      db.prepare(
+        `UPDATE raw_events SET payload = ?
+         WHERE source_type = ? AND source_ref = ?`,
+      ).run(
+        Buffer.from(JSON.stringify(email), 'utf8'),
+        row.source_type,
+        row.source_ref,
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          threadId: email.thread_id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'brain ingest: raw_events payload update failed — non-fatal',
+      );
+    }
+  }
+
+  const bodyText = email.body ?? email.snippet ?? '';
+  const text = [email.subject, bodyText, email.sender ?? '']
     .filter(Boolean)
     .join('\n');
   if (!text.trim()) {
@@ -275,11 +365,49 @@ export async function runExtractionPipeline(
   });
   txn();
 
-  // Step 5: embed and upsert each KU. Best-effort — a Qdrant failure does
-  // NOT roll back the SQLite write.
-  for (const ku of kuRows) {
+  // Step 5: embed and upsert each KU. Best-effort — a Qdrant failure
+  // does NOT roll back the SQLite write. Embedding is batched (one
+  // model invocation per email instead of per-claim) — Nomic via
+  // transformers.js handles batches up to 32 natively. If the batch
+  // call throws (e.g. model load failed) we fall back to per-claim
+  // embedding so a single bad input can't kill the whole email.
+  let vectors: Array<number[] | null> = [];
+  if (kuRows.length > 0) {
     try {
-      const vec = await embedText(ku.claim.text, 'document');
+      vectors = await embedBatch(
+        kuRows.map((k) => k.claim.text),
+        'document',
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          claimCount: kuRows.length,
+        },
+        'brain ingest: embedBatch failed — falling back to per-claim',
+      );
+      vectors = await Promise.all(
+        kuRows.map(async (k) => {
+          try {
+            return await embedText(k.claim.text, 'document');
+          } catch {
+            return null;
+          }
+        }),
+      );
+    }
+  }
+  for (let i = 0; i < kuRows.length; i++) {
+    const ku = kuRows[i];
+    const vec = vectors[i];
+    if (!vec) {
+      logger.warn(
+        { kuId: ku.id },
+        'brain ingest: embed produced no vector — Qdrant upsert skipped, SQLite row retained',
+      );
+      continue;
+    }
+    try {
       await upsertKu({
         kuId: ku.id,
         vector: vec,
@@ -299,7 +427,7 @@ export async function runExtractionPipeline(
           kuId: ku.id,
           err: err instanceof Error ? err.message : String(err),
         },
-        'brain ingest: embed/upsert failed — SQLite row retained',
+        'brain ingest: Qdrant upsert failed — SQLite row retained',
       );
     }
   }

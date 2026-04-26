@@ -27,6 +27,7 @@ import {
   extractCheap,
   extractLLM,
   extractPipeline,
+  getDailyLlmBudgetUsd,
   getTodaysExtractSpend,
   normalizeTopic,
   topicKey,
@@ -107,6 +108,68 @@ describe('brain/extract — LLM gating', () => {
     );
     expect(claims).toEqual([]);
     expect(caller).not.toHaveBeenCalled();
+  });
+
+  it('getDailyLlmBudgetUsd honors BRAIN_LLM_DAILY_BUDGET_USD when set, else default', () => {
+    const original = process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+    try {
+      delete process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+      expect(getDailyLlmBudgetUsd()).toBe(DAILY_LLM_BUDGET_USD);
+      process.env.BRAIN_LLM_DAILY_BUDGET_USD = '0.50';
+      expect(getDailyLlmBudgetUsd()).toBe(0.5);
+      process.env.BRAIN_LLM_DAILY_BUDGET_USD = 'not-a-number';
+      expect(getDailyLlmBudgetUsd()).toBe(DAILY_LLM_BUDGET_USD);
+      process.env.BRAIN_LLM_DAILY_BUDGET_USD = '-1';
+      expect(getDailyLlmBudgetUsd()).toBe(DAILY_LLM_BUDGET_USD);
+    } finally {
+      if (original === undefined) delete process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+      else process.env.BRAIN_LLM_DAILY_BUDGET_USD = original;
+    }
+  });
+
+  it('extractLLM uses env-overridden budget when set', async () => {
+    const db = getBrainDb();
+    // Spend $0.10 today — exceeds default $0.05 cap, but under $1.00 override.
+    db.prepare(
+      `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
+       VALUES ('c-env', ?, 'anthropic', 'extract', 1000, 0.10, ?)`,
+    ).run(new Date().toISOString().slice(0, 10), 'now');
+
+    const caller: LlmCaller = vi.fn(async () => ({
+      claims: [
+        {
+          text: 'X agreed to renew.',
+          topic_seed: 'X renewal',
+          confidence: 0.9,
+        },
+      ],
+      inputTokens: 100,
+      outputTokens: 50,
+    }));
+
+    const original = process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+    try {
+      // Without override: budget hit ($0.10 >= $0.05) → no LLM call.
+      delete process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+      const blocked = await extractLLM(
+        { text: 'deal_42 $1,000' },
+        { signalScore: 0.9, llmCaller: caller },
+      );
+      expect(blocked).toEqual([]);
+      expect(caller).not.toHaveBeenCalled();
+
+      // With override of $1.00: still under budget → LLM is called.
+      process.env.BRAIN_LLM_DAILY_BUDGET_USD = '1.00';
+      const claims = await extractLLM(
+        { text: 'deal_42 $1,000' },
+        { signalScore: 0.9, llmCaller: caller },
+      );
+      expect(claims).toHaveLength(1);
+      expect(caller).toHaveBeenCalledTimes(1);
+    } finally {
+      if (original === undefined) delete process.env.BRAIN_LLM_DAILY_BUDGET_USD;
+      else process.env.BRAIN_LLM_DAILY_BUDGET_USD = original;
+    }
   });
 
   it('skips LLM when today already hit budget', async () => {

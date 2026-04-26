@@ -101,7 +101,11 @@ import { startAlertsSchedule } from './brain/alert-dispatcher.js';
 import { maybeInjectBrainContext } from './brain/auto-recall.js';
 import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
-import { startBrainIngest, stopBrainIngest } from './brain/ingest.js';
+import {
+  setBrainBodyFetcher,
+  startBrainIngest,
+  stopBrainIngest,
+} from './brain/ingest.js';
 import { startProviderProbe } from './brain/provider-probe.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
@@ -1684,6 +1688,17 @@ async function main(): Promise<void> {
       }
     }
   }
+
+  // Brain ingest: now that ops-only Gmail providers are registered, give
+  // the ingestor a way to pull full message bodies (it only sees Gmail
+  // snippets on the SSE wire otherwise).
+  setBrainBodyFetcher(async (account, threadId) => {
+    try {
+      return await gmailOpsRouter.getMessageBody(account, threadId);
+    } catch {
+      return null;
+    }
+  });
 
   // --- Calendar Ops (RSVP support) ---
   const calendarOpsRouter = buildCalendarOpsRouter();
