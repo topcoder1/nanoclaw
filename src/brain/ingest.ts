@@ -324,7 +324,16 @@ export async function runExtractionPipeline(
   }
 
   // Step 4: insert KU + ku_entities rows in a single transaction.
+  //
+  // valid_from anchors the KU to when the email was *received* (the fact
+  // entered our world), not when extraction ran. This matters for backfills
+  // — re-extracting a months-old raw_event must keep the KU on the original
+  // timeline so time-anchored retrieval ("what did X say in early April?")
+  // finds it. recorded_at stays as the system clock — it's an audit field.
   const nowIso = new Date().toISOString();
+  const validFromIso = row.received_at && row.received_at.length > 0
+    ? row.received_at
+    : nowIso;
   const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> =
     claims.map((c, i) => ({
       id: newId(),
@@ -352,7 +361,7 @@ export async function runExtractionPipeline(
         email.thread_id,
         accountBucket,
         ku.claim.confidence,
-        nowIso, // valid_from = now for emails
+        validFromIso,
         nowIso,
         ku.claim.topic_key,
         ku.claim.extracted_by,
@@ -415,7 +424,7 @@ export async function runExtractionPipeline(
           account: accountBucket,
           scope: null,
           model_version: 'nomic-embed-text-v1.5:768',
-          valid_from: nowIso,
+          valid_from: validFromIso,
           recorded_at: nowIso,
           source_type: 'email',
           topic_key: ku.claim.topic_key ?? null,
@@ -519,9 +528,12 @@ export async function reprocessRawEvent(
   const db = getBrainDb();
   const row = db
     .prepare(
-      `SELECT payload FROM raw_events WHERE source_type = ? AND source_ref = ?`,
+      `SELECT payload, received_at FROM raw_events
+        WHERE source_type = ? AND source_ref = ?`,
     )
-    .get(sourceType, sourceRef) as { payload: Buffer } | undefined;
+    .get(sourceType, sourceRef) as
+    | { payload: Buffer; received_at: string }
+    | undefined;
   if (!row) return { reprocessed: false, deletedKus: 0 };
 
   // Find existing KUs so we can purge their Qdrant points before the DB rows
@@ -571,7 +583,7 @@ export async function reprocessRawEvent(
     source_type: sourceType,
     source_ref: sourceRef,
     payload: row.payload,
-    received_at: '',
+    received_at: row.received_at,
     parsedEmail,
   };
   await processRawEvent(db, fakeRow);
