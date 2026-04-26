@@ -221,10 +221,7 @@ export function deleteProcedure(name: string, groupId?: string): boolean {
  * Listing/matching skip `.deprecated.json` files, so the procedure stops
  * participating in matching but remains on disk for audit/recovery.
  */
-export function deprecateProcedure(
-  name: string,
-  groupId?: string,
-): boolean {
+export function deprecateProcedure(name: string, groupId?: string): boolean {
   const filePath = procedurePath(name, groupId);
   if (!fs.existsSync(filePath)) return false;
   const deprecatedPath = filePath.replace(/\.json$/, '.deprecated.json');
