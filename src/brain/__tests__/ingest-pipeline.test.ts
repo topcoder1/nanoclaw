@@ -26,6 +26,11 @@ vi.mock('../../config.js', () => ({
   get STORE_DIR() {
     return tmpDir;
   },
+  // reprocessRawEvent reads QDRANT_URL to decide whether to issue a
+  // best-effort vector cleanup. Leave it blank so the test exercise stays
+  // SQLite-only (the qdrant.js mock is what catches inserts during normal
+  // ingest).
+  QDRANT_URL: '',
 }));
 
 const { embedMock, embedBatchMock, qdrantUpsertMock } = vi.hoisted(() => ({
@@ -52,6 +57,7 @@ vi.mock('../qdrant.js', () => ({
 import { eventBus } from '../../event-bus.js';
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import {
+  reprocessRawEvent,
   setBrainBodyFetcher,
   startBrainIngest,
   stopBrainIngest,
@@ -63,11 +69,16 @@ import {
   getSystemState,
 } from '../metrics.js';
 
-function emit(threadId: string, subject: string, text: string): void {
+function emit(
+  threadId: string,
+  subject: string,
+  text: string,
+  timestamp?: number,
+): void {
   eventBus.emit('email.received', {
     type: 'email.received',
     source: 'email-sse',
-    timestamp: Date.now(),
+    timestamp: timestamp ?? Date.now(),
     payload: {
       count: 1,
       emails: [
@@ -307,6 +318,88 @@ describe('brain/ingest — P1 pipeline integration', () => {
         .get() as { n: number }
     ).n;
     expect(kuCount).toBeGreaterThan(0);
+  });
+
+  it('anchors valid_from to raw_event.received_at, not extraction wall-clock — survives backfill', async () => {
+    // Simulate the Apr 25 backfill scenario: an email that *arrived* on
+    // Apr 2 is being extracted "now" (some later wall-clock). valid_from
+    // must point at Apr 2 so time-anchored retrieval still matches the
+    // original window.
+    const emailReceivedMs = Date.parse('2026-04-02T03:45:49Z');
+    const expectedValidFrom = new Date(emailReceivedMs).toISOString();
+    const extractionStart = new Date().toISOString();
+
+    startBrainIngest();
+    emit(
+      'thread-backdate',
+      'Re: pagination feature',
+      'Quote $4,200 due Friday. Call +1 555 222 3333.',
+      emailReceivedMs,
+    );
+    await wait(1500);
+
+    const db = getBrainDb();
+    const rows = db
+      .prepare(
+        `SELECT valid_from, recorded_at FROM knowledge_units
+          WHERE source_ref = 'thread-backdate'`,
+      )
+      .all() as { valid_from: string; recorded_at: string }[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      // valid_from anchors to the email's actual arrival time.
+      expect(r.valid_from).toBe(expectedValidFrom);
+      // recorded_at stays as the system clock (audit field) — it must
+      // have advanced past the start of the test, NOT match the old
+      // received_at.
+      expect(r.recorded_at >= extractionStart).toBe(true);
+      expect(r.recorded_at).not.toBe(expectedValidFrom);
+    }
+
+    // Qdrant payload must carry the same valid_from so vector search
+    // filters by email-arrival time, not extraction time.
+    expect(qdrantUpsertMock).toHaveBeenCalled();
+    const upsertCall = qdrantUpsertMock.mock.calls[0][0];
+    expect(upsertCall.payload.valid_from).toBe(expectedValidFrom);
+    expect(upsertCall.payload.recorded_at).not.toBe(expectedValidFrom);
+  });
+
+  it('reprocessRawEvent preserves the original received_at on re-extraction', async () => {
+    const originalReceivedMs = Date.parse('2026-04-02T03:45:49Z');
+    const expectedValidFrom = new Date(originalReceivedMs).toISOString();
+
+    startBrainIngest();
+    emit(
+      'thread-reprocess-anchor',
+      'Original email',
+      'Quote $1,000 due Monday.',
+      originalReceivedMs,
+    );
+    await wait(1500);
+
+    const db = getBrainDb();
+    const before = db
+      .prepare(
+        `SELECT id, valid_from FROM knowledge_units WHERE source_ref = 'thread-reprocess-anchor'`,
+      )
+      .all() as { id: string; valid_from: string }[];
+    expect(before.length).toBeGreaterThan(0);
+    expect(before[0].valid_from).toBe(expectedValidFrom);
+
+    const result = await reprocessRawEvent('email', 'thread-reprocess-anchor');
+    expect(result.reprocessed).toBe(true);
+
+    const after = db
+      .prepare(
+        `SELECT valid_from, recorded_at FROM knowledge_units WHERE source_ref = 'thread-reprocess-anchor'`,
+      )
+      .all() as { valid_from: string; recorded_at: string }[];
+    expect(after.length).toBeGreaterThan(0);
+    for (const r of after) {
+      // After reprocess, valid_from still anchors to the original arrival
+      // time pulled from raw_events.received_at.
+      expect(r.valid_from).toBe(expectedValidFrom);
+    }
   });
 
   it('SQLite row survives even if Qdrant upsert throws', async () => {
