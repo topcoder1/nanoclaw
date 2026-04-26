@@ -209,7 +209,9 @@ describe('startProceduresMarkdownSchedule', () => {
     });
     stop();
     if (fs.existsSync(groupMdPath)) fs.unlinkSync(groupMdPath);
-    saveProcedure(makeProc({ name: 'p_after_stop', success_count: 1, groupId }));
+    saveProcedure(
+      makeProc({ name: 'p_after_stop', success_count: 1, groupId }),
+    );
     await new Promise((r) => setTimeout(r, 150));
     expect(fs.existsSync(groupMdPath)).toBe(false);
   });
