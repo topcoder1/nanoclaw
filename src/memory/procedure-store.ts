@@ -216,6 +216,26 @@ export function deleteProcedure(name: string, groupId?: string): boolean {
   return false;
 }
 
+/**
+ * Mark a procedure deprecated by renaming `<name>.json` → `<name>.deprecated.json`.
+ * Listing/matching skip `.deprecated.json` files, so the procedure stops
+ * participating in matching but remains on disk for audit/recovery.
+ */
+export function deprecateProcedure(
+  name: string,
+  groupId?: string,
+): boolean {
+  const filePath = procedurePath(name, groupId);
+  if (!fs.existsSync(filePath)) return false;
+  const deprecatedPath = filePath.replace(/\.json$/, '.deprecated.json');
+  fs.renameSync(filePath, deprecatedPath);
+  logger.info(
+    { name, groupId, filePath: deprecatedPath },
+    'Procedure deprecated',
+  );
+  return true;
+}
+
 function listProceduresFromDir(dir: string): Procedure[] {
   if (!fs.existsSync(dir)) return [];
 
