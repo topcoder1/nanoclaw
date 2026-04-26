@@ -200,7 +200,7 @@ describe('Brain miniapp — /brain/ku/:id', () => {
     expect(res.text).toContain(
       'https://mail.google.com/mail/#all/thread-abcd1234',
     );
-    expect(res.text).not.toContain('/u/0/');
+    expect(res.text).not.toContain('?authuser=');
     expect(res.text).not.toContain('#inbox/');
   });
 
@@ -248,7 +248,7 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
     return new Promise((r) => setTimeout(r, 100));
   });
 
-  it('uses /mail/u/<email>/#all/ for personal gmail.com accounts', async () => {
+  it('uses ?authuser=<email>#all/ for personal gmail.com accounts', async () => {
     seedFullKu(brainDb, 'K_personal', {
       source_type: 'email',
       source_ref: 'thread-personal',
@@ -265,17 +265,16 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
     });
     const res = await request(app).get('/brain/ku/K_personal');
     expect(res.text).toContain(
-      'https://mail.google.com/mail/u/topcoder1%40gmail.com/#all/thread-personal',
+      'https://mail.google.com/mail/u/0/?authuser=topcoder1%40gmail.com#all/thread-personal',
     );
-    expect(res.text).not.toContain('/u/0/');
     expect(res.text).not.toContain('#inbox/');
   });
 
-  it('uses /mail/u/<email>/#all/ for Workspace accounts too', async () => {
-    // /a/<domain>/ used to be the Workspace-routing form, but Gmail's
-    // server-side redirect for that pattern strips the URL fragment,
-    // landing the user on a bare inbox view. /mail/u/<email>/ keeps
-    // the fragment intact and Gmail still resolves to the right slot.
+  it('uses ?authuser=<email>#all/ for Workspace accounts too', async () => {
+    // /u/<email>/ 404s for Workspace and /a/<domain>/ strips the
+    // fragment on its server-side redirect. ?authuser= is the documented
+    // Google Sign-In account selector — it keeps the fragment and works
+    // for both personal and Workspace.
     seedFullKu(brainDb, 'K_work', {
       source_type: 'email',
       source_ref: 'thread-work',
@@ -292,10 +291,10 @@ describe('Brain miniapp — /brain/ku/:id Gmail deep links', () => {
     });
     const res = await request(app).get('/brain/ku/K_work');
     expect(res.text).toContain(
-      'https://mail.google.com/mail/u/jonathan%40attaxion.com/#all/thread-work',
+      'https://mail.google.com/mail/u/0/?authuser=jonathan%40attaxion.com#all/thread-work',
     );
     expect(res.text).not.toContain('/a/attaxion.com/');
-    expect(res.text).not.toContain('/u/0/');
+    expect(res.text).not.toContain('/mail/u/jonathan');
   });
 
   it('falls back to bare URL when alias does not resolve', async () => {

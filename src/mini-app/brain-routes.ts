@@ -1914,11 +1914,19 @@ function makeReviewWriteQueue(
 /**
  * Build a Gmail deep-link URL for a thread.
  *
- * Uses the `/mail/u/<email>/#all/<id>` form for both personal and
- * Workspace accounts — Gmail resolves the email to the active account
- * slot client-side and preserves the fragment. The previous `/a/<domain>/`
- * routing for Workspace strip-redirected the fragment server-side and
- * landed users on a bare inbox view.
+ * Uses `?authuser=<email>` (Google Sign-In's canonical account-selector
+ * query param) instead of either of the path-based forms, both of which
+ * have failure modes:
+ *
+ *   - `/a/<domain>/#all/<id>` — server-side redirect strips the URL fragment.
+ *   - `/mail/u/<email>/#all/<id>` — works for personal gmail.com but 404s
+ *     for Workspace accounts (Gmail's `/u/<email>/` resolver doesn't cover
+ *     them, even when the account is signed in).
+ *
+ * `?authuser=<email>` is handled by Google's auth layer client-side, so
+ * the fragment survives and the right account is selected for both
+ * personal and Workspace. `u/0` in the path is a harmless placeholder
+ * that `authuser` overrides.
  *
  * `#all/` (not `#inbox/`) so archived threads still open — brain-ingested
  * threads are typically already archived.
@@ -1934,7 +1942,7 @@ export function buildGmailDeepLink(
 ): string {
   const id = encodeURIComponent(threadId);
   if (!email) return `https://mail.google.com/mail/#all/${id}`;
-  return `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#all/${id}`;
+  return `https://mail.google.com/mail/u/0/?authuser=${encodeURIComponent(email)}#all/${id}`;
 }
 
 /**
