@@ -1282,8 +1282,31 @@ def cmd_save(argv: list[str]) -> int:
         conn.close()
 
     print(f"saved note {ku_id} ({len(text)} chars, tags={tags})", file=sys.stderr)
-    print(f"  → run `npx tsx scripts/brain-embed-repos.ts` later to index "
-          f"semantically  (FTS already live)", file=sys.stderr)
+
+    # Fire-and-forget semantic embed. The script is idempotent (skips notes
+    # already in Qdrant) so a re-run after manual `brain save` is safe; here
+    # we just kick off the next pass so this note is rerank-eligible within
+    # ~1-2s without blocking the CLI return. stdout/stderr go to /dev/null —
+    # if it fails, FTS5 still works and the user can re-run by hand.
+    embed_script = NANOCLAW_DIR / "scripts" / "brain-embed-notes.ts"
+    if embed_script.exists():
+        try:
+            subprocess.Popen(
+                ["npx", "tsx", str(embed_script), "--limit", "5"],
+                cwd=str(NANOCLAW_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            print("  → semantic embed running in background", file=sys.stderr)
+        except Exception as e:
+            dbg(f"failed to spawn embed: {e}")
+            print(f"  → run `npx tsx scripts/brain-embed-notes.ts` to index "
+                  f"semantically  (FTS already live)", file=sys.stderr)
+    else:
+        print(f"  → embed script missing; only FTS5 indexed for this note",
+              file=sys.stderr)
     return 0
 
 
