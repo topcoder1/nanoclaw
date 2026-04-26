@@ -114,9 +114,16 @@ describe('exportProceduresMarkdown', () => {
   });
 
   it('only includes group + global, ranked', () => {
-    saveProcedure(makeProc({ name: 'global_low', success_count: 1, failure_count: 0 }));
     saveProcedure(
-      makeProc({ name: 'group_high', success_count: 9, failure_count: 0, groupId }),
+      makeProc({ name: 'global_low', success_count: 1, failure_count: 0 }),
+    );
+    saveProcedure(
+      makeProc({
+        name: 'group_high',
+        success_count: 9,
+        failure_count: 0,
+        groupId,
+      }),
     );
     const md = exportProceduresMarkdown({ groupId });
     const groupIdx = md.indexOf('group_high');

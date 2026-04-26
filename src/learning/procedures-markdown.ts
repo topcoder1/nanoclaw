@@ -3,10 +3,7 @@ import path from 'path';
 
 import { GROUPS_DIR } from '../config.js';
 import { logger } from '../logger.js';
-import {
-  listProcedures,
-  type Procedure,
-} from '../memory/procedure-store.js';
+import { listProcedures, type Procedure } from '../memory/procedure-store.js';
 
 export interface ExportOptions {
   topN?: number;
