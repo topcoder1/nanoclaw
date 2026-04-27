@@ -7,6 +7,9 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+import { eventBus } from '../event-bus.js';
+import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
+import type { ChatMessageSavedEvent } from '../events.js';
 
 export interface SignalChannelOpts {
   onMessage: OnInboundMessage;
@@ -19,8 +22,24 @@ interface DataMessage {
   message?: string | null;
   expiresInSeconds?: number;
   viewOnce?: boolean;
-  attachments?: Array<{ contentType: string; filename?: string }>;
+  attachments?: Array<{
+    id?: string;
+    contentType: string;
+    filename?: string;
+    size?: number;
+  }>;
   groupInfo?: { groupId: string; type: string };
+  reaction?: {
+    emoji: string;
+    targetAuthor: string;
+    targetSentTimestamp: number;
+    isRemove?: boolean;
+  };
+  editMessage?: {
+    targetSentTimestamp: number;
+    dataMessage: { message?: string | null };
+  };
+  remoteDelete?: { timestamp: number };
 }
 
 interface SyncMessage {
@@ -147,6 +166,83 @@ export class SignalChannel implements Channel {
     } else {
       chatJid = `sig:${sourceNumber}`;
     }
+
+    // --- New behaviors: cache write, 🧠 reaction, claw save ---
+
+    const sourceJid = envelope.source ?? envelope.sourceNumber ?? 'unknown';
+    const chatId = dataMsg.groupInfo?.groupId ?? sourceJid;
+    const messageId = String(dataMsg.timestamp);
+    const sentAt = new Date(dataMsg.timestamp).toISOString();
+
+    // 1. Reaction → emit save event if emoji matches and not a remove.
+    if (dataMsg.reaction) {
+      if (dataMsg.reaction.isRemove) return;
+      const target = process.env.BRAIN_SAVE_EMOJI ?? '🧠';
+      if (dataMsg.reaction.emoji !== target) return;
+      const targetAuthor = dataMsg.reaction.targetAuthor;
+      const targetTs = String(dataMsg.reaction.targetSentTimestamp);
+      const targetChatId = dataMsg.groupInfo?.groupId ?? targetAuthor;
+      const cached = getChatMessage('signal', targetChatId, targetTs);
+      if (!cached) {
+        logger.warn(
+          { targetTs, targetChatId },
+          'Signal 🧠-react: target not cached',
+        );
+        return;
+      }
+      eventBus.emit('chat.message.saved', {
+        type: 'chat.message.saved',
+        timestamp: Date.now(),
+        source: 'signal',
+        payload: {},
+        platform: 'signal',
+        chat_id: targetChatId,
+        message_id: targetTs,
+        sender: cached.sender,
+        sender_display: cached.sender_name,
+        sent_at: cached.sent_at,
+        text: cached.text ?? '',
+        trigger: 'emoji',
+      } satisfies ChatMessageSavedEvent);
+      return;
+    }
+
+    // 2. `claw save` text trigger.
+    const body = dataMsg.message?.trim() ?? '';
+    const clawMatch = body.match(/^claw\s+save\b\s*(.*)$/i);
+    if (clawMatch) {
+      const tail = clawMatch[1].trim();
+      eventBus.emit('chat.message.saved', {
+        type: 'chat.message.saved',
+        timestamp: Date.now(),
+        source: 'signal',
+        payload: {},
+        platform: 'signal',
+        chat_id: chatId,
+        message_id: messageId,
+        sender: sourceJid,
+        sender_display: envelope.sourceName,
+        sent_at: sentAt,
+        text: tail,
+        trigger: 'text',
+      } satisfies ChatMessageSavedEvent);
+      return;
+    }
+
+    // 3. Cache the message for future reaction lookups.
+    if (body || (dataMsg.attachments?.length ?? 0) > 0) {
+      putChatMessage({
+        platform: 'signal',
+        chat_id: chatId,
+        message_id: messageId,
+        sent_at: sentAt,
+        sender: sourceJid,
+        sender_name: envelope.sourceName,
+        text: body || undefined,
+      });
+    }
+
+    // --- Existing inbound-message routing ---
 
     this.opts.onChatMetadata(
       chatJid,
