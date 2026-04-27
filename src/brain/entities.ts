@@ -121,7 +121,7 @@ function readEntity(
   };
 }
 
-function findEntityIdByAlias(
+export function findEntityIdByAlias(
   db: Database.Database,
   fieldName: string,
   fieldValue: string,
@@ -365,4 +365,124 @@ export async function attachAlias(input: {
         );
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Discord / Signal handle resolution
+// ---------------------------------------------------------------------------
+
+export type ChatPlatform = 'discord' | 'signal';
+
+interface HandleNamespace {
+  field: string;
+  normalize: (raw: string) => string | null;
+}
+
+function pickNamespace(
+  platform: ChatPlatform,
+  raw: string,
+): HandleNamespace | null {
+  if (platform === 'discord') {
+    // Snowflake: 17–20 digit numeric string
+    if (/^\d{17,20}$/.test(raw)) {
+      return { field: 'discord_snowflake', normalize: (s) => s };
+    }
+    return {
+      field: 'discord_username',
+      normalize: (s) => s.replace(/#\d+$/, '').toLowerCase().trim() || null,
+    };
+  }
+  // signal
+  if (/^\+?\d[\d\s().-]{6,}$/.test(raw)) {
+    return {
+      field: 'signal_phone',
+      normalize: (s) => {
+        const digits = s.replace(/[^\d+]/g, '');
+        if (!digits) return null;
+        return digits.startsWith('+') ? digits : `+${digits}`;
+      },
+    };
+  }
+  if (/^[0-9a-f-]{36}$/i.test(raw)) {
+    return { field: 'signal_uuid', normalize: (s) => s.toLowerCase() };
+  }
+  return {
+    field: 'signal_profile_name',
+    normalize: (s) => s.normalize('NFC').trim() || null,
+  };
+}
+
+/**
+ * Idempotent: resolve or create a person entity from a chat platform handle.
+ * Supports Discord (username / snowflake ID) and Signal (phone / UUID /
+ * profile name). Normalizes the handle before lookup and insertion.
+ */
+export async function createPersonFromHandle(
+  platform: ChatPlatform,
+  rawHandle: string,
+  displayName?: string,
+): Promise<Entity> {
+  const ns = pickNamespace(platform, rawHandle);
+  if (!ns) {
+    throw new Error(`createPersonFromHandle: cannot classify '${rawHandle}'`);
+  }
+  const value = ns.normalize(rawHandle);
+  if (!value) {
+    throw new Error(
+      `createPersonFromHandle: empty after normalize '${rawHandle}'`,
+    );
+  }
+
+  const db = getBrainDb();
+
+  // Fast path: alias already exists.
+  const existingId = findEntityIdByAlias(db, ns.field, value);
+  if (existingId) {
+    const e = readEntity(db, existingId);
+    if (e) return e;
+  }
+
+  const entityId = newId();
+  const aliasId = newId();
+  const now = new Date().toISOString();
+  const canonical = JSON.stringify(
+    displayName
+      ? { name: displayName, [ns.field]: value }
+      : { [ns.field]: value },
+  );
+
+  await getWriteQueue().enqueue({
+    run: (database) => {
+      // Re-check inside transaction to handle concurrent ingest.
+      const raceId = findEntityIdByAlias(database, ns.field, value);
+      if (raceId) return;
+      database
+        .prepare(
+          `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+           VALUES (?, 'person', ?, ?, ?)`,
+        )
+        .run(entityId, canonical, now, now);
+      database
+        .prepare(
+          `INSERT INTO entity_aliases
+             (alias_id, entity_id, source_type, source_ref, field_name,
+              field_value, valid_from, valid_until, confidence)
+           VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, 1.0)`,
+        )
+        .run(aliasId, entityId, platform, ns.field, value, now);
+    },
+  });
+
+  // Read back — if a racing writer won, we get their entity.
+  const finalId = findEntityIdByAlias(db, ns.field, value);
+  if (!finalId) {
+    throw new Error(`createPersonFromHandle: failed to persist ${value}`);
+  }
+  const final = readEntity(db, finalId);
+  if (!final) {
+    throw new Error(
+      `createPersonFromHandle: entity row missing for ${finalId}`,
+    );
+  }
+  return final;
 }

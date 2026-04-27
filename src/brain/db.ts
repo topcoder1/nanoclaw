@@ -67,6 +67,13 @@ function applyColumnMigrations(database: Database.Database): void {
   } catch {
     /* column already exists — idempotent no-op */
   }
+  // PR 1 (chat ingest): forward-link to replacement KU on edit-sync supersession.
+  // Pre-existing brain DBs may not have this column.
+  try {
+    database.exec(`ALTER TABLE knowledge_units ADD COLUMN superseded_by TEXT`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(String(err))) throw err;
+  }
   // Index is idempotent via CREATE INDEX IF NOT EXISTS — safe to run every time
   // so brain.db files that existed before the column was added still get the
   // index once the column has been ALTERed in.

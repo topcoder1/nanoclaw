@@ -27,7 +27,9 @@ import {
   attachAlias,
   createCompanyFromDomain,
   createPersonFromEmail,
+  createPersonFromHandle,
   createProjectFromRepoSlug,
+  findEntityIdByAlias,
   parseRepoSlugFromSourceRef,
   resolveByDomain,
   resolveByEmail,
@@ -206,5 +208,45 @@ describe('brain/entities', () => {
       )
       .all(e.entity_id) as { field_name: string }[];
     expect(rows.map((r) => r.field_name).sort()).toEqual(['email', 'slack_id']);
+  });
+});
+
+describe('createPersonFromHandle', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-entities-'));
+  });
+
+  afterEach(async () => {
+    await _shutdownEntityQueue();
+    _closeBrainDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates a person and discord_username alias for a Discord handle', async () => {
+    const e = await createPersonFromHandle('discord', 'alice#1234', 'Alice');
+    expect(e.entity_type).toBe('person');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'discord_username',
+      'alice',
+    );
+    expect(found).toBe(e.entity_id);
+  });
+
+  it('creates a person and signal_phone alias normalized to E.164', async () => {
+    const e = await createPersonFromHandle('signal', '+1 (555) 123-4567');
+    expect(e.entity_type).toBe('person');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'signal_phone',
+      '+15551234567',
+    );
+    expect(found).toBe(e.entity_id);
+  });
+
+  it('is idempotent — second call returns the same entity', async () => {
+    const a = await createPersonFromHandle('discord', 'bob');
+    const b = await createPersonFromHandle('discord', 'bob');
+    expect(a.entity_id).toBe(b.entity_id);
   });
 });

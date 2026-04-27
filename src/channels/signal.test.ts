@@ -14,6 +14,24 @@ vi.mock('../config.js', () => ({
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
+// Mock chat-message-cache — use vi.hoisted so vars are available in factory
+const { mockPutChatMessage, mockGetChatMessage } = vi.hoisted(() => ({
+  mockPutChatMessage: vi.fn(),
+  mockGetChatMessage: vi.fn(),
+}));
+vi.mock('../chat-message-cache.js', () => ({
+  putChatMessage: mockPutChatMessage,
+  getChatMessage: mockGetChatMessage,
+}));
+
+// Mock event-bus — use vi.hoisted so var is available in factory
+const { mockEventBusEmit } = vi.hoisted(() => ({
+  mockEventBusEmit: vi.fn(),
+}));
+vi.mock('../event-bus.js', () => ({
+  eventBus: { emit: mockEventBusEmit },
+}));
+
 // Mock logger
 vi.mock('../logger.js', () => ({
   logger: {
@@ -637,5 +655,140 @@ describe('setTyping', () => {
     await expect(
       channel.setTyping('sig:+15559876543', true),
     ).resolves.toBeUndefined();
+  });
+});
+
+// --- Cache writes, 🧠 reaction, and claw save ---
+
+describe('cache writes, 🧠 reaction, and claw save', () => {
+  const PHONE = '+15551234567';
+  const API_URL = 'http://localhost:18080';
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    globalThis.fetch = originalFetch;
+  });
+
+  function mockPollResponse(...payloads: unknown[]) {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(payloads),
+    });
+  }
+
+  async function connectAndPoll(channel: SignalChannel) {
+    await channel.connect();
+    await vi.advanceTimersByTimeAsync(2100);
+  }
+
+  it('inbound message is cached via putChatMessage', async () => {
+    const opts = createInboundTestOpts();
+    mockPollResponse(make1to1Envelope());
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    expect(mockPutChatMessage).toHaveBeenCalledOnce();
+    expect(mockPutChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'signal',
+        chat_id: '+15559876543',
+        message_id: '1700000000000',
+        sender: '+15559876543',
+        text: 'Hello from Signal',
+      }),
+    );
+    await channel.disconnect();
+  });
+
+  it('🧠 reaction emits ChatMessageSavedEvent with trigger="emoji"', async () => {
+    const opts = createInboundTestOpts();
+
+    // Pre-seed cache mock to return the target message
+    const cachedMsg = {
+      platform: 'signal' as const,
+      chat_id: '+15559876543',
+      message_id: '1700000000000',
+      sent_at: new Date(1700000000000).toISOString(),
+      sender: '+15559876543',
+      sender_name: 'Alice',
+      text: 'This is the cached message',
+      attachment_download_attempts: 0,
+    };
+    mockGetChatMessage.mockReturnValue(cachedMsg);
+
+    const reactionEnvelope = {
+      envelope: {
+        source: '+15559876543',
+        sourceNumber: '+15559876543',
+        sourceName: 'Alice',
+        timestamp: 1700000001000,
+        dataMessage: {
+          timestamp: 1700000001000,
+          message: null,
+          reaction: {
+            emoji: '🧠',
+            targetAuthor: '+15559876543',
+            targetSentTimestamp: 1700000000000,
+            isRemove: false,
+          },
+        },
+      },
+      account: PHONE,
+    };
+
+    mockPollResponse(reactionEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    expect(mockEventBusEmit).toHaveBeenCalledOnce();
+    const [eventType, eventObj] = mockEventBusEmit.mock.calls[0];
+    expect(eventType).toBe('chat.message.saved');
+    expect(eventObj).toMatchObject({
+      type: 'chat.message.saved',
+      platform: 'signal',
+      trigger: 'emoji',
+      text: 'This is the cached message',
+      message_id: '1700000000000',
+    });
+    await channel.disconnect();
+  });
+
+  it('claw save text emits ChatMessageSavedEvent with trigger="text" and trailing text', async () => {
+    const opts = createInboundTestOpts();
+
+    const clawEnvelope = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'claw save This is the gem',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+
+    mockPollResponse(clawEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    expect(mockEventBusEmit).toHaveBeenCalledOnce();
+    const [eventType, eventObj] = mockEventBusEmit.mock.calls[0];
+    expect(eventType).toBe('chat.message.saved');
+    expect(eventObj).toMatchObject({
+      type: 'chat.message.saved',
+      platform: 'signal',
+      trigger: 'text',
+      text: 'This is the gem',
+    });
+    // onMessage should NOT be called — claw save returns early
+    expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
   });
 });

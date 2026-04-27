@@ -725,6 +725,34 @@ export interface SignFailedEvent extends NanoClawEvent {
   };
 }
 
+// --- Chat ingest -----------------------------------------------------------
+
+export interface ChatAttachment {
+  filename: string;
+  mime: string;
+  sha256: string;
+  local_path: string;
+  size_bytes: number;
+}
+
+export interface ChatMessageSavedEvent extends NanoClawEvent {
+  type: 'chat.message.saved';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  chat_name?: string;
+  message_id: string;
+  sender: string;
+  sender_display?: string;
+  sent_at: string;
+  text: string;
+  attachments?: ChatAttachment[];
+  context_before?: { sender: string; text: string; sent_at: string }[];
+  reply_to?: { sender: string; text: string; sent_at: string };
+  trigger: 'emoji' | 'slash' | 'text';
+  payload: Record<string, unknown>;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -792,6 +820,7 @@ export interface EventMap {
   'sign.field_input_provided': SignFieldInputProvidedEvent;
   'sign.completed': SignCompletedEvent;
   'sign.failed': SignFailedEvent;
+  'chat.message.saved': ChatMessageSavedEvent;
 }
 
 export type EventType = keyof EventMap;

@@ -65,6 +65,10 @@ export interface ExtractInput {
   sender?: string;
   /** Override today's date for tests. ISO YYYY-MM-DD. */
   today?: string;
+  /** Source of this input. Affects signal-score gating and prompt. */
+  mode?: 'email' | 'chat_single' | 'chat_window';
+  /** For chat_window mode — speaker handles for the prompt. */
+  participants?: string[];
 }
 
 // --- Regex library --------------------------------------------------------
@@ -354,6 +358,30 @@ export const defaultLlmCaller: LlmCaller = async (prompt: string) => {
 };
 
 function buildPrompt(input: ExtractInput): string {
+  if (input.mode === 'chat_single') {
+    return [
+      `You extract durable knowledge from a single chat message. Return JSON {claims: [...]}.`,
+      `Each claim should be a self-contained factual statement, decision, or commitment.`,
+      `Skip greetings, acknowledgements, and pure reactions.`,
+      input.sender ? `Sender: ${input.sender}` : '',
+      `Message: ${input.text}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  if (input.mode === 'chat_window') {
+    return [
+      `You extract durable knowledge from a chat-conversation transcript. Return JSON {claims: [...]}.`,
+      `Identify distinct factual statements, decisions, and commitments — one claim per topic.`,
+      `Skip chitchat, greetings, and pure reactions. Use participant names where attribution matters.`,
+      input.participants?.length
+        ? `Participants: ${input.participants.join(', ')}`
+        : '',
+      `Transcript:\n${input.text}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
   const parts = [
     'Extract factual claims from the message below.',
     'Return JSON: {"claims":[{"text":string,"topic_seed":string,"entities_mentioned":[{"kind":string,"value":string}],"confidence":number}]}.',
@@ -394,7 +422,8 @@ export async function extractLLM(
 ): Promise<Claim[]> {
   const db = opts.db ?? getBrainDb();
   const day = opts.day ?? todayStr();
-  if (opts.signalScore <= 0.3) return [];
+  const isChat = input.mode === 'chat_single' || input.mode === 'chat_window';
+  if (!isChat && opts.signalScore <= 0.3) return [];
   const spent = getTodaysExtractSpend(db, day);
   const budget = getDailyLlmBudgetUsd();
   if (spent >= budget) {

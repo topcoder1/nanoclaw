@@ -23,6 +23,7 @@ import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
 import { ensureLegacyCutoverTombstone } from './drop-legacy-tombstone.js';
+import { startChatIngest, stopChatIngest } from './chat-ingest.js';
 import { embedBatch, embedText } from './embed.js';
 import { kuPointId, BRAIN_COLLECTION } from './qdrant.js';
 import { QdrantClient } from '@qdrant/js-client-rest';
@@ -331,9 +332,8 @@ export async function runExtractionPipeline(
   // timeline so time-anchored retrieval ("what did X say in early April?")
   // finds it. recorded_at stays as the system clock — it's an audit field.
   const nowIso = new Date().toISOString();
-  const validFromIso = row.received_at && row.received_at.length > 0
-    ? row.received_at
-    : nowIso;
+  const validFromIso =
+    row.received_at && row.received_at.length > 0 ? row.received_at : nowIso;
   const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> =
     claims.map((c, i) => ({
       id: newId(),
@@ -510,6 +510,8 @@ export function startBrainIngest(): void {
     }
   });
 
+  startChatIngest();
+
   logger.info('Brain ingest started (raw_events + P1 extraction pipeline)');
 }
 
@@ -594,6 +596,7 @@ export async function reprocessRawEvent(
  * Drain the in-flight queue and unsubscribe.
  */
 export async function stopBrainIngest(): Promise<void> {
+  stopChatIngest();
   if (unsubscribe) {
     unsubscribe();
     unsubscribe = null;

@@ -13,6 +13,7 @@ vi.mock('./logger.js', () => ({
 
 import { EventBus } from './event-bus.js';
 import type {
+  ChatMessageSavedEvent,
   MessageInboundEvent,
   SystemErrorEvent,
   SystemStartupEvent,
@@ -182,5 +183,26 @@ describe('EventBus', () => {
     bus.emit('message.inbound', event);
 
     expect(anyHandler).not.toHaveBeenCalled();
+  });
+
+  it('emits and receives ChatMessageSavedEvent typed end-to-end', async () => {
+    const seen: ChatMessageSavedEvent[] = [];
+    bus.on('chat.message.saved', (e) => seen.push(e));
+    const evt: ChatMessageSavedEvent = {
+      type: 'chat.message.saved',
+      source: 'discord',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'discord',
+      chat_id: 'channel-1',
+      message_id: 'msg-1',
+      sender: 'user-1',
+      sent_at: '2026-04-27T12:00:00.000Z',
+      text: 'hello',
+      trigger: 'emoji',
+    };
+    bus.emit('chat.message.saved', evt);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].text).toBe('hello');
   });
 });

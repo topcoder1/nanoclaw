@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS knowledge_units (
   valid_until       TEXT,
   recorded_at       TEXT NOT NULL,
   superseded_at     TEXT,
+  superseded_by     TEXT,
   topic_key         TEXT,
   tags              TEXT,              -- JSON array
   extracted_by      TEXT,
