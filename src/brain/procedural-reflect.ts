@@ -125,11 +125,10 @@ export function collectSignals(
         ORDER BY query_count DESC
         LIMIT 20`,
     )
-    .all(
-      windowStartIso,
-      nowIso,
-      RECURRING_RETRIEVAL_THRESHOLD,
-    ) as Array<{ ku_id: string; query_count: number }>;
+    .all(windowStartIso, nowIso, RECURRING_RETRIEVAL_THRESHOLD) as Array<{
+    ku_id: string;
+    query_count: number;
+  }>;
 
   const recurring = recurringRows.map((row) => {
     const samples = brainDb
@@ -237,10 +236,7 @@ export function buildReflectionPrompt(
       );
     }
   }
-  lines.push(
-    '',
-    `Output ONLY the JSON object — no prose, no markdown fences.`,
-  );
+  lines.push('', `Output ONLY the JSON object — no prose, no markdown fences.`);
   return lines.join('\n');
 }
 
