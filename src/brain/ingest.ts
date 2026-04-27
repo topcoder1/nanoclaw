@@ -331,9 +331,8 @@ export async function runExtractionPipeline(
   // timeline so time-anchored retrieval ("what did X say in early April?")
   // finds it. recorded_at stays as the system clock — it's an audit field.
   const nowIso = new Date().toISOString();
-  const validFromIso = row.received_at && row.received_at.length > 0
-    ? row.received_at
-    : nowIso;
+  const validFromIso =
+    row.received_at && row.received_at.length > 0 ? row.received_at : nowIso;
   const kuRows: Array<{ id: string; claim: Claim; entities: Entity[] }> =
     claims.map((c, i) => ({
       id: newId(),

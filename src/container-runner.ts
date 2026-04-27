@@ -1167,7 +1167,11 @@ async function spawnContainer(
           .split('\n')
           .filter((l) => /\[mcp-probe\]|MCP server|mcp server|gmail/i.test(l));
         if (diagLines.length > 0) {
-          logLines.push(`=== MCP Diagnostics (from stderr) ===`, diagLines.join('\n'), ``);
+          logLines.push(
+            `=== MCP Diagnostics (from stderr) ===`,
+            diagLines.join('\n'),
+            ``,
+          );
         }
       }
 

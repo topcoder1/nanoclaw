@@ -99,7 +99,7 @@ Per-type handling at brain-ingest time (in the `ChatMessageSavedEvent` / `ChatWi
 | Type | Handling |
 |---|---|
 | `application/pdf` | Run `pdftotext` (already used by `/add-pdf-reader`); concatenate first 50 pages of text into the extraction input prefixed by `[Attachment: <filename>]`. |
-| `image/*` | Default: include `[Attachment image: <filename>]` placeholder in extraction input, plus EXIF date if present. If `BRAIN_IMAGE_VISION=true`, send a single Claude Haiku vision call to produce a one-sentence caption that is appended. |
+| `image/*` | Default (`BRAIN_IMAGE_VISION=true`): single Claude Haiku vision call produces a one-sentence caption appended as `[Attachment image: <filename> — <caption>]`, plus EXIF date if present. If disabled, placeholder-only `[Attachment image: <filename>]`. |
 | `audio/*` (voice notes) | If `/add-voice-transcription` skill is installed and `OPENAI_API_KEY` available, transcribe via Whisper; transcript is appended. Otherwise placeholder only. |
 | Other (zip, docx, etc.) | Placeholder `[Attachment: <filename>, <size>]`; not extracted in v1. |
 
@@ -215,7 +215,40 @@ Account bucket: chat-sourced KUs default to `'personal'`. (Future: per-chat conf
 
 `shouldSkipBrainExtraction` is currently email-specific; add a parallel `shouldSkipChatExtraction` that drops obvious noise (single emoji, message <8 chars without an attachment).
 
+**Extraction pipeline adapter** — `extractPipeline` today (`extract.ts:452`) takes `ExtractInput { text, subject?, sender? }` and gates LLM extraction on a "signal score" cheap-rules tier calibrated for email patterns (money, deal IDs, Gong call IDs). Chat content will score near-zero and never reach the LLM tier. Two changes:
+
+1. Extend `ExtractInput` with `mode?: 'email' | 'chat_single' | 'chat_window'` (default `'email'`, preserves current behavior).
+2. When `mode` is a `chat_*` value: bypass the email-tuned signal-score gate (a 🧠-react is itself the signal that this is worth extracting; for windows, the operator opted-in the chat). Use a chat-specific extraction prompt that asks for distinct claims/decisions across the transcript and uses participant identifiers as candidate `who` mentions.
+
+`window` mode also receives `participants: string[]` so the prompt can pre-list known speakers.
+
+**Race resolution: 🧠-react inside an open window.** When a `ChatMessageSavedEvent` arrives for a chat that has `brain_ingest: window` and an open window covering the message:
+
+1. The single-message save runs immediately (operator intent is explicit — they want this *now*).
+2. The window flusher records the message_id in a per-window `excluded_message_ids: Set<string>`.
+3. At flush time, transcript generation skips excluded ids. The window KU still summarizes everything else.
+
+This avoids duplicate KUs while preserving both signals: the deliberate save and the surrounding context summary.
+
+**`chat_id` → group lookup.** Discord channel ids and Signal group ids both already map to NanoClaw `groups/<name>/CLAUDE.md` files via the existing channel-registration logic (`dc:<channelId>` and `sig:group:<groupId>` JID conventions in `src/db.ts`'s `groups` table). The window flusher reads `groups.jid` → group name → reads YAML frontmatter from `groups/<name>/CLAUDE.md`. Chats with no registered group default to `brain_ingest: off`.
+
 #### 6. Identity merge (`src/brain/identity-merge.ts`)
+
+**Scope note**: the `entity_merge_log` table exists in `schema.sql:49` but no merge engine is implemented today (`grep -rn "mergeEntit\|entity_merge"` confirms zero call sites). Phase 7 includes writing this from scratch: alias re-pointing, KU re-linking on the canonical entity, conflict logging, and the audit row. Size accordingly.
+
+**Entity-alias namespace** (resolves the `entity_aliases.field_name` ambiguity):
+
+| Platform | field_name | field_value | Normalization |
+|---|---|---|---|
+| Discord | `discord_username` | lowercase canonical username (`alice`, post-pomelo) | strip `#discriminator` if present |
+| Discord | `discord_snowflake` | numeric snowflake string | as-is |
+| Signal | `signal_phone` | E.164 (`+15551234567`) | strip whitespace, ensure leading `+` |
+| Signal | `signal_uuid` | UUID string | lowercase |
+| Signal | `signal_profile_name` | display name | trim, NFC-normalize |
+
+Both forms are written when available so YAML can reference either.
+
+A new `createPersonFromHandle(platform, handle)` helper mirrors `createPersonFromEmail` (entities.ts:124): create a new `entities` row with `kind='person'`, insert one `entity_aliases` row with the appropriate `(field_name, field_value)`, return the entity id. Resolution at ingest time goes through `findEntityIdByAlias(field_name, field_value)`.
 
 Same human shows up as different entities — `discord:alice#1234`, `signal:+15551234567`, `email:alice@example.com`. v1 makes this operator-driven, not auto-detected (research said auto is unreliable):
 
@@ -244,6 +277,13 @@ On startup and on file change:
 
 **C. Conflict handling**: a merge that would unify two entities each holding distinct `entity_relationships` records is logged but executed (the merge log preserves the prior state for audit). No interactive resolution UI in v1.
 
+**D. YAML validation at load**: reject the entire file (keep prior state) if any of the following fail, log a single structured error:
+- Cycles (alias chain returns to a canonical).
+- Same alias listed under two different canonicals (would silently steal entities on reload).
+- Type mismatch — `aliases` not a list, `canonical` not a string, missing required keys.
+- Canonical resolves to a non-`person` entity kind (e.g., a company alias being merged into a person).
+Successful merges from prior loads are not rolled back; a bad reload simply doesn't add new ones.
+
 #### 7. Edit & delete sync (`src/brain/edit-sync.ts`)
 
 Subscribe to `chat.message.edited` and `chat.message.deleted`. The handler:
@@ -253,18 +293,21 @@ Subscribe to `chat.message.edited` and `chat.message.deleted`. The handler:
    - For windows: `source_ref` is `${chat_id}:${window_started_at}`, but `raw_events.payload` stores `message_ids[]` (added to the payload schema). Match by membership.
 2. If the original `raw_events.received_at` is older than `EDIT_SYNC_TTL_HOURS` (default 24h), do nothing — it's outside the sync window. Log info.
 3. Otherwise, for each affected `knowledge_unit` (joined via `(source_type, source_ref)`):
-   - **On edit**: build the new transcript with the edited text substituted, re-run `extractPipeline`, insert *new* KU rows, then set `superseded_at = NOW()` and `superseded_by = <new_ku_id>` on the old rows. Qdrant points for old KUs are deleted; new ones upserted.
-   - **On delete**: set `superseded_at = NOW()` and `superseded_by = NULL` on affected KUs. Qdrant points deleted. (Existing retrieval already filters by `superseded_at IS NULL`, per `idx_ku_superseded`.)
-4. Append a row to a small `edit_sync_log` table for traceability:
+   - **On single-message edit**: re-run `extractPipeline(mode='chat_single')` on the new text, insert new KU rows, set `superseded_at = NOW()` and `superseded_by = <new_ku_id>` on the old rows. Qdrant points for old KUs are deleted; new ones upserted.
+   - **On windowed-message edit**: rebuild the transcript with the edited message substituted (omitting any `excluded_message_ids`), re-run `extractPipeline(mode='chat_window')`, then supersede the entire prior window's KUs with the new set. This is the "wholesale window re-extract" path; cheaper than per-claim diffing and matches the snapshot model.
+   - **On single-message delete**: set `superseded_at = NOW()` and `superseded_by = NULL` on affected KUs. Qdrant points deleted.
+   - **On windowed-message delete**: rebuild the window transcript without the deleted message, re-run extraction, supersede the prior window's KUs. If the window had only one message and it's deleted, simply tombstone (set `superseded_at` with no replacement).
+4. Existing retrieval already filters by `superseded_at IS NULL` per `idx_ku_superseded`, so superseded rows fall out of search automatically.
+5. Append a row to a small `edit_sync_log` table for traceability (id generated via existing `newId()` from `src/brain/ulid.ts`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS edit_sync_log (
-  id           TEXT PRIMARY KEY,
+  id           TEXT PRIMARY KEY,         -- ULID via newId()
   occurred_at  TEXT NOT NULL,
   platform     TEXT NOT NULL,
   chat_id      TEXT NOT NULL,
   message_id   TEXT NOT NULL,
-  action       TEXT NOT NULL,           -- 'edit' | 'delete'
+  action       TEXT NOT NULL,            -- 'edit' | 'delete'
   affected_kus INTEGER NOT NULL,
   raw_event_id TEXT
 );
@@ -306,11 +349,12 @@ Edits arriving after the TTL are deliberately ignored — keeps the brain stable
 
 ## Schema changes
 
-`src/brain/schema.sql` — minimal additions (everything else reuses what's already there):
+`src/brain/schema.sql` — additions:
 
-- Add `edit_sync_log` table (definition in §7).
-- Reuse: `raw_events` (new `source_type` values), `knowledge_units.superseded_at` / `superseded_by` (already on the table at line 75 + indexed at line 89), `entity_merge_log` (line 49), `entity_aliases` (line 20).
-- The `raw_events.payload` shape for window saves now includes a `message_ids: string[]` field so edit-sync can locate windowed messages by membership.
+- **New column**: `ALTER TABLE knowledge_units ADD COLUMN superseded_by TEXT` (idempotent guarded migration in `db.ts`, mirroring the existing `important` column pattern). The current schema has only `superseded_at` (line 75). Forward-link from old → new KU is needed so retrieve-time we can show the replacement.
+- **New table**: `edit_sync_log` (definition in §7).
+- Reuse: `raw_events` (new `source_type` values), `knowledge_units.superseded_at` (already indexed at `idx_ku_superseded`), `entity_merge_log` (line 49 — table only; the merge engine itself is new code, see §6 scope note), `entity_aliases` (line 20).
+- The `raw_events.payload` shape for window saves includes a `message_ids: string[]` field so edit-sync can locate windowed messages by membership.
 
 One migration to the nanoclaw DB (not the brain DB) for the message cache:
 
@@ -327,6 +371,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   attachments  TEXT,                   -- JSON array of ChatAttachment
   edited_at    TEXT,                   -- last observed edit ts, NULL if untouched
   deleted_at   TEXT,                   -- soft-delete; row kept for edit-sync trace
+  attachment_download_attempts INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (platform, chat_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_msg_chat_time
@@ -350,7 +395,8 @@ WINDOW_DAILY_FLUSH_HOUR=23
 CHAT_CACHE_TTL_HOURS=24
 EDIT_SYNC_TTL_HOURS=24              # how long after save edits/deletes propagate
 BRAIN_ATTACHMENT_MAX_BYTES=26214400 # 25 MB per file
-BRAIN_IMAGE_VISION=false            # enable Haiku vision captions
+BRAIN_IMAGE_VISION=true             # Haiku vision captions for image attachments
+BRAIN_LLM_BUDGET_CHAT_PCT=30        # share of daily LLM budget reserved for chat
 ```
 
 Per-chat opt-in lives in `groups/<name>/CLAUDE.md` YAML frontmatter (parsed at startup and on file-watch reload).
@@ -363,7 +409,10 @@ Per-chat opt-in lives in `groups/<name>/CLAUDE.md` YAML frontmatter (parsed at s
 | Signal poller drops connection | Existing reconnect logic; cached messages survive. Open window resumes on reconnect. |
 | Discord rate limit on slash command response | Already handled by discord.js; ephemeral reply may be delayed but save still emits. |
 | Extraction returns 0 claims for a window | Insert raw_events row with `processed_at` set so we don't retry; skip KU insert. Same as today's email-with-no-claims path. |
-| Process restart with open window | In-memory window state is lost. Acceptable v1 cost — a restart forfeits at most `WINDOW_IDLE_MS` worth of buffered messages, all still in the cache and recoverable manually if needed. |
+| Process restart with open window | Window flusher's `stop()` is wired into the existing `stopBrainIngest()` shutdown path. On SIGTERM it iterates open windows and emits `ChatWindowFlushedEvent` with `flush_reason='shutdown'` so in-flight context isn't lost. Hard crash still forfeits the buffer (acceptable v1). |
+| Chat extraction starves email LLM budget | The shared daily LLM budget (`extract.ts:239`, default $0.05) is partitioned: `BRAIN_LLM_BUDGET_USD` (overall) plus `BRAIN_LLM_BUDGET_CHAT_PCT` (default 30%). Chat extraction calls check the chat slice; email retains its existing path. Both share the overall ceiling. |
+| Attachment download fails | Cache row written without `local_path`; `attachment_download_attempts` counter incremented. A periodic retry sweep (every 30 min, capped at 3 attempts in the 24h window) re-tries pending downloads. After 3 failures, ingest proceeds with a `[Attachment unavailable: <filename>]` placeholder. |
+| Two attachments with same content (sha256 collision) | `local_path` keyed by `sha256` so dedup is automatic; cache row references the shared path. |
 | Edit/delete within `EDIT_SYNC_TTL_HOURS` | edit-sync pipeline supersedes the affected KU(s). |
 | Edit/delete after `EDIT_SYNC_TTL_HOURS` | Ignored. Snapshot is immutable. Documented. |
 | Attachment download fails | Cache row written without `local_path`; placeholder used in extraction; warn logged. Retry loop on next ingest cycle. |
@@ -390,17 +439,38 @@ No live-platform tests in CI — manual verification with the user's own Discord
 
 ## Implementation phases
 
-For the writing-plans pass:
+The work is large; each PR below is independently shippable and reviewable. Phases inside a PR are expected to land together.
 
-1. **Foundation** — message cache table + module. No behavior change yet.
-2. **Attachment store** — `src/chat-attachments.ts` plus the per-type extraction adapters (PDF, image placeholder, audio if voice-transcription is on).
-3. **Discord wiring** — message create/update/reactions, slash command, cache + attachment write. Emits events but `ingest.ts` not yet listening, so they're no-ops.
-4. **Signal wiring** — same as Discord.
-5. **Brain ingest extension** — handle `chat.message.saved` + `chat.window.flushed` end-to-end; entity creation for Discord/Signal handles.
-6. **Window flusher** — opt-in via group config, hook into cache, emit window events.
-7. **Identity merge** — YAML loader, `claw merge` admin command, hot-reload watcher.
-8. **Edit & delete sync** — handlers for `chat.message.edited` / `chat.message.deleted`, `edit_sync_log`, supersede pipeline.
-9. **Manual verification** — turn on for the user's own Discord server and Signal main number; verify each path (react, slash, claw save, window auto-ingest, edit, delete, identity merge, attachment) produces the expected brain state.
+**PR 1 — Cache, attachments, channel wiring, single-message ingest** (the minimum viable knowledge-from-chat path):
+
+1. Foundation — `chat_messages` table, `chat-message-cache.ts` module.
+2. Attachment store — `chat-attachments.ts`, per-type extraction adapters (PDF, image placeholder/vision, audio via voice-transcription if installed), retry sweep.
+3. Discord wiring — `MessageCreate`, `MessageUpdate`, `MessageReactionAdd`, `/save` slash command, cache + attachment write.
+4. Signal wiring — message poller persistence, `dataMessage.reaction`, `^claw save` text trigger, `editMessage`, `remoteDelete`, attachment fetch.
+5. Brain ingest extension for `chat.message.saved` — `extractPipeline` `chat_single` mode, entity-alias namespace, `createPersonFromHandle`, KU + Qdrant via existing path. Includes the `superseded_by` migration.
+6. Manual verification of the react / slash / `claw save` paths end-to-end.
+
+**PR 2 — Window flusher + auto-ingest opt-in**:
+
+7. Window flusher state machine, idle/cap/daily/shutdown flush.
+8. `extractPipeline` `chat_window` mode + race resolution (`excluded_message_ids`).
+9. `chat_id` → group lookup; YAML frontmatter parsing in `groups/<name>/CLAUDE.md`.
+10. LLM budget partitioning (`BRAIN_LLM_BUDGET_CHAT_PCT`).
+11. Verification on one opt-in chat.
+
+**PR 3 — Identity merge engine**:
+
+12. Merge engine (alias re-pointing, KU re-linking on canonical, conflict logging, audit row to `entity_merge_log`). The table exists; the engine is new.
+13. `groups/global/identity-merges.yaml` loader with full validation (cycle / dup / type / kind checks).
+14. Hot-reload watcher; rejects bad YAML without rolling back prior merges.
+15. `claw merge <alias> -> <canonical>` admin command.
+
+**PR 4 — Edit & delete sync**:
+
+16. `edit_sync_log` table.
+17. Handlers for `chat.message.edited` / `chat.message.deleted` (single + windowed paths).
+18. Wholesale window re-extract on windowed edits/deletes.
+19. Verification of edit / delete propagation within TTL.
 
 ## Open questions
 
