@@ -1184,10 +1184,12 @@ def cmd_sync(argv: list[str]) -> int:
               file=sys.stderr)
         return 0
     if result.returncode != 0:
-        print(f"warning: embedding step exited {result.returncode} — "
-              f"FTS-only retrieval will still work; run "
-              f"`npx tsx scripts/brain-embed-repos.ts` manually to retry",
+        print(f"error: embedding step exited {result.returncode} — "
+              f"SQLite rows are committed but Qdrant is now drifted. "
+              f"Run `npx tsx scripts/brain-embed-repos.ts` to backfill, "
+              f"or `--no-embed` next time to suppress this check.",
               file=sys.stderr)
+        return result.returncode
     return 0
 
 
