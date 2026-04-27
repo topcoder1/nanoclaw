@@ -916,6 +916,29 @@ function createSchema(database: Database.Database): void {
       ON sign_ceremonies(email_id)
       WHERE state NOT IN ('failed','cancelled');
   `);
+
+  // PR 1 (chat ingest): 24h cache of inbound chat messages.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      platform     TEXT NOT NULL,
+      chat_id      TEXT NOT NULL,
+      message_id   TEXT NOT NULL,
+      sent_at      TEXT NOT NULL,
+      sender       TEXT NOT NULL,
+      sender_name  TEXT,
+      text         TEXT,
+      reply_to_id  TEXT,
+      attachments  TEXT,
+      edited_at    TEXT,
+      deleted_at   TEXT,
+      attachment_download_attempts INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (platform, chat_id, message_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_msg_chat_time
+      ON chat_messages (platform, chat_id, sent_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_msg_prune
+      ON chat_messages (sent_at);
+  `);
 }
 
 /**
