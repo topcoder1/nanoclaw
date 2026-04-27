@@ -737,7 +737,7 @@ export interface ChatAttachment {
 
 export interface ChatMessageSavedEvent extends NanoClawEvent {
   type: 'chat.message.saved';
-  source: string;
+  source: 'discord' | 'signal';
   platform: 'discord' | 'signal';
   chat_id: string;
   chat_name?: string;
