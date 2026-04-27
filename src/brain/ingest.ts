@@ -23,6 +23,7 @@ import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
 import { ensureLegacyCutoverTombstone } from './drop-legacy-tombstone.js';
+import { startChatIngest, stopChatIngest } from './chat-ingest.js';
 import { embedBatch, embedText } from './embed.js';
 import { kuPointId, BRAIN_COLLECTION } from './qdrant.js';
 import { QdrantClient } from '@qdrant/js-client-rest';
@@ -509,6 +510,8 @@ export function startBrainIngest(): void {
     }
   });
 
+  startChatIngest();
+
   logger.info('Brain ingest started (raw_events + P1 extraction pipeline)');
 }
 
@@ -593,6 +596,7 @@ export async function reprocessRawEvent(
  * Drain the in-flight queue and unsubscribe.
  */
 export async function stopBrainIngest(): Promise<void> {
+  stopChatIngest();
   if (unsubscribe) {
     unsubscribe();
     unsubscribe = null;
