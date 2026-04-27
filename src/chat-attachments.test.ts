@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
   storeAttachment,
   attachmentRoot,
+  describeAttachment,
   type AttachmentDescriptor,
 } from './chat-attachments.js';
 
@@ -57,7 +58,11 @@ describe('chat-attachments', () => {
     const fetcher = vi.fn();
     const desc = await storeAttachment(
       { platform: 'discord', chat_id: 'c1', message_id: 'm1' },
-      { filename: 'too-big.bin', mime: 'application/octet-stream', size_bytes: 100 },
+      {
+        filename: 'too-big.bin',
+        mime: 'application/octet-stream',
+        size_bytes: 100,
+      },
       fetcher,
     );
     expect(desc).toBeNull();
@@ -76,5 +81,37 @@ describe('chat-attachments', () => {
 
   it('attachmentRoot honors BRAIN_ATTACHMENT_DIR', () => {
     expect(attachmentRoot()).toBe(baseDir);
+  });
+});
+
+describe('describeAttachment', () => {
+  it('returns the placeholder for unknown types', async () => {
+    const path = join(baseDir, 'a.zip');
+    writeFileSync(path, Buffer.from('PK\x03\x04'));
+    const out = await describeAttachment(
+      { filename: 'archive.zip', mime: 'application/zip', sha256: 'x', local_path: path, size_bytes: 4 },
+      { imageVision: false, voiceTranscribe: false },
+    );
+    expect(out).toBe('[Attachment: archive.zip, 4 B]');
+  });
+
+  it('returns a placeholder for images when vision is off', async () => {
+    const path = join(baseDir, 'a.png');
+    writeFileSync(path, Buffer.alloc(8));
+    const out = await describeAttachment(
+      { filename: 'pic.png', mime: 'image/png', sha256: 'x', local_path: path, size_bytes: 8 },
+      { imageVision: false, voiceTranscribe: false },
+    );
+    expect(out).toBe('[Attachment image: pic.png]');
+  });
+
+  it('extracts text from a PDF when pdftotext is available', async () => {
+    const stub = vi.fn().mockResolvedValue('Quarterly report — Q3 revenue up 12%.');
+    const out = await describeAttachment(
+      { filename: 'q3.pdf', mime: 'application/pdf', sha256: 'x', local_path: '/dev/null', size_bytes: 100 },
+      { imageVision: false, voiceTranscribe: false, _pdfExtractor: stub },
+    );
+    expect(out.startsWith('[Attachment PDF: q3.pdf]')).toBe(true);
+    expect(out).toContain('Quarterly report');
   });
 });
