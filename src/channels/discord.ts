@@ -9,6 +9,9 @@ import {
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { eventBus } from '../event-bus.js';
+import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
+import type { ChatMessageSavedEvent } from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -42,6 +45,8 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.DirectMessageReactions,
       ],
     });
 
@@ -59,6 +64,18 @@ export class DiscordChannel implements Channel {
         message.author.username;
       const sender = message.author.id;
       const msgId = message.id;
+
+      // Cache the message for reaction/slash triggers
+      putChatMessage({
+        platform: 'discord',
+        chat_id: channelId,
+        message_id: msgId,
+        sent_at: timestamp,
+        sender,
+        sender_name: senderName,
+        text: message.content,
+        reply_to_id: message.reference?.messageId ?? undefined,
+      });
 
       // Determine chat name
       let chatName: string;
@@ -168,13 +185,87 @@ export class DiscordChannel implements Channel {
       );
     });
 
+    // Cache updates for edited messages (brain edit-sync handled in PR 4)
+    this.client.on(Events.MessageUpdate, async (_old, message) => {
+      if (message.partial) {
+        try { await message.fetch(); } catch { return; }
+      }
+      if (message.author?.bot) return;
+      putChatMessage({
+        platform: 'discord',
+        chat_id: message.channelId,
+        message_id: message.id,
+        sent_at: message.createdAt.toISOString(),
+        sender: message.author?.id ?? 'unknown',
+        sender_name: message.member?.displayName ?? message.author?.username,
+        text: message.content,
+        edited_at: message.editedAt?.toISOString() ?? new Date().toISOString(),
+      });
+    });
+
+    // 🧠 emoji reaction → emit ChatMessageSavedEvent
+    this.client.on(Events.MessageReactionAdd, async (reaction, user) => {
+      const targetEmoji = process.env.BRAIN_SAVE_EMOJI ?? '🧠';
+      if (reaction.partial) {
+        try { await reaction.fetch(); } catch { return; }
+      }
+      if (reaction.emoji.name !== targetEmoji) return;
+      if (user.id === this.client?.user?.id) return; // ignore self
+
+      const cached = getChatMessage('discord', reaction.message.channelId, reaction.message.id);
+      if (!cached) {
+        logger.warn(
+          { messageId: reaction.message.id, channelId: reaction.message.channelId },
+          'Discord 🧠-react: message not in cache (older than TTL?)',
+        );
+        return;
+      }
+      const evt: ChatMessageSavedEvent = {
+        type: 'chat.message.saved',
+        timestamp: Date.now(),
+        source: 'discord',
+        payload: {},
+        platform: 'discord',
+        chat_id: reaction.message.channelId,
+        message_id: reaction.message.id,
+        sender: cached.sender,
+        sender_display: cached.sender_name,
+        sent_at: cached.sent_at,
+        text: cached.text ?? '',
+        trigger: 'emoji',
+      };
+      eventBus.emit('chat.message.saved', evt);
+    });
+
+    // /save slash command → emit ChatMessageSavedEvent
+    this.client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isChatInputCommand() || interaction.commandName !== 'save') return;
+      const text = interaction.options.getString('text', true);
+      const evt: ChatMessageSavedEvent = {
+        type: 'chat.message.saved',
+        timestamp: Date.now(),
+        source: 'discord',
+        payload: {},
+        platform: 'discord',
+        chat_id: interaction.channelId ?? `dm:${interaction.user.id}`,
+        message_id: interaction.id,
+        sender: interaction.user.id,
+        sender_display: interaction.user.username,
+        sent_at: new Date().toISOString(),
+        text,
+        trigger: 'slash',
+      };
+      eventBus.emit('chat.message.saved', evt);
+      await interaction.reply({ content: `🧠 saved.`, ephemeral: true });
+    });
+
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
     return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
+      this.client!.once(Events.ClientReady, async (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',
@@ -183,6 +274,16 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
+        // Register /save slash command
+        try {
+          await readyClient.application?.commands.create({
+            name: 'save',
+            description: 'Save text to your brain',
+            options: [{ name: 'text', description: 'What to save', type: 3, required: true }], // 3 = STRING
+          });
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Discord /save command registration failed');
+        }
         resolve();
       });
 

@@ -24,6 +24,24 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Mock chat-message-cache — use vi.hoisted so vars are available in factory
+const { mockPutChatMessage, mockGetChatMessage } = vi.hoisted(() => ({
+  mockPutChatMessage: vi.fn(),
+  mockGetChatMessage: vi.fn(),
+}));
+vi.mock('../chat-message-cache.js', () => ({
+  putChatMessage: mockPutChatMessage,
+  getChatMessage: mockGetChatMessage,
+}));
+
+// Mock event-bus — use vi.hoisted so var is available in factory
+const { mockEventBusEmit } = vi.hoisted(() => ({
+  mockEventBusEmit: vi.fn(),
+}));
+vi.mock('../event-bus.js', () => ({
+  eventBus: { emit: mockEventBusEmit },
+}));
+
 // --- discord.js mock ---
 
 type Handler = (...args: any[]) => any;
@@ -33,6 +51,9 @@ const clientRef = vi.hoisted(() => ({ current: null as any }));
 vi.mock('discord.js', () => {
   const Events = {
     MessageCreate: 'messageCreate',
+    MessageUpdate: 'messageUpdate',
+    MessageReactionAdd: 'messageReactionAdd',
+    InteractionCreate: 'interactionCreate',
     ClientReady: 'ready',
     Error: 'error',
   };
@@ -42,6 +63,8 @@ vi.mock('discord.js', () => {
     GuildMessages: 2,
     MessageContent: 4,
     DirectMessages: 8,
+    GuildMessageReactions: 16,
+    DirectMessageReactions: 32,
   };
 
   class MockClient {
@@ -193,6 +216,9 @@ async function triggerMessage(message: any) {
 describe('DiscordChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPutChatMessage.mockClear();
+    mockGetChatMessage.mockClear();
+    mockEventBusEmit.mockClear();
   });
 
   afterEach(() => {
@@ -772,6 +798,222 @@ describe('DiscordChannel', () => {
     it('has name "discord"', () => {
       const channel = new DiscordChannel('test-token', createTestOpts());
       expect(channel.name).toBe('discord');
+    });
+  });
+
+  // --- Cache helpers ---
+
+  function createReaction(overrides: {
+    emojiName?: string;
+    userId?: string;
+    channelId?: string;
+    messageId?: string;
+    isPartial?: boolean;
+  } = {}) {
+    const emojiName = overrides.emojiName ?? '🧠';
+    const channelId = overrides.channelId ?? '1234567890123456';
+    const messageId = overrides.messageId ?? 'msg_cached_001';
+    return {
+      partial: overrides.isPartial ?? false,
+      emoji: { name: emojiName },
+      message: { channelId, id: messageId },
+      fetch: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  function createUser(userId?: string) {
+    return { id: userId ?? '55512345' };
+  }
+
+  function createInteraction(overrides: {
+    text?: string;
+    channelId?: string;
+    userId?: string;
+    username?: string;
+    interactionId?: string;
+  } = {}) {
+    const text = overrides.text ?? 'remember: KV cache hit ratio is 80%';
+    return {
+      isChatInputCommand: () => true,
+      commandName: 'save',
+      channelId: overrides.channelId ?? '1234567890123456',
+      id: overrides.interactionId ?? 'interaction_001',
+      user: {
+        id: overrides.userId ?? '55512345',
+        username: overrides.username ?? 'alice',
+      },
+      options: {
+        getString: (_name: string, _required: boolean) => text,
+      },
+      reply: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  async function triggerReaction(reaction: any, user: any) {
+    const handlers = currentClient().eventHandlers.get('messageReactionAdd') || [];
+    for (const h of handlers) await h(reaction, user);
+  }
+
+  async function triggerInteraction(interaction: any) {
+    const handlers = currentClient().eventHandlers.get('interactionCreate') || [];
+    for (const h of handlers) await h(interaction);
+  }
+
+  // --- MessageCreate cache write ---
+
+  describe('MessageCreate cache write', () => {
+    it('writes message to cache on inbound message', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        content: 'Hello cache',
+        messageId: 'msg_cache_test',
+        guildName: 'Test Server',
+      });
+      await triggerMessage(msg);
+
+      expect(mockPutChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platform: 'discord',
+          chat_id: '1234567890123456',
+          message_id: 'msg_cache_test',
+          text: 'Hello cache',
+          sender: '55512345',
+        }),
+      );
+    });
+  });
+
+  // --- 🧠 emoji reaction ---
+
+  describe('MessageReactionAdd (🧠 emoji)', () => {
+    it('emits ChatMessageSavedEvent with trigger=emoji when 🧠 reaction added', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Seed the cache mock
+      mockGetChatMessage.mockReturnValue({
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_cached_001',
+        sent_at: '2024-01-01T00:00:00.000Z',
+        sender: '55512345',
+        sender_name: 'Alice',
+        text: 'KV cache hit ratio is 80%',
+        attachment_download_attempts: 0,
+      });
+
+      const reaction = createReaction();
+      const user = createUser();
+      await triggerReaction(reaction, user);
+
+      expect(mockEventBusEmit).toHaveBeenCalledTimes(1);
+      const [eventType, evt] = mockEventBusEmit.mock.calls[0];
+      expect(eventType).toBe('chat.message.saved');
+      expect(evt).toMatchObject({
+        type: 'chat.message.saved',
+        source: 'discord',
+        platform: 'discord',
+        trigger: 'emoji',
+        text: 'KV cache hit ratio is 80%',
+        chat_id: '1234567890123456',
+        message_id: 'msg_cached_001',
+      });
+    });
+
+    it("ignores bot's own reactions", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue({
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_cached_001',
+        sent_at: '2024-01-01T00:00:00.000Z',
+        sender: '55512345',
+        sender_name: 'Alice',
+        text: 'Some message',
+        attachment_download_attempts: 0,
+      });
+
+      const reaction = createReaction();
+      const botUser = createUser('999888777'); // matches mock client user id
+      await triggerReaction(reaction, botUser);
+
+      expect(mockEventBusEmit).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when message is not in cache', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue(null);
+
+      const reaction = createReaction();
+      const user = createUser();
+      await triggerReaction(reaction, user);
+
+      expect(mockEventBusEmit).not.toHaveBeenCalled();
+    });
+
+    it('ignores reactions with a different emoji', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍' });
+      const user = createUser();
+      await triggerReaction(reaction, user);
+
+      expect(mockGetChatMessage).not.toHaveBeenCalled();
+      expect(mockEventBusEmit).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- /save slash command ---
+
+  describe('/save slash command', () => {
+    it('emits ChatMessageSavedEvent with trigger=slash', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const interaction = createInteraction({
+        text: 'remember: KV cache hit ratio is 80%',
+      });
+      await triggerInteraction(interaction);
+
+      expect(mockEventBusEmit).toHaveBeenCalledTimes(1);
+      const [eventType, evt] = mockEventBusEmit.mock.calls[0];
+      expect(eventType).toBe('chat.message.saved');
+      expect(evt).toMatchObject({
+        type: 'chat.message.saved',
+        source: 'discord',
+        platform: 'discord',
+        trigger: 'slash',
+        text: 'remember: KV cache hit ratio is 80%',
+        sender: '55512345',
+        sender_display: 'alice',
+      });
+    });
+
+    it('replies ephemerally after emitting event', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const interaction = createInteraction({ text: 'test save' });
+      await triggerInteraction(interaction);
+
+      expect(interaction.reply).toHaveBeenCalledWith({
+        content: expect.stringContaining('saved'),
+        ephemeral: true,
+      });
     });
   });
 });
