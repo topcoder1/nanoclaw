@@ -39,9 +39,7 @@ describe('initRulesStore', () => {
 
   it('applies idempotent column migrations for supersession + subsource', () => {
     initRulesStore();
-    const allSql = mockDb.exec.mock.calls
-      .map((c) => c[0] as string)
-      .join('\n');
+    const allSql = mockDb.exec.mock.calls.map((c) => c[0] as string).join('\n');
     expect(allSql).toContain('ADD COLUMN subsource');
     expect(allSql).toContain('ADD COLUMN supersedes_id');
     expect(allSql).toContain('ADD COLUMN superseded_at');

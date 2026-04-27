@@ -143,7 +143,9 @@ describe('brain/procedural-reflect', () => {
       const hot = s.recurringRetrievals.find((r) => r.kuId === hotKu);
       expect(hot).toBeDefined();
       expect(hot!.queryCount).toBeGreaterThanOrEqual(3);
-      expect(s.recurringRetrievals.find((r) => r.kuId === coldKu)).toBeUndefined();
+      expect(
+        s.recurringRetrievals.find((r) => r.kuId === coldKu),
+      ).toBeUndefined();
     });
 
     it('truncates long query text to keep the prompt bounded', () => {
@@ -183,7 +185,7 @@ describe('brain/procedural-reflect', () => {
       ]);
       const s = collectSignals(db, WINDOW_START, NOW);
       expect(s.recentCorrections).toHaveLength(1);
-      expect(s.recentCorrections[0].text).toContain("Best,");
+      expect(s.recentCorrections[0].text).toContain('Best,');
     });
   });
 
