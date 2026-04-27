@@ -108,10 +108,20 @@ function fmtBytes(n: number): string {
 
 async function defaultPdfExtractor(path: string): Promise<string> {
   try {
-    const { stdout } = await pExecFile('pdftotext', ['-layout', '-q', '-l', '50', path, '-']);
+    const { stdout } = await pExecFile('pdftotext', [
+      '-layout',
+      '-q',
+      '-l',
+      '50',
+      path,
+      '-',
+    ]);
     return stdout.trim();
   } catch (err) {
-    logger.warn({ path, err: err instanceof Error ? err.message : String(err) }, 'pdftotext failed');
+    logger.warn(
+      { path, err: err instanceof Error ? err.message : String(err) },
+      'pdftotext failed',
+    );
     return '';
   }
 }
@@ -140,14 +150,19 @@ export async function describeAttachment(
   }
   if (att.mime.startsWith('image/')) {
     if (!opts.imageVision) return `[Attachment image: ${att.filename}]`;
-    const caption = (await (opts._imageCaptioner ?? defaultImageCaptioner)(att.local_path)).trim();
+    const caption = (
+      await (opts._imageCaptioner ?? defaultImageCaptioner)(att.local_path)
+    ).trim();
     return caption
       ? `[Attachment image: ${att.filename} — ${caption}]`
       : `[Attachment image: ${att.filename}]`;
   }
   if (att.mime.startsWith('audio/')) {
-    if (!opts.voiceTranscribe) return `[Attachment audio: ${att.filename}, ${size}]`;
-    const tx = (await (opts._audioTranscriber ?? defaultAudioTranscriber)(att.local_path)).trim();
+    if (!opts.voiceTranscribe)
+      return `[Attachment audio: ${att.filename}, ${size}]`;
+    const tx = (
+      await (opts._audioTranscriber ?? defaultAudioTranscriber)(att.local_path)
+    ).trim();
     return tx
       ? `[Attachment audio: ${att.filename}]\n${tx}`
       : `[Attachment audio: ${att.filename}, ${size}]`;

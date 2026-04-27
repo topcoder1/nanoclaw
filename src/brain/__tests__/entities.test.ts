@@ -225,14 +225,22 @@ describe('createPersonFromHandle', () => {
   it('creates a person and discord_username alias for a Discord handle', async () => {
     const e = await createPersonFromHandle('discord', 'alice#1234', 'Alice');
     expect(e.entity_type).toBe('person');
-    const found = findEntityIdByAlias(getBrainDb(), 'discord_username', 'alice');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'discord_username',
+      'alice',
+    );
     expect(found).toBe(e.entity_id);
   });
 
   it('creates a person and signal_phone alias normalized to E.164', async () => {
     const e = await createPersonFromHandle('signal', '+1 (555) 123-4567');
     expect(e.entity_type).toBe('person');
-    const found = findEntityIdByAlias(getBrainDb(), 'signal_phone', '+15551234567');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'signal_phone',
+      '+15551234567',
+    );
     expect(found).toBe(e.entity_id);
   });
 

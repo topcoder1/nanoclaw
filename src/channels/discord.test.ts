@@ -803,13 +803,15 @@ describe('DiscordChannel', () => {
 
   // --- Cache helpers ---
 
-  function createReaction(overrides: {
-    emojiName?: string;
-    userId?: string;
-    channelId?: string;
-    messageId?: string;
-    isPartial?: boolean;
-  } = {}) {
+  function createReaction(
+    overrides: {
+      emojiName?: string;
+      userId?: string;
+      channelId?: string;
+      messageId?: string;
+      isPartial?: boolean;
+    } = {},
+  ) {
     const emojiName = overrides.emojiName ?? '🧠';
     const channelId = overrides.channelId ?? '1234567890123456';
     const messageId = overrides.messageId ?? 'msg_cached_001';
@@ -825,13 +827,15 @@ describe('DiscordChannel', () => {
     return { id: userId ?? '55512345' };
   }
 
-  function createInteraction(overrides: {
-    text?: string;
-    channelId?: string;
-    userId?: string;
-    username?: string;
-    interactionId?: string;
-  } = {}) {
+  function createInteraction(
+    overrides: {
+      text?: string;
+      channelId?: string;
+      userId?: string;
+      username?: string;
+      interactionId?: string;
+    } = {},
+  ) {
     const text = overrides.text ?? 'remember: KV cache hit ratio is 80%';
     return {
       isChatInputCommand: () => true,
@@ -850,12 +854,14 @@ describe('DiscordChannel', () => {
   }
 
   async function triggerReaction(reaction: any, user: any) {
-    const handlers = currentClient().eventHandlers.get('messageReactionAdd') || [];
+    const handlers =
+      currentClient().eventHandlers.get('messageReactionAdd') || [];
     for (const h of handlers) await h(reaction, user);
   }
 
   async function triggerInteraction(interaction: any) {
-    const handlers = currentClient().eventHandlers.get('interactionCreate') || [];
+    const handlers =
+      currentClient().eventHandlers.get('interactionCreate') || [];
     for (const h of handlers) await h(interaction);
   }
 

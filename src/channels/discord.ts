@@ -188,7 +188,11 @@ export class DiscordChannel implements Channel {
     // Cache updates for edited messages (brain edit-sync handled in PR 4)
     this.client.on(Events.MessageUpdate, async (_old, message) => {
       if (message.partial) {
-        try { await message.fetch(); } catch { return; }
+        try {
+          await message.fetch();
+        } catch {
+          return;
+        }
       }
       if (message.author?.bot) return;
       putChatMessage({
@@ -207,15 +211,26 @@ export class DiscordChannel implements Channel {
     this.client.on(Events.MessageReactionAdd, async (reaction, user) => {
       const targetEmoji = process.env.BRAIN_SAVE_EMOJI ?? '🧠';
       if (reaction.partial) {
-        try { await reaction.fetch(); } catch { return; }
+        try {
+          await reaction.fetch();
+        } catch {
+          return;
+        }
       }
       if (reaction.emoji.name !== targetEmoji) return;
       if (user.id === this.client?.user?.id) return; // ignore self
 
-      const cached = getChatMessage('discord', reaction.message.channelId, reaction.message.id);
+      const cached = getChatMessage(
+        'discord',
+        reaction.message.channelId,
+        reaction.message.id,
+      );
       if (!cached) {
         logger.warn(
-          { messageId: reaction.message.id, channelId: reaction.message.channelId },
+          {
+            messageId: reaction.message.id,
+            channelId: reaction.message.channelId,
+          },
           'Discord 🧠-react: message not in cache (older than TTL?)',
         );
         return;
@@ -239,7 +254,11 @@ export class DiscordChannel implements Channel {
 
     // /save slash command → emit ChatMessageSavedEvent
     this.client.on(Events.InteractionCreate, async (interaction) => {
-      if (!interaction.isChatInputCommand() || interaction.commandName !== 'save') return;
+      if (
+        !interaction.isChatInputCommand() ||
+        interaction.commandName !== 'save'
+      )
+        return;
       const text = interaction.options.getString('text', true);
       const evt: ChatMessageSavedEvent = {
         type: 'chat.message.saved',
@@ -279,10 +298,20 @@ export class DiscordChannel implements Channel {
           await readyClient.application?.commands.create({
             name: 'save',
             description: 'Save text to your brain',
-            options: [{ name: 'text', description: 'What to save', type: 3, required: true }], // 3 = STRING
+            options: [
+              {
+                name: 'text',
+                description: 'What to save',
+                type: 3,
+                required: true,
+              },
+            ], // 3 = STRING
           });
         } catch (err) {
-          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Discord /save command registration failed');
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Discord /save command registration failed',
+          );
         }
         resolve();
       });

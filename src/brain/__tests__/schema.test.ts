@@ -196,7 +196,9 @@ describe('brain schema', () => {
 
   it('knowledge_units has a superseded_by column for forward-link supersession', () => {
     db = openWithSchema(dbPath);
-    const cols = db.prepare(`PRAGMA table_info(knowledge_units)`).all() as Array<{ name: string }>;
+    const cols = db
+      .prepare(`PRAGMA table_info(knowledge_units)`)
+      .all() as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     expect(names).toContain('superseded_at');
     expect(names).toContain('superseded_by');

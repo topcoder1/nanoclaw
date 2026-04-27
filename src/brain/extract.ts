@@ -365,16 +365,22 @@ function buildPrompt(input: ExtractInput): string {
       `Skip greetings, acknowledgements, and pure reactions.`,
       input.sender ? `Sender: ${input.sender}` : '',
       `Message: ${input.text}`,
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
   if (input.mode === 'chat_window') {
     return [
       `You extract durable knowledge from a chat-conversation transcript. Return JSON {claims: [...]}.`,
       `Identify distinct factual statements, decisions, and commitments — one claim per topic.`,
       `Skip chitchat, greetings, and pure reactions. Use participant names where attribution matters.`,
-      input.participants?.length ? `Participants: ${input.participants.join(', ')}` : '',
+      input.participants?.length
+        ? `Participants: ${input.participants.join(', ')}`
+        : '',
       `Transcript:\n${input.text}`,
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
   const parts = [
     'Extract factual claims from the message below.',

@@ -93,7 +93,9 @@ export function listChatMessages(
       opts.sinceIso ?? null,
       opts.sinceIso ?? null,
       opts.limit ?? 200,
-    ) as Array<Omit<ChatMessageRow, 'attachments'> & { attachments: string | null }>;
+    ) as Array<
+    Omit<ChatMessageRow, 'attachments'> & { attachments: string | null }
+  >;
   return rows.map((r) => ({
     ...r,
     attachments: r.attachments ? JSON.parse(r.attachments) : undefined,

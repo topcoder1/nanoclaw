@@ -236,11 +236,13 @@ describe('brain/extract — chat mode bypass', () => {
     const fakeLlm = vi.fn(async (prompt: string) => {
       calls.push(prompt);
       return {
-        claims: [{
-          text: 'Launch moved to next Wednesday',
-          topic_seed: 'launch date',
-          confidence: 0.85,
-        }],
+        claims: [
+          {
+            text: 'Launch moved to next Wednesday',
+            topic_seed: 'launch date',
+            confidence: 0.85,
+          },
+        ],
         inputTokens: 200,
         outputTokens: 50,
       };

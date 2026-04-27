@@ -424,9 +424,7 @@ export async function createPersonFromHandle(
 ): Promise<Entity> {
   const ns = pickNamespace(platform, rawHandle);
   if (!ns) {
-    throw new Error(
-      `createPersonFromHandle: cannot classify '${rawHandle}'`,
-    );
+    throw new Error(`createPersonFromHandle: cannot classify '${rawHandle}'`);
   }
   const value = ns.normalize(rawHandle);
   if (!value) {
@@ -478,9 +476,7 @@ export async function createPersonFromHandle(
   // Read back — if a racing writer won, we get their entity.
   const finalId = findEntityIdByAlias(db, ns.field, value);
   if (!finalId) {
-    throw new Error(
-      `createPersonFromHandle: failed to persist ${value}`,
-    );
+    throw new Error(`createPersonFromHandle: failed to persist ${value}`);
   }
   const final = readEntity(db, finalId);
   if (!final) {
