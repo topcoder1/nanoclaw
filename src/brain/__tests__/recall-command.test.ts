@@ -28,6 +28,7 @@ describe('brain/recall-command', () => {
 
   it('formats results with source, date, score, snippet', async () => {
     const msg = await handleRecallCommand('what did Alice say', {
+      dbForCitations: null,
       recallFn: async () => [
         {
           ku_id: 'KU-1',
@@ -38,9 +39,11 @@ describe('brain/recall-command', () => {
           valid_from: '2026-04-20T10:00:00Z',
           recorded_at: '2026-04-20T10:05:00Z',
           topic_key: null,
+          important: false,
           rankScore: 0.9,
           recencyScore: 0.95,
           accessScore: 0,
+          importantScore: 0,
           finalScore: 0.85,
         },
       ],
@@ -51,6 +54,76 @@ describe('brain/recall-command', () => {
     expect(msg).toMatch(/0\.85/);
     expect(msg).toMatch(/Alice said/);
     expect(msg).toMatch(/thread-42/);
+  });
+
+  it('renders [subject · date](url) when citation is enriched', async () => {
+    const fakeDb = {
+      prepare: () => ({
+        get: () => ({
+          payload: JSON.stringify({
+            subject: 'Q4 renewal — pricing discussion',
+            sender: 'alice@acme.co',
+            account: 'attaxion',
+          }),
+        }),
+      }),
+    } as unknown as import('better-sqlite3').Database;
+    const msg = await handleRecallCommand('alice', {
+      recallFn: async () => [
+        {
+          ku_id: 'KU-2',
+          text: 'Renewal closed.',
+          source_type: 'email',
+          source_ref: 'thread-99',
+          account: 'work',
+          valid_from: '2026-04-20T10:00:00Z',
+          recorded_at: '2026-04-20T10:05:00Z',
+          topic_key: null,
+          important: false,
+          rankScore: 0.9,
+          recencyScore: 0.95,
+          accessScore: 0,
+          importantScore: 0,
+          finalScore: 0.9,
+        },
+      ],
+      dbForCitations: fakeDb,
+      resolveAlias: (alias) =>
+        alias === 'attaxion' ? 'jonathan@attaxion.com' : null,
+    });
+    // Subject is rendered with markdown escaping (— stays as —)
+    expect(msg).toMatch(/Q4 renewal/);
+    expect(msg).toMatch(/2026-04-20/);
+    // ?authuser= deep link form, with URL-encoded address
+    expect(msg).toContain(
+      'https://mail.google.com/mail/u/0/?authuser=jonathan%40attaxion.com#all/thread-99',
+    );
+  });
+
+  it('falls back to bare thread ref when no resolver is wired', async () => {
+    const msg = await handleRecallCommand('alice', {
+      recallFn: async () => [
+        {
+          ku_id: 'KU-3',
+          text: 'Renewal closed.',
+          source_type: 'email',
+          source_ref: 'thread-77',
+          account: 'work',
+          valid_from: '2026-04-20T10:00:00Z',
+          recorded_at: '2026-04-20T10:05:00Z',
+          topic_key: null,
+          important: false,
+          rankScore: 0.9,
+          recencyScore: 0.95,
+          accessScore: 0,
+          importantScore: 0,
+          finalScore: 0.9,
+        },
+      ],
+      dbForCitations: null,
+    });
+    expect(msg).toMatch(/thread-77/);
+    expect(msg).not.toContain('mail.google.com');
   });
 
   it('passes the requested limit to recall()', async () => {

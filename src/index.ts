@@ -1489,7 +1489,13 @@ async function main(): Promise<void> {
           const args = trimmed.slice('/recall'.length);
           try {
             // TODO(P2): derive account from chatJid once personal ingestion lands.
-            const reply = await handleRecallCommand(args, { account: 'work' });
+            const router = gmailOpsRouterRef.current;
+            const reply = await handleRecallCommand(args, {
+              account: 'work',
+              resolveAlias: router
+                ? (alias: string) => router.emailAddressForAlias(alias)
+                : undefined,
+            });
             const ch = findChannel(channels, chatJid);
             if (ch) await ch.sendMessage(chatJid, reply);
           } catch (err) {
