@@ -17,13 +17,10 @@ import type { ChatMessageSavedEvent } from '../events.js';
 import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
-import { embedText } from './embed.js';
+import { embedText, getEmbeddingModelVersion } from './embed.js';
 import { createPersonFromHandle } from './entities.js';
 import { extractPipeline, type LlmCaller } from './extract.js';
-import {
-  upsertKu,
-  getEmbeddingModelVersion,
-} from './qdrant.js';
+import { upsertKu } from './qdrant.js';
 import { newId } from './ulid.js';
 
 export interface ChatIngestOpts {
@@ -118,16 +115,20 @@ async function handleChatMessageSaved(
     senderEntityId = entity.entity_id;
   } catch (err) {
     logger.warn(
-      { err: err instanceof Error ? err.message : String(err), sender: evt.sender },
+      {
+        err: err instanceof Error ? err.message : String(err),
+        sender: evt.sender,
+      },
       'chat ingest: entity resolve failed — KU will have no sender link',
     );
   }
 
   // No claims → mark processed and exit.
   if (claims.length === 0) {
-    db.prepare(
-      `UPDATE raw_events SET processed_at = ? WHERE id = ?`,
-    ).run(receivedAt, rawId);
+    db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(
+      receivedAt,
+      rawId,
+    );
     return;
   }
 
@@ -149,7 +150,12 @@ async function handleChatMessageSaved(
     `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, 'mentioned')`,
   );
 
-  const kuRows: Array<{ id: string; text: string; topicKey: string | null; confidence: number }> = [];
+  const kuRows: Array<{
+    id: string;
+    text: string;
+    topicKey: string | null;
+    confidence: number;
+  }> = [];
 
   db.transaction(() => {
     for (const claim of claims) {
@@ -209,7 +215,8 @@ async function handleChatMessageSaved(
   }
 
   // Step 6: mark raw_event as processed.
-  db.prepare(
-    `UPDATE raw_events SET processed_at = ? WHERE id = ?`,
-  ).run(nowIso, rawId);
+  db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(
+    nowIso,
+    rawId,
+  );
 }

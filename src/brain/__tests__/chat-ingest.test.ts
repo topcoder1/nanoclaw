@@ -50,7 +50,6 @@ vi.mock('../qdrant.js', () => ({
   ensureBrainCollection: vi.fn(),
   BRAIN_COLLECTION: 'ku_nomic-embed-text-v1.5_768',
   _setQdrantClientForTest: () => {},
-  getEmbeddingModelVersion: () => 'nomic-embed-text-v1.5:768',
   kuPointId: vi.fn((id: string) => id),
 }));
 
@@ -119,9 +118,7 @@ describe('chat-ingest', () => {
     const db = getBrainDb();
 
     const raw = db
-      .prepare(
-        `SELECT * FROM raw_events WHERE source_type = 'discord_message'`,
-      )
+      .prepare(`SELECT * FROM raw_events WHERE source_type = 'discord_message'`)
       .get() as { source_ref: string } | undefined;
     expect(raw).toBeDefined();
     expect(raw!.source_ref).toBe('channel-1:msg-7');
