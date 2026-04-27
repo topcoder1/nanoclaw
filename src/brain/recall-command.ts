@@ -118,8 +118,7 @@ function loadCitations(
   if (!opts.resolveAlias) return results.map(empty);
   let db: Database.Database | null;
   try {
-    db =
-      opts.dbForCitations === undefined ? getBrainDb() : opts.dbForCitations;
+    db = opts.dbForCitations === undefined ? getBrainDb() : opts.dbForCitations;
   } catch (err) {
     logger.warn(
       { err: err instanceof Error ? err.message : String(err) },
