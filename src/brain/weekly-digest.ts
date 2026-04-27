@@ -23,6 +23,8 @@
  *   8. Re-eval trigger status
  */
 
+import { listActiveRules, type LearnedRule } from '../learning/rules-engine.js';
+
 import { getBrainDb } from './db.js';
 import { escapeMarkdown } from './markdown.js';
 import {
@@ -61,6 +63,17 @@ export interface WeeklyDigestSummary {
   processedRawEvents: number;
   topRetrievedKus: Array<{ id: string; text: string; access_count: number }>;
   newEntityCount: number;
+  /**
+   * Brain-reflection rules emitted in the window. Surfaced for review;
+   * v1 does not auto-inject these into the agent system prompt.
+   */
+  newProceduralRules: Array<{
+    id: string;
+    rule: string;
+    actionClasses: string[];
+    confidence: number;
+    supersedesId: string | null;
+  }>;
   deadLetterCount: number;
   staleUnprocessedCount: number;
   /** SSE→brain canary: email.received events actually seen in last 24h. */
@@ -167,6 +180,27 @@ export function collectWeeklyDigest(
   const emailsSeen = getSystemCounter(EMAILS_SEEN_KEY, nowIso);
   const lastIngest = getSystemState(LAST_INGEST_EVENT_KEY);
 
+  // Brain-reflection rules emitted in the window. Read from messages.db's
+  // learned_rules via the existing rules-engine API. Failure here must not
+  // break the digest — fall back to an empty list.
+  let newRules: WeeklyDigestSummary['newProceduralRules'] = [];
+  try {
+    const rules: LearnedRule[] = listActiveRules({
+      subsource: 'brain_reflection',
+      since: startIso,
+      limit: 10,
+    });
+    newRules = rules.map((r) => ({
+      id: r.id,
+      rule: r.rule,
+      actionClasses: r.actionClasses,
+      confidence: r.confidence,
+      supersedesId: r.supersedesId,
+    }));
+  } catch {
+    /* rules-engine unavailable — leave list empty */
+  }
+
   return {
     windowStartIso: startIso,
     windowEndIso: nowIso,
@@ -178,6 +212,7 @@ export function collectWeeklyDigest(
     processedRawEvents: rawStats.processed ?? 0,
     topRetrievedKus: topKus,
     newEntityCount: newEntities,
+    newProceduralRules: newRules,
     deadLetterCount: counts.deadLetterCandidates,
     staleUnprocessedCount: staleUnprocessed,
     emailsSeenByBrain24h: emailsSeen.count,
@@ -239,6 +274,21 @@ export function formatWeeklyDigestMarkdown(
   }
 
   lines.push(`\n*New entities (${windowLabel}):* ${s.newEntityCount}`);
+
+  if (s.newProceduralRules.length > 0) {
+    lines.push(`\n📐 *New procedural rules (${windowLabel}):*`);
+    for (let i = 0; i < s.newProceduralRules.length; i++) {
+      const r = s.newProceduralRules[i];
+      const cls = r.actionClasses.length > 0 ? r.actionClasses.join(',') : '—';
+      const supersedes = r.supersedesId
+        ? ` (supersedes \`${r.supersedesId.slice(0, 8)}\`)`
+        : '';
+      lines.push(
+        `  ${i + 1}. [${cls}] ${escapeMarkdown(r.rule)}` +
+          ` _(conf ${r.confidence.toFixed(2)})_${supersedes}`,
+      );
+    }
+  }
 
   if (s.reconcileStats) {
     const st = s.reconcileStats as {

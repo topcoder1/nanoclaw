@@ -116,6 +116,7 @@ import {
   formatWeeklyDigestMarkdown,
   startDigestSchedule,
 } from './brain/weekly-digest.js';
+import { startReflectionSchedule } from './brain/procedural-reflect.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1364,6 +1365,11 @@ async function main(): Promise<void> {
 
   const stopAlertsSched = startAlertsSchedule(deliverBrainMessage('alert'));
 
+  // Brain procedural reflection — independent runner, fires Sunday morning.
+  // Failure here does NOT block the digest above; the digest reads emitted
+  // rules from learned_rules at format time regardless of whether this ran.
+  const stopReflectionSched = startReflectionSchedule();
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     try {
@@ -1388,6 +1394,7 @@ async function main(): Promise<void> {
     stopProviderProbe();
     stopDigestSched();
     stopAlertsSched();
+    stopReflectionSched();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
