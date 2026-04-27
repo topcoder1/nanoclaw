@@ -70,10 +70,16 @@ Anti-patterns to avoid (all confirmed by both research passes):
 3. **`/wikilint` command** *(separate PR — design pinned here)*
    - Surface: duplicate KUs (high text similarity, same entity, overlapping `valid_*`), temporal contradictions (same predicate-object, contradictory facts, overlapping windows), orphan entities (<2 KUs), wiki pages whose backing KU set is empty.
    - Output: report only. No autonomous CRUD. Suggests merges; user confirms.
-4. **`procedural_memory` table** *(separate PR — design pinned here)*
-   - Schema: `id, rule_text, evidence (JSON), recorded_at, last_used_at, supersedes_id`.
-   - Population: weekly digest job runs an LLM reflection pass over the last week's `ku_queries` + agent corrections. New rules append; old conflicting rules get `supersedes_id` set.
-   - Use: prepended to agent system prompt at container boot (alongside group `CLAUDE.md`).
+4. **Brain reflection extending the existing `learned_rules` store** *(separate PR — design pinned here)*
+   - **Revised from initial draft.** A standalone `procedural_memory` table in `brain.db` would have been a parallel rule store next to the existing `src/learning/rules-engine.ts` (table `learned_rules` in `messages.db`) — the deep research's #1 anti-pattern (split-brain). Reuse the existing store instead.
+   - **Schema migration** (idempotent ALTER on `learned_rules`):
+     - `supersedes_id TEXT` — points to the rule this one replaces (NULL = original).
+     - `superseded_at TEXT` — when this rule was retired by a newer one (NULL = active).
+     - `subsource TEXT` — discriminator within the existing `source` enum. Brain reflections use `source='agent_reported', subsource='brain_reflection'`. Avoids the SQLite CHECK-constraint rewrite that expanding the `source` enum would require.
+   - **Population**: a weekly job (`src/brain/procedural-reflect.ts`) reads (a) recent `ku_queries`/`ku_retrievals` from `brain.db` and (b) recent `learned_rules WHERE source='user_feedback'` from `messages.db`. Sends a reflection prompt to Haiku 4.5; emits 0–5 rules via existing `addRule()` with `subsource='brain_reflection'`. Cross-DB read is one-way (brain reads messages.db's rules table; messages.db never reads brain.db).
+   - **Supersession**: when emitting a new brain-reflection rule, scan existing `active` brain-reflection rules for textual conflicts (LLM-judge or string heuristic) and stamp the older one's `superseded_at` + the new one's `supersedes_id`.
+   - **Surface**: brain weekly digest gains a "📐 New procedural rules" section listing brain-reflection rules created in the window.
+   - **No prompt injection in v1.** Existing `learning/index.ts:buildRulesBlock` already handles per-group rule injection; brain-reflection rules can opt into that later by setting `groupId=null` (agent-wide). v1 stays digest-surfaced only — first prove the rules are good.
 
 ### Deferred (with re-eval triggers)
 
@@ -161,39 +167,44 @@ Output: a Markdown report posted back to the chat. Each finding includes a "merg
 
 Cadence: same scheduler hook as the existing `add-karpathy-llm-wiki` lint cron (weekly default).
 
-## Procedural memory — design
+## Brain reflection (extending `learned_rules`) — design
 
-### Schema
+### Schema migration
+
+Inline in `src/learning/rules-engine.ts:initRulesStore` (matches the existing `CREATE TABLE IF NOT EXISTS` pattern; idempotent for already-deployed DBs via try-catch ALTER):
 
 ```sql
-CREATE TABLE IF NOT EXISTS procedural_memory (
-  id              TEXT PRIMARY KEY,    -- ULID
-  rule_text       TEXT NOT NULL,
-  evidence        TEXT NOT NULL,        -- JSON array of ku_query.id refs
-  recorded_at     TEXT NOT NULL,
-  last_used_at    TEXT,
-  supersedes_id   TEXT REFERENCES procedural_memory(id),
-  superseded_at   TEXT,
-  active          INTEGER NOT NULL DEFAULT 1
-);
-CREATE INDEX IF NOT EXISTS idx_proc_active ON procedural_memory(active) WHERE active = 1;
+ALTER TABLE learned_rules ADD COLUMN supersedes_id TEXT;
+ALTER TABLE learned_rules ADD COLUMN superseded_at TEXT;
+ALTER TABLE learned_rules ADD COLUMN subsource TEXT;
+CREATE INDEX IF NOT EXISTS idx_learned_rules_active
+  ON learned_rules(superseded_at, subsource)
+  WHERE superseded_at IS NULL;
 ```
+
+The CHECK constraint on `source` stays as-is (`outcome_pattern | user_feedback | agent_reported`). Brain reflections use `source='agent_reported'` with `subsource='brain_reflection'`. The agent is in fact reporting these rules — the discriminator distinguishes the brain-batch source from event-driven agent reports.
 
 ### Population
 
-A weekly job:
+`src/brain/procedural-reflect.ts`:
 
-1. Pulls last 7 days of `ku_queries` + `ku_retrievals`, plus any chat turns where the agent's reply was followed by an obvious correction signal (next user message starts with "no", "actually", or contains a thumbs-down reaction).
-2. Sends them through a Haiku reflection prompt: *"Given these interactions, write 0–5 procedural rules for the agent. Each rule must cite ≥2 specific evidence items. Only emit rules that would not be obvious from a generic system prompt."*
-3. Each new rule is checked against existing active rules — if it contradicts one, mark the older as `superseded_at = now()` and set the new rule's `supersedes_id`.
+1. **Gather signals** (last 7 days):
+   - `ku_queries` rows with `result_count = 0` — knowledge gaps.
+   - `ku_retrievals` rows where the same KU was returned to ≥3 distinct queries — recurring concerns.
+   - `learned_rules WHERE source='user_feedback' AND created_at >= window_start` — explicit user corrections from chat (already captured by `feedback-capture.ts`).
+2. **Reflection prompt** to Haiku 4.5 — same `defaultLlmCaller` pattern as `extract.ts`. Output schema: `{rules: [{rule: string, action_classes: string[], evidence: string[], confidence: number}]}`. Cap at 5 rules per window. Each rule must cite ≥2 evidence items by `ku_queries.id` or `learned_rules.id`.
+3. **Emit** via existing `addRule({source: 'agent_reported', subsource: 'brain_reflection', groupId: null, ...})`. `groupId=null` means agent-wide.
+4. **Supersession**: before insert, fetch active brain-reflection rules whose `action_classes` overlap. Use Haiku-judge (`isContradictory(oldRule, newRule)`) — if true, stamp old rule with `superseded_at = now()` and new rule with `supersedes_id = old.id`. Cap the judge at 5 candidate pairs to bound cost.
 
 ### Surface
 
-v1: rules are surfaced in the weekly digest only. The user reviews, can manually mark `active = 0` to retire. **No automatic system-prompt injection in v1** — first prove the rules are good, then wire them into the agent's container `CLAUDE.md` rendering pass.
+Brain weekly digest gains a "📐 New procedural rules" section that lists rules with `subsource='brain_reflection' AND created_at >= window_start`. Includes rule text, action classes, and supersession status (`supersedes <id>` if applicable).
+
+**No automatic system-prompt injection in v1.** The existing `learning/index.ts:buildRulesBlock` already handles per-group injection — brain-reflection rules can opt into that path later, but v1 stays digest-only until the rule quality is observed for 30+ days.
 
 ### Why this matters (deep research)
 
-Per LangMem and A-MEM, agents that don't develop procedural memory plateau on user-fit quickly. The brain currently encodes *facts* (semantic) and *events* (episodic via raw_events), but not *behaviors*. A 3-month-old brain.db has no record of how I prefer the agent to behave — only what I know.
+Per LangMem and A-MEM, agents that don't develop procedural memory plateau on user-fit quickly. The brain currently encodes *facts* (semantic) and *events* (episodic via raw_events). The existing `learning/` system encodes *behaviors at the group level* from outcome patterns and direct corrections. The missing piece is **batch reflection over query patterns** — looking across a week of `ku_queries` to spot knowledge gaps and recurring concerns that no single chat turn surfaces. That's the LangMem distinction the deep research called out.
 
 ## v1 down payment — `/recall` source citations
 
