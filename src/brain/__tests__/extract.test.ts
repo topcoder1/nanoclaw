@@ -221,6 +221,49 @@ describe('brain/extract — LLM gating', () => {
   });
 });
 
+describe('brain/extract — chat mode bypass', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-extract-chat-'));
+    getBrainDb();
+  });
+  afterEach(() => {
+    _closeBrainDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('chat_single mode bypasses the signal-score gate even on plain chat', async () => {
+    const calls: Array<string> = [];
+    const fakeLlm = vi.fn(async (prompt: string) => {
+      calls.push(prompt);
+      return {
+        claims: [{
+          text: 'Launch moved to next Wednesday',
+          topic_seed: 'launch date',
+          confidence: 0.85,
+        }],
+        inputTokens: 200,
+        outputTokens: 50,
+      };
+    });
+    const claims = await extractPipeline(
+      { text: "ok let's call it — launch = next Wed", mode: 'chat_single' },
+      { llmCaller: fakeLlm as unknown as LlmCaller, day: '2026-04-27' },
+    );
+    expect(fakeLlm).toHaveBeenCalledTimes(1);
+    expect(claims.length).toBeGreaterThan(0);
+    expect(calls[0]).toContain('chat');
+  });
+
+  it('default email mode still gates on signal score', async () => {
+    const fakeLlm = vi.fn();
+    await extractPipeline(
+      { text: 'hi how are you', sender: 'a@b.com' },
+      { llmCaller: fakeLlm as unknown as LlmCaller, day: '2026-04-27' },
+    );
+    expect(fakeLlm).not.toHaveBeenCalled();
+  });
+});
+
 describe('brain/extract — extractPipeline confidence branching', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-extract-pipe-'));
