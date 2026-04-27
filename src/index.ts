@@ -1321,9 +1321,15 @@ async function main(): Promise<void> {
     (label: string) =>
     (md: string): void => {
       const primary = channels.find((c) => c.name.startsWith('telegram'));
-      const mainGroup = Object.entries(registeredGroups).find(
-        ([, g]) => g.isMain,
-      );
+      // Multiple `is_main=1` rows can coexist (one per channel: WhatsApp,
+      // Telegram, Signal). Pick the main group whose JID the telegram
+      // channel actually owns — otherwise we'd hand a WhatsApp JID to
+      // grammy and get `400: chat not found`.
+      const mainGroup = primary
+        ? Object.entries(registeredGroups).find(
+            ([jid, g]) => g.isMain && primary.ownsJid(jid),
+          )
+        : undefined;
       if (primary && mainGroup) {
         void primary
           .sendMessage(mainGroup[0], md)

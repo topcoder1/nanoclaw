@@ -24,6 +24,35 @@ import { renderAgentOutcome, type QaProposal } from './qa-proposal-types.js';
 const REPO = path.resolve('.');
 const PROPOSALS_DIR = path.join(REPO, 'data/qa-proposals');
 
+// Throttle launchctl kickstarts triggered by rapid QA merges. Each restart
+// blackholes the SSE stream for 10–20s while the new process re-handshakes,
+// so back-to-back merges (we've seen 4 in 25 minutes) starve email pushes.
+// Skip the kickstart if one fired recently — the next merge inside the
+// window simply rides on the still-fresh build.
+const KICKSTART_DEBOUNCE_MS = 5 * 60 * 1000;
+const KICKSTART_STAMP_FILE = path.join(REPO, 'data/.qa-last-kickstart');
+
+function shouldKickstart(now = Date.now()): boolean {
+  try {
+    const last = parseInt(fs.readFileSync(KICKSTART_STAMP_FILE, 'utf-8'), 10);
+    if (Number.isFinite(last) && now - last < KICKSTART_DEBOUNCE_MS) {
+      return false;
+    }
+  } catch {
+    /* no stamp yet — first kickstart proceeds */
+  }
+  return true;
+}
+
+function markKickstart(now = Date.now()): void {
+  try {
+    fs.mkdirSync(path.dirname(KICKSTART_STAMP_FILE), { recursive: true });
+    fs.writeFileSync(KICKSTART_STAMP_FILE, String(now));
+  } catch {
+    /* best effort — debounce is just an optimization */
+  }
+}
+
 // Old proposals on disk (pre-shared-types) may be missing the newer
 // fields. Treat anything structural beyond id/worktreePath/branch/
 // testStatus as optional at load time and let the Details renderer
@@ -258,11 +287,21 @@ export async function handleQaCallback(
       return;
     }
     // Build + restart — match what the main commit-flow would do.
+    // Debounced: a kickstart inside the last KICKSTART_DEBOUNCE_MS window is
+    // skipped to avoid SSE/email-push starvation under back-to-back merges.
     try {
       execSync('npm run build', { cwd: REPO, stdio: 'ignore' });
-      execSync(`launchctl kickstart -k gui/$(id -u)/com.nanoclaw`, {
-        stdio: 'ignore',
-      });
+      if (shouldKickstart()) {
+        execSync(`launchctl kickstart -k gui/$(id -u)/com.nanoclaw`, {
+          stdio: 'ignore',
+        });
+        markKickstart();
+      } else {
+        logger.info(
+          { proposalId: p.id },
+          'QA merge: kickstart skipped (within debounce window)',
+        );
+      }
     } catch (err) {
       logger.warn(
         { err, proposalId: p.id },
