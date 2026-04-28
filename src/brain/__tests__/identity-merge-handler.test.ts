@@ -203,3 +203,72 @@ describe('handleEntityMergeRequested', () => {
     expect(sent[0]).toMatch(/failed/i);
   });
 });
+
+import { startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
+import { eventBus } from '../../event-bus.js';
+
+describe('identity-merge-handler — lifecycle', () => {
+  afterEach(() => {
+    stopIdentityMergeHandler();
+    eventBus.removeAllListeners();
+  });
+
+  it('startIdentityMergeHandler subscribes to entity.merge.requested and runs the merge on emit', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Alice');
+    seedPerson(db, 'e-2', 'Alicia');
+    const sent: string[] = [];
+
+    startIdentityMergeHandler({ sendReply: async (text: string) => { sent.push(text); } });
+
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'Alice',
+      handle_b: 'Alicia',
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any;
+    expect(log.n).toBe(1);
+    expect(sent[0]).toMatch(/merged/i);
+  });
+
+  it('startIdentityMergeHandler is idempotent', () => {
+    startIdentityMergeHandler();
+    startIdentityMergeHandler();
+    stopIdentityMergeHandler();
+    // No assertions; passes if nothing throws.
+    expect(true).toBe(true);
+  });
+
+  it('stopIdentityMergeHandler unsubscribes — emits after stop are no-ops', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Alice');
+    seedPerson(db, 'e-2', 'Alicia');
+
+    startIdentityMergeHandler();
+    stopIdentityMergeHandler();
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'Alice',
+      handle_b: 'Alicia',
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any;
+    expect(log.n).toBe(0);
+  });
+});

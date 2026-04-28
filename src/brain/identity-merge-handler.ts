@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { eventBus } from '../event-bus.js';
 import type { EntityMergeRequestedEvent } from '../events.js';
 import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
@@ -149,5 +150,36 @@ export async function handleEntityMergeRequested(
     await reply(
       `claw merge: failed — ${err instanceof Error ? err.message : 'unknown error'}`,
     );
+  }
+}
+
+let unsub: (() => void) | null = null;
+
+export interface IdentityMergeStartOpts {
+  /** Optional reply sender. Wired by future PR; today no-op in production. */
+  sendReply?: (text: string) => Promise<void>;
+}
+
+export function startIdentityMergeHandler(
+  opts: IdentityMergeStartOpts = {},
+): void {
+  if (unsub) return;
+  unsub = eventBus.on('entity.merge.requested', async (evt) => {
+    try {
+      await handleEntityMergeRequested(evt, { sendReply: opts.sendReply });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), evt },
+        'identity-merge-handler: top-level error',
+      );
+    }
+  });
+  logger.info('Identity merge handler started');
+}
+
+export function stopIdentityMergeHandler(): void {
+  if (unsub) {
+    unsub();
+    unsub = null;
   }
 }
