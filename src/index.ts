@@ -14,6 +14,7 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
+  STORE_DIR,
   TIMEZONE,
   TRUST_GATEWAY_PORT,
   PROACTIVE_SUGGESTION_INTERVAL,
@@ -104,15 +105,22 @@ import { handleBrainHealthCommand } from './brain/health.js';
 import { setBrainDriveFetcher } from './brain/drive-resolver.js';
 import {
   setBrainBodyFetcher,
+  setWikiRebuildHandler,
   startBrainIngest,
   stopBrainIngest,
 } from './brain/ingest.js';
 import { productionDriveFetcher } from './drive-fetcher.js';
 import { startProviderProbe } from './brain/provider-probe.js';
+import { CoalescingQueue } from './brain/queue.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
 import { handleBrainStreamCommand } from './brain/stream-command.js';
 import { startReconcileSchedule } from './brain/reconcile.js';
+import { handleWikiCommand } from './brain/wiki-command.js';
+import {
+  materializeEntity,
+  startWikiSynthesisSchedule,
+} from './brain/wiki-writer.js';
 import {
   collectWeeklyDigest,
   formatWeeklyDigestMarkdown,
@@ -1260,6 +1268,34 @@ async function main(): Promise<void> {
   // Brain P0: raw_events capture from email.received. Must start before
   // the SSE/watchers do any emitting so no events are missed.
   startBrainIngest();
+
+  // Phase 3b.4 — wiki rebuild plumbing. The coalescing queue collapses
+  // multi-KU email storms targeting one entity into a single materialize
+  // call. 5-min debounce matches the design (D2). Trigger A (KU insert)
+  // never calls the LLM; that's reserved for the daily synthesis pass.
+  const wikiRebuildQueue = new CoalescingQueue<string>({
+    debounceMs: 5 * 60 * 1000,
+    handler: async (entityId) => {
+      const result = await materializeEntity(entityId, STORE_DIR, {
+        synthesize: false,
+      });
+      if (result.status === 'failed') {
+        logger.warn(
+          { entityId, err: result.err },
+          'wiki rebuild failed (non-fatal — next KU insert will re-enqueue)',
+        );
+      }
+    },
+    onError: (err, entityId) => {
+      logger.warn(
+        { entityId, err: err instanceof Error ? err.message : String(err) },
+        'wiki rebuild handler threw',
+      );
+    },
+  });
+  setWikiRebuildHandler((entityIds) => {
+    for (const id of entityIds) wikiRebuildQueue.enqueue(id);
+  });
   logger.info('Database initialized');
   loadState();
 
@@ -1372,6 +1408,13 @@ async function main(): Promise<void> {
   // rules from learned_rules at format time regardless of whether this ran.
   const stopReflectionSched = startReflectionSchedule();
 
+  // Brain wiki synthesis — daily pass that refreshes cached LLM
+  // blockquotes for entities whose KU set has drifted. Independent of
+  // the on-insert trigger A above (which never calls the LLM).
+  const stopWikiSynthesisSched = startWikiSynthesisSchedule({
+    baseDir: STORE_DIR,
+  });
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     try {
@@ -1397,6 +1440,16 @@ async function main(): Promise<void> {
     stopDigestSched();
     stopAlertsSched();
     stopReflectionSched();
+    stopWikiSynthesisSched();
+    // Drain any pending wiki rebuilds so a SIGTERM doesn't drop edits.
+    try {
+      await wikiRebuildQueue.shutdown();
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'wiki rebuild queue shutdown failed (continuing)',
+      );
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1511,6 +1564,23 @@ async function main(): Promise<void> {
             logger.error({ err, chatJid }, '/recall handler crashed');
           }
         })().catch((err) => logger.error({ err }, '/recall error'));
+        return;
+      }
+
+      // Brain /wiki <entity> — resolves an entity by name or id-prefix,
+      // materializes its wiki page (LLM-refreshing the summary if stale),
+      // and replies with the first ~4KB inline.
+      if (trimmed.startsWith('/wiki')) {
+        (async () => {
+          const args = trimmed.slice('/wiki'.length);
+          try {
+            const reply = await handleWikiCommand(args, { baseDir: STORE_DIR });
+            const ch = findChannel(channels, chatJid);
+            if (ch) await ch.sendMessage(chatJid, reply);
+          } catch (err) {
+            logger.error({ err, chatJid }, '/wiki handler crashed');
+          }
+        })().catch((err) => logger.error({ err }, '/wiki error'));
         return;
       }
 
