@@ -299,9 +299,8 @@ describe('window-flusher', () => {
     });
     noteMessage('discord', 'c8', 'mT', sentAt);
 
-    const { startWindowFlusher, stopWindowFlusher } = await import(
-      '../window-flusher.js'
-    );
+    const { startWindowFlusher, stopWindowFlusher } =
+      await import('../window-flusher.js');
     startWindowFlusher({ tickIntervalMs: 50 });
     await new Promise((r) => setTimeout(r, 200));
     stopWindowFlusher();
