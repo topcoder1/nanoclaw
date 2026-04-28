@@ -197,8 +197,13 @@ export class SignalChannel implements Channel {
 
     const sourceJid = envelope.source ?? envelope.sourceNumber ?? 'unknown';
     const chatId = dataMsg.groupInfo?.groupId ?? sourceJid;
-    const messageId = String(dataMsg.timestamp);
-    const sentAt = new Date(dataMsg.timestamp).toISOString();
+    // For edit/remoteDelete sync envelopes, dataMsg.timestamp is absent
+    // (the inner timestamp lives at editMessage.dataMessage.timestamp /
+    // remoteDelete.timestamp). Fall back to envelope.timestamp so we don't
+    // throw RangeError before reaching the editMessage/remoteDelete branches.
+    const dataMsgTimestamp = dataMsg.timestamp ?? envelope.timestamp;
+    const messageId = String(dataMsgTimestamp);
+    const sentAt = new Date(dataMsgTimestamp).toISOString();
 
     // 1. Reaction → emit save event if emoji matches and not a remove.
     if (dataMsg.reaction) {

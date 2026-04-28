@@ -951,6 +951,118 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     await channel.disconnect();
   });
 
+  // Regression: a Note-to-Self edit arrives as syncMessage.sentMessage with
+  // editMessage nested and no top-level `timestamp`/`message` on sentMessage.
+  // Previously, `new Date(dataMsg.timestamp).toISOString()` ran before the
+  // editMessage branch and threw RangeError, swallowed by the poll-loop
+  // catch — chat.message.edited was never emitted.
+  it('sync editMessage envelope (Note-to-Self shape) emits chat.message.edited even when sentMessage has no top-level timestamp', async () => {
+    const opts = createInboundTestOpts();
+    mockGetChatMessage.mockReturnValue({
+      platform: 'signal',
+      chat_id: '+15551234567',
+      message_id: '1700000000000',
+      sent_at: '2026-04-27T00:00:00.000Z',
+      sender: '+15551234567',
+      text: 'original text',
+    });
+
+    const syncEditEnvelope = {
+      envelope: {
+        source: '+15551234567',
+        sourceNumber: '+15551234567',
+        sourceUuid: 'uuid-self',
+        sourceName: 'Jonathan',
+        sourceDevice: 4,
+        timestamp: 1700000099999,
+        syncMessage: {
+          sentMessage: {
+            destination: '+15551234567',
+            destinationNumber: '+15551234567',
+            destinationUuid: 'uuid-self',
+            editMessage: {
+              targetSentTimestamp: 1700000000000,
+              dataMessage: {
+                timestamp: 1700000099999,
+                message: 'edited text',
+              },
+            },
+          },
+        },
+      },
+      account: '+15551234567',
+    };
+    mockPollResponse(syncEditEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const editedEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.edited',
+    );
+    expect(editedEmits).toHaveLength(1);
+    expect(editedEmits[0][1]).toMatchObject({
+      type: 'chat.message.edited',
+      platform: 'signal',
+      chat_id: '+15551234567',
+      message_id: '1700000000000',
+      new_text: 'edited text',
+    });
+    expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
+  });
+
+  // Regression: same crash class as the sync editMessage case above, but for
+  // remoteDelete that arrives via syncMessage.sentMessage with no top-level
+  // timestamp on sentMessage.
+  it('sync remoteDelete envelope (sentMessage shape) emits chat.message.deleted even when sentMessage has no top-level timestamp', async () => {
+    const opts = createInboundTestOpts();
+    mockGetChatMessage.mockReturnValue({
+      platform: 'signal',
+      chat_id: '+15551234567',
+      message_id: '1700000000000',
+      sent_at: '2026-04-27T00:00:00.000Z',
+      sender: '+15551234567',
+      sender_name: 'Jonathan',
+      text: 'something to be deleted',
+    });
+
+    const syncDeleteEnvelope = {
+      envelope: {
+        source: '+15551234567',
+        sourceNumber: '+15551234567',
+        sourceUuid: 'uuid-self',
+        sourceName: 'Jonathan',
+        sourceDevice: 4,
+        timestamp: 1700000099999,
+        syncMessage: {
+          sentMessage: {
+            destination: '+15551234567',
+            destinationNumber: '+15551234567',
+            destinationUuid: 'uuid-self',
+            remoteDelete: { timestamp: 1700000000000 },
+          },
+        },
+      },
+      account: '+15551234567',
+    };
+    mockPollResponse(syncDeleteEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const deletedEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.deleted',
+    );
+    expect(deletedEmits).toHaveLength(1);
+    expect(deletedEmits[0][1]).toMatchObject({
+      type: 'chat.message.deleted',
+      platform: 'signal',
+      chat_id: '+15551234567',
+      message_id: '1700000000000',
+    });
+    expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
+  });
+
   it('editMessage takes priority over claw save text trigger when edited body starts with "claw save"', async () => {
     const opts = createInboundTestOpts();
     mockGetChatMessage.mockReturnValue({
