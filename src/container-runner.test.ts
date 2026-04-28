@@ -11,6 +11,7 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
+  CONTAINER_STDERR_GRACE_MS: 300000, // 5min default
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
@@ -318,6 +319,56 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
+  });
+
+  it('recovers when stderr goes briefly silent then resumes (gap shorter than stdout idle)', async () => {
+    // Reviewer-flagged edge case: stderr was active, then silent past
+    // STDERR_GRACE, but stdout has not yet hit timeoutMs — must NOT
+    // kill, since the kill condition requires BOTH thresholds. When
+    // stderr resumes, lastStderrAt updates and the agent stays alive.
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Phase 1: stderr active for 10 minutes.
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      fakeProc.stderr.push(`[debug] phase1 ${i}\n`);
+    }
+
+    // Phase 2: 6 minutes of total silence on both streams. Past the
+    // 5-min stderr grace, but stdout idle is still only ~16min (under
+    // the 30:30 timeout) — must NOT kill.
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(timeoutKillFired()).toBe(false);
+
+    // Phase 3: stderr resumes for another 30 minutes.
+    for (let i = 0; i < 30; i++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      fakeProc.stderr.push(`[debug] phase3 ${i}\n`);
+    }
+    // Total runtime ~46min, still under the 61-min hard cap. Should
+    // remain alive throughout because stderr keeps resetting the
+    // alive window.
+    expect(timeoutKillFired()).toBe(false);
+
+    // Eventually emit a result.
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done after recovery',
+      newSessionId: 'sess-recover',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(timeoutKillFired()).toBe(false);
   });
 
   it('normal exit after output resolves as success', async () => {
