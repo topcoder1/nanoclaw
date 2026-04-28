@@ -130,8 +130,13 @@ interface RecentQueryRow {
  * the entity_id as a last resort. The entity_id never produces a useful
  * page title but it's better than throwing — a renamed/incomplete entity
  * still gets a page so /wikilint can flag it.
+ *
+ * Exported so wiki-writer's `rebuildIndex` can apply the identical
+ * fallback chain — without sharing this helper, the page title and the
+ * index link text drift apart whenever an entity has a non-name
+ * identifier (e.g. email-only person, domain-only company).
  */
-function deriveTitle(
+export function deriveTitle(
   entityType: EntityType,
   canonical: Record<string, unknown> | null,
   entityId: string,

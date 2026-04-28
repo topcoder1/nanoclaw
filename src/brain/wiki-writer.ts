@@ -29,6 +29,7 @@ import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
 import {
   ENTITY_NOT_FOUND,
+  deriveTitle,
   renderEntityPage,
   synthesizeEntitySummary,
   type EntityType,
@@ -280,7 +281,8 @@ export async function rebuildIndex(
       lines.push(`## ${TYPE_TO_DIR[row.entity_type]}`, '');
       currentType = row.entity_type;
     }
-    const name = parseName(row.canonical) ?? row.entity_id;
+    const canonical = parseCanonical(row.canonical);
+    const name = deriveTitle(row.entity_type, canonical, row.entity_id);
     const link = `${TYPE_TO_DIR[row.entity_type]}/${row.entity_id}.md`;
     const summary = row.wiki_summary?.trim().split('\n')[0] ?? '';
     lines.push(summary ? `- [${name}](${link}) — ${summary}` : `- [${name}](${link})`);
@@ -290,17 +292,15 @@ export async function rebuildIndex(
   await atomicWrite(path.join(wikiDir, 'index.md'), lines.join('\n'));
 }
 
-function parseName(canonical: string | null): string | null {
+function parseCanonical(
+  canonical: string | null,
+): Record<string, unknown> | null {
   if (!canonical) return null;
   try {
-    const parsed = JSON.parse(canonical) as Record<string, unknown>;
-    if (typeof parsed.name === 'string' && parsed.name.trim().length > 0) {
-      return parsed.name.trim();
-    }
+    return JSON.parse(canonical) as Record<string, unknown>;
   } catch {
-    /* malformed canonical — fall back to entity_id */
+    return null;
   }
-  return null;
 }
 
 /**

@@ -46,6 +46,17 @@ describe('brain/extract — normalize + topic_key', () => {
     expect(topicKey('Foo Bar')).toBe(topicKey('foo bar'));
     expect(topicKey('Foo Bar')).not.toBe(topicKey('baz qux'));
   });
+
+  it('topicKey returns the human-readable normalized phrase, not a hash', () => {
+    // Used as a heading in the wiki layer's "## Facts" section, so it
+    // MUST be readable. Was a SHA256 hash before 2026-04-28.
+    expect(topicKey('Q4 Renewal Pricing')).toBe('q4 renewal pricing');
+    expect(topicKey('  Renewal Discussion  ')).toBe('renewal discussion');
+    // Stopwords still stripped.
+    expect(topicKey('the quick brown fox')).toBe('quick brown fox');
+    // Should not look like a hex hash even for stopword-heavy seeds.
+    expect(topicKey('a and of')).not.toMatch(/^[a-f0-9]{64}$/);
+  });
 });
 
 describe('brain/extract — cheap rules', () => {

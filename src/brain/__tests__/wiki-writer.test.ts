@@ -352,6 +352,38 @@ describe('brain/wiki-writer', () => {
     expect(idx).toContain('Zoe runs comms.');
   });
 
+  it('rebuildIndex falls back to email/domain/slug per EntityType when name is missing', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: '01HEMAIL',
+      entityType: 'person',
+      canonical: { email: 'nobody@example.com' },
+    });
+    seedEntity(db, {
+      entityId: '01HDOMAIN',
+      entityType: 'company',
+      canonical: { domain: 'example.com' },
+    });
+    seedEntity(db, {
+      entityId: '01HRULID',
+      entityType: 'person',
+      canonical: null, // intentionally NULL — must fall back to entity_id
+    });
+
+    await rebuildIndex(tmpDir);
+    const idx = fs.readFileSync(
+      path.join(tmpDir, 'wiki', 'index.md'),
+      'utf-8',
+    );
+
+    // Display name pulled from email / domain when name is missing —
+    // matches the page renderer's deriveTitle fallback chain.
+    expect(idx).toContain('[nobody@example.com]');
+    expect(idx).toContain('[example.com]');
+    // Last-resort fallback when canonical is null.
+    expect(idx).toContain('[01HRULID]');
+  });
+
   // 8. appendLog rotation: pre-fill log.md to >1MB, next append rotates
   it('rotates log.md when it exceeds 1MB before appending', async () => {
     const wikiDir = path.join(tmpDir, 'wiki');

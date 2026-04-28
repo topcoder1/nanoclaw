@@ -187,7 +187,14 @@ export async function createPersonFromEmail(
   const entityId = newId();
   const aliasId = newId();
   const now = new Date().toISOString();
-  const canonical = name ? JSON.stringify({ name, email: normalized }) : null;
+  // Always populate canonical with at least the email — the wiki page
+  // renderer's `deriveTitle` falls back from `name` to `email` per
+  // EntityType, so a NULL canonical produces an unreadable ULID title.
+  // When a name is provided we include it; otherwise email alone is the
+  // most identifying field we have.
+  const canonical = JSON.stringify(
+    name ? { name, email: normalized } : { email: normalized },
+  );
 
   await getWriteQueue().enqueue({
     run: (db) => {
