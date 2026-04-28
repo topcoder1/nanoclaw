@@ -11,6 +11,7 @@ import path from 'path';
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_STDERR_GRACE_MS,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
@@ -1040,7 +1041,7 @@ async function spawnContainer(
     // user-facing emission tripped the timer despite the agent being
     // alive — caused chronic 'Email intelligence trigger failed' alerts
     // on email triggers requiring deep research.
-    const STDERR_GRACE_MS = 5 * 60 * 1000;
+    const STDERR_GRACE_MS = CONTAINER_STDERR_GRACE_MS;
     const HARD_CAP_MS = Math.max(timeoutMs * 2, 60 * 60 * 1000);
     let lastStdoutAt = startTime;
 

@@ -58,6 +58,17 @@ export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
 );
+/**
+ * Window during which stderr activity counts as "agent still alive" for
+ * the container-runner's idle check. Default 5 min — generous enough for
+ * a long-blocking external tool call (e.g. an HTTP request to a slow MCP
+ * server) without keeping a hung container alive forever. Override via
+ * env when a workload regularly produces longer stderr-quiet stretches.
+ */
+export const CONTAINER_STDERR_GRACE_MS = parseInt(
+  process.env.CONTAINER_STDERR_GRACE_MS || '300000',
+  10,
+);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
