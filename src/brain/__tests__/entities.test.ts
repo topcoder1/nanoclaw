@@ -84,6 +84,21 @@ describe('brain/entities', () => {
     expect(rows.n).toBe(1);
   });
 
+  it('createPersonFromEmail without name still populates canonical with email (wiki title fallback)', async () => {
+    const e = await createPersonFromEmail('nameless@example.com');
+    // Canonical must be non-null so the wiki page renderer can fall back
+    // from name → email per EntityType. A NULL canonical here previously
+    // produced unreadable ULID titles like `# 01HALICE` in the wiki.
+    expect(e.canonical).toEqual({ email: 'nameless@example.com' });
+
+    // Verify it's persisted, not just in the returned object.
+    const db = getBrainDb();
+    const row = db
+      .prepare(`SELECT canonical FROM entities WHERE entity_id = ?`)
+      .get(e.entity_id) as { canonical: string };
+    expect(JSON.parse(row.canonical)).toEqual({ email: 'nameless@example.com' });
+  });
+
   it('resolveByEmail returns the created entity exactly', async () => {
     const created = await createPersonFromEmail('carol@example.com', 'Carol');
     const resolved = resolveByEmail('carol@example.com');

@@ -21,11 +21,13 @@
  *   0.4 – 0.7    → KU stored, needs_review = 1
  *   < 0.4        → dropped
  *
- * topic_key: SHA256 of normalize(topic_seed). normalize = lowercase, drop
- * ~50 common English stopwords, truncate to 128 chars. Deterministic.
+ * topic_key: normalize(topic_seed). normalize = lowercase, drop ~50
+ * common English stopwords, truncate to 128 chars. Deterministic AND
+ * human-readable — surfaced as a heading in the wiki layer's
+ * `## Facts` section. (This was a SHA256 hash before 2026-04-28;
+ * existing rows in production retain their hash keys and re-extract
+ * naturally on supersede / reprocess.)
  */
-
-import crypto from 'crypto';
 
 import type Database from 'better-sqlite3';
 
@@ -39,7 +41,7 @@ import { newId } from './ulid.js';
 export interface Claim {
   text: string;
   topic_seed: string;
-  topic_key: string; // sha256(normalize(topic_seed))
+  topic_key: string; // normalize(topic_seed) — human-readable
   entities_mentioned: EntityMention[];
   confidence: number; // 0–1
   needs_review: boolean;
@@ -164,8 +166,7 @@ export function normalizeTopic(seed: string): string {
 }
 
 export function topicKey(seed: string): string {
-  const normalized = normalizeTopic(seed);
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+  return normalizeTopic(seed);
 }
 
 // --- Tier 1: cheap rules --------------------------------------------------
