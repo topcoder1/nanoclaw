@@ -36,6 +36,7 @@ import { readEnvFile } from './env.js';
 import { ensureMemoryDirs } from './memory/shared/paths.js';
 import { regenerateIndex } from './memory/shared/store.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { refreshGmailTokens } from './gmail-token-refresh.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
@@ -250,7 +251,12 @@ function buildVolumeMounts(
       mounts.push({
         hostPath: gmailDir,
         containerPath: `/home/node/${gd.containerDir}`,
-        readonly: false, // MCP may need to refresh OAuth tokens
+        // Read-only: the host owns OAuth lifecycle via gmail-token-refresh.ts.
+        // A compromised in-container agent (e.g. via prompt injection from an
+        // email body) cannot overwrite credentials.json or exfiltrate by
+        // writing attacker tokens. The pre-spawn staleness check below
+        // guarantees the access token is fresh enough to last a normal session.
+        readonly: true,
         optional: true,
       });
     } else if (fs.existsSync(gmailDir)) {
@@ -741,6 +747,52 @@ async function buildContainerArgs(
   return { args, oauthToken, envFilePath };
 }
 
+/**
+ * If any Gmail credentials.json is older than this, force a refresh before
+ * spawning. Access tokens last ~1 hour; refreshing at 30 min keeps a generous
+ * margin so a normal-length agent session always has a valid access token.
+ * Containers mount the gmail dirs read-only — they cannot refresh themselves,
+ * so the host must keep these files current.
+ */
+const GMAIL_STALENESS_THRESHOLD_MS = 30 * 60 * 1000;
+
+async function ensureFreshGmailTokens(): Promise<void> {
+  const homeDir = os.homedir();
+  const gmailDirs = [
+    '.gmail-mcp',
+    '.gmail-mcp-jonathan',
+    '.gmail-mcp-attaxion',
+    '.gmail-mcp-dev',
+  ];
+  let stale = false;
+  for (const dir of gmailDirs) {
+    const credsPath = path.join(homeDir, dir, 'credentials.json');
+    if (!fs.existsSync(credsPath)) continue;
+    const ageMs = Date.now() - fs.statSync(credsPath).mtimeMs;
+    if (ageMs > GMAIL_STALENESS_THRESHOLD_MS) {
+      stale = true;
+      break;
+    }
+  }
+  if (!stale) return;
+  try {
+    const result = await refreshGmailTokens();
+    if (result.status === 'error') {
+      logger.warn(
+        { summary: result.summary },
+        'Pre-spawn Gmail refresh failed — container may see stale tokens',
+      );
+    } else {
+      logger.debug({ summary: result.summary }, 'Pre-spawn Gmail refresh ok');
+    }
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Pre-spawn Gmail refresh threw — continuing with existing tokens',
+    );
+  }
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -759,6 +811,10 @@ export async function runContainerAgent(
       'shared memory init failed (continuing without it)',
     );
   }
+
+  // Refresh Gmail tokens on the host if they're stale, since the container
+  // mounts ~/.gmail-mcp* read-only and cannot refresh in-flight.
+  await ensureFreshGmailTokens();
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

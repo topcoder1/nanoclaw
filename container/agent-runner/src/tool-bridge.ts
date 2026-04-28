@@ -44,8 +44,13 @@ export async function checkTrustWithPolling(
     });
     if (!res.ok) return { allowed: false, error: `Trust gateway returned ${res.status}` };
     evaluateResult = await res.json() as typeof evaluateResult;
-  } catch {
-    return { allowed: true }; // fail open if gateway unreachable
+  } catch (err) {
+    // Fail closed: an unreachable gateway must not be a free pass for write/transact ops.
+    // If this fires repeatedly, the host trust gateway is down — surface that loudly via logs
+    // and let the failure-escalator catch the resulting tool errors.
+    const reason = err instanceof Error ? err.message : String(err);
+    log(`Trust gateway unreachable (${reason}) — failing closed for ${toolName}`);
+    return { allowed: false, error: `trust gateway unreachable: ${reason}` };
   }
 
   if (evaluateResult.decision === 'approved') return { allowed: true };

@@ -2952,23 +2952,53 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
   });
+  // Eager startup refresh so the first container after launch sees fresh
+  // tokens. Containers mount the gmail dirs read-only and rely on the host
+  // owning the OAuth lifecycle — they cannot self-heal a stale token.
+  void refreshGmailTokens()
+    .then((result) => {
+      if (result.status === 'ok') {
+        logger.info({ summary: result.summary }, 'Gmail tokens fresh at startup');
+      } else if (result.status !== 'missing') {
+        logger.warn(
+          { summary: result.summary },
+          'Startup Gmail refresh did not succeed — loop will retry shortly',
+        );
+      }
+    })
+    .catch((err) =>
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Startup Gmail refresh threw',
+      ),
+    );
+
   // Background Gmail token refresh: tokens expire every 60 min, refresh every 45 min.
   startGmailRefreshLoop({
     onAuthExpired: (summary) => {
-      // Alert via the main group's channel
+      // Alert via the main group's channel.
+      // The summary may indicate either (a) a permanent auth failure that
+      // requires the user to re-run the OAuth flow, or (b) a transient
+      // failure (script crashed, network blip, etc.). We surface both so the
+      // user can decide whether to act — silent failures here are exactly
+      // the shape of "agents start sending stale-token errors and nobody
+      // notices for hours" that we want to avoid.
       const mainJid = Object.keys(registeredGroups).find(
         (jid) => registeredGroups[jid].isMain,
       );
       if (!mainJid) return;
       const channel = findChannel(channels, mainJid);
       if (!channel) return;
+      const looksLikeAuthExpired = /invalid_grant|unauthorized|revoked|reauth/i.test(
+        summary,
+      );
+      const message = looksLikeAuthExpired
+        ? `⚠️ Gmail auth needs re-authorization.\n\nRun on your Mac:\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n\nDetails: ${summary}`
+        : `⚠️ Gmail token refresh failing on host.\n\nThis is not yet a re-auth issue, but containers will start seeing stale tokens within ~30 minutes if it persists.\n\nDetails: ${summary}`;
       channel
-        .sendMessage(
-          mainJid,
-          `⚠️ Gmail auth needs re-authorization.\n\nRun on your Mac:\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n\nDetails: ${summary}`,
-        )
+        .sendMessage(mainJid, message)
         .catch((err) =>
-          logger.warn({ err }, 'Failed to send Gmail auth alert'),
+          logger.warn({ err }, 'Failed to send Gmail refresh alert'),
         );
     },
   });

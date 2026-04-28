@@ -633,6 +633,13 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Cap turns per query to bound runaway loops. A typical message takes
+  // single-digit turns; 100 leaves comfortable headroom for complex multi-step
+  // tasks while preventing the 30-hour-unattended pattern that wiped a
+  // production database in the PocketOS incident (see brain/research notes).
+  const maxTurnsRaw = process.env.NANOCLAW_AGENT_MAX_TURNS;
+  const maxTurns = maxTurnsRaw ? Number.parseInt(maxTurnsRaw, 10) : 100;
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -641,6 +648,7 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
       resume: sessionId,
       resumeSessionAt: resumeAt,
       maxThinkingTokens: 16384,
+      maxTurns: Number.isFinite(maxTurns) && maxTurns > 0 ? maxTurns : 100,
       systemPrompt: globalClaudeMd
         ? {
             type: 'preset' as const,

@@ -10,10 +10,24 @@ describe('tool-bridge', () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-tools-test-'));
     fs.mkdirSync(path.join(tempDir, 'messages'), { recursive: true });
     fs.mkdirSync(path.join(tempDir, 'tasks'), { recursive: true });
+
+    // Stub fetch so trust gateway calls return approved. Without a stub, fetch
+    // throws (no gateway in tests) and the bridge correctly fails closed —
+    // which would block the IPC-write paths these tests are designed to cover.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ decision: 'approved' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.unstubAllGlobals();
   });
 
   it('buildIpcTools returns tool definitions with correct names', async () => {
@@ -81,5 +95,30 @@ describe('tool-bridge', () => {
       fs.readFileSync(path.join(tempDir, 'messages', files[0]), 'utf-8'),
     );
     expect(data.type).toBe('learn_feedback');
+  });
+
+  it('fails closed when trust gateway is unreachable (does not silently allow)', async () => {
+    // Override the approve-everything stub with one that simulates network failure.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      }),
+    );
+
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
+    const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
+    const result = await tools.send_message.execute(
+      { text: 'should not be sent' },
+      { toolCallId: 'tc-fail', messages: [], abortSignal: undefined as any },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/trust gateway unreachable/i);
+
+    // No IPC file should have been written
+    const files = fs.readdirSync(path.join(tempDir, 'messages'));
+    expect(files).toHaveLength(0);
   });
 });
