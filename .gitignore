@@ -21,6 +21,7 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+*.bak
 
 # Temp files
 .tmp-*
@@ -31,6 +32,10 @@ groups/global/*
 # IDE
 .idea/
 .vscode/
+
+# Concurrent agent worktrees + assistant local state
+.claude/worktrees/
+.claire/
 
 # Skills system (local per-installation state)
 .nanoclaw/
