@@ -28,7 +28,10 @@
 
 import type Database from 'better-sqlite3';
 
+import { logger } from '../logger.js';
+
 import { escapeMarkdown } from './markdown.js';
+import { logCost } from './metrics.js';
 
 // --- Public types ----------------------------------------------------------
 
@@ -409,4 +412,281 @@ export function renderEntityPage(
     markdown,
     liveKuCount: liveCount,
   };
+}
+
+// ===========================================================================
+// Phase 3a.3 — LLM summary writer + cache
+// ===========================================================================
+//
+// Writes the human-prose blockquote that sits between the title and the
+// "## Facts" section. Decoupled from renderEntityPage so that:
+//   - The deterministic projection (3a.2) can be tested without an LLM.
+//   - The synthesis is async and writes to disk; the render is sync and
+//     reads only.
+//   - Each can be triggered on its own cadence (render = on-insert,
+//     synthesize = daily pass).
+
+/**
+ * Caller for the summary LLM. Mirrors the shape of
+ * `procedural-reflect.ts:ReflectionLlmCaller` so tests can stub identically
+ * and so we can reuse `estimateHaikuCostUsd` plumbing if/when we
+ * consolidate.
+ */
+export type SummaryLlmCaller = (prompt: string) => Promise<{
+  summary: string;
+  inputTokens: number;
+  outputTokens: number;
+}>;
+
+export interface SynthesisInput {
+  entityId: string;
+  db: Database.Database;
+  /** Inject for tests / cost gating. Defaults to the real Haiku caller. */
+  llm?: SummaryLlmCaller;
+  /** Override clock for determinism. ISO. */
+  nowIso?: string;
+  /**
+   * Cap KUs fed to the LLM prompt. Bounds input cost — default 32 covers
+   * typical entities while keeping a Haiku call comfortably under 2K
+   * input tokens even with verbose KU text.
+   */
+  maxKusInPrompt?: number;
+}
+
+/**
+ * Outcome of a synthesis attempt:
+ *   - 'synthesized' — LLM was called, `wiki_summary` + cache stamps
+ *                     written. Most expensive case.
+ *   - 'reused'      — cache was still valid (recent enough AND ku_count
+ *                     not drifted enough), no LLM call, no DB write.
+ *   - 'skipped'     — entity has no KUs (nothing for the LLM to summarize)
+ *                     OR entity_id doesn't exist. Cache stamps are NOT
+ *                     written, so a future call after KUs land will
+ *                     correctly trigger a fresh synthesis.
+ */
+export type SynthesisOutcome = 'synthesized' | 'reused' | 'skipped';
+
+/** Regen if last synthesis was more than this long ago. 7 days per design. */
+const SYNTHESIS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Regen if live ku_count drifted by more than this fraction. 20% per design. */
+const KU_DRIFT_THRESHOLD = 0.2;
+
+/**
+ * Cache invalidation per design § "Cache invalidation rule":
+ *   needsRegen =
+ *     last_synthesis_at IS NULL
+ *     OR (now - last_synthesis_at) > 7 days
+ *     OR abs(liveKuCount - cachedKuCount) / max(1, cachedKuCount) > 0.20
+ *
+ * Exported for unit-testing the predicate directly without standing up a
+ * full Haiku stub — and so a future caller can ask "is the cache stale?"
+ * without paying for synthesis.
+ */
+export function shouldRegenerateSummary(opts: {
+  lastSynthesisAt: string | null;
+  cachedKuCount: number | null;
+  liveKuCount: number;
+  nowIso: string;
+}): boolean {
+  if (!opts.lastSynthesisAt) return true;
+  const lastMs = Date.parse(opts.lastSynthesisAt);
+  if (!Number.isFinite(lastMs)) return true;
+  const nowMs = Date.parse(opts.nowIso);
+  if (Number.isFinite(nowMs) && nowMs - lastMs > SYNTHESIS_STALE_MS) {
+    return true;
+  }
+  const cached = opts.cachedKuCount ?? 0;
+  const drift = Math.abs(opts.liveKuCount - cached) / Math.max(1, cached);
+  if (drift > KU_DRIFT_THRESHOLD) return true;
+  return false;
+}
+
+/**
+ * Build the summary prompt. Bounded by maxKusInPrompt (default 32, sorted
+ * by valid_from DESC). Prompt asks for 2-4 plain sentences and explicitly
+ * forbids markdown headers / bullets / JSON so the output drops cleanly
+ * into the blockquote.
+ *
+ * Exported for testability — callers shouldn't wire this directly.
+ */
+export function buildSummaryPrompt(input: {
+  title: string;
+  entityType: EntityType;
+  canonical: Record<string, unknown> | null;
+  kus: Array<{ text: string; validFrom: string }>;
+}): string {
+  const lines: string[] = [
+    `You are summarizing what is known about a single ${input.entityType} based on extracted facts from emails.`,
+    `Subject: ${input.title}`,
+  ];
+  if (input.canonical) {
+    const interesting = Object.entries(input.canonical)
+      .filter(([k, v]) => k !== 'name' && typeof v === 'string')
+      .map(([k, v]) => `${k}=${String(v)}`);
+    if (interesting.length > 0) {
+      lines.push(`Identifiers: ${interesting.join(', ')}`);
+    }
+  }
+  lines.push(
+    '',
+    'Facts (most recent first):',
+    ...input.kus.map((k) => `  - [${k.validFrom.slice(0, 10)}] ${k.text}`),
+    '',
+    'Write 2 to 4 plain sentences summarizing the current state. Lead with the most decision-useful information. No bullet lists, no markdown headers, no JSON. Output only the summary text.',
+  );
+  return lines.join('\n');
+}
+
+/** Haiku 4.5 pricing — USD per 1M tokens. Mirrors procedural-reflect.ts. */
+const HAIKU_INPUT_PER_MILLION = 1.0;
+const HAIKU_OUTPUT_PER_MILLION = 5.0;
+
+function estimateHaikuCostUsd(
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  return (
+    (inputTokens / 1_000_000) * HAIKU_INPUT_PER_MILLION +
+    (outputTokens / 1_000_000) * HAIKU_OUTPUT_PER_MILLION
+  );
+}
+
+/**
+ * Default Haiku caller. Same `@ai-sdk/anthropic` plumbing as
+ * `procedural-reflect.ts:defaultReflectionLlmCaller`. Writes one
+ * `cost_log` row per call (operation='extract' — Haiku usage shares the
+ * extraction cost bucket; we don't add a separate 'wiki_summary' op
+ * because it'd require another `CostOperation` enum widening for ~$3/yr
+ * of spend). Cost-log failure is non-fatal.
+ */
+export const defaultSummaryLlmCaller: SummaryLlmCaller = async (prompt) => {
+  const { generateText } = await import('ai');
+  const { createAnthropic } = await import('@ai-sdk/anthropic');
+  const { readEnvValue } = await import('../env.js');
+  const apiKey = readEnvValue('ANTHROPIC_API_KEY');
+  const anthropic = createAnthropic({
+    apiKey: apiKey ?? '',
+    baseURL:
+      readEnvValue('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com/v1',
+  });
+  const model = anthropic('claude-haiku-4-5-20251001');
+  const result = await generateText({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    // Cap matches the design (4-sentence summary). 256 tokens ≈ 6-8
+    // sentences; a 4-sentence target plus model overhead lands well
+    // inside the cap without truncation.
+    maxOutputTokens: 256,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const usage = (result as any).usage ?? {};
+  const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
+  try {
+    logCost({
+      provider: 'anthropic',
+      operation: 'extract',
+      units: inputTokens + outputTokens,
+      costUsd: estimateHaikuCostUsd(inputTokens, outputTokens),
+    });
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'wiki-projection: cost_log write failed (non-fatal)',
+    );
+  }
+  return {
+    summary: result.text.trim(),
+    inputTokens,
+    outputTokens,
+  };
+};
+
+/**
+ * Synthesize (or reuse) the LLM summary for one entity. Writes
+ * `entities.wiki_summary`, `last_synthesis_at`, and
+ * `ku_count_at_last_synthesis` on success. Idempotent under cache —
+ * calling twice in quick succession costs one LLM call, not two.
+ *
+ * Errors from the LLM are caught and logged but never thrown; the
+ * function returns 'reused' with the existing cache (or 'skipped' if no
+ * cache exists yet). This way the daily synthesizer cron can fail one
+ * entity without blowing up the whole pass.
+ */
+export async function synthesizeEntitySummary(
+  input: SynthesisInput,
+): Promise<SynthesisOutcome> {
+  const { db, entityId } = input;
+  const llm = input.llm ?? defaultSummaryLlmCaller;
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const maxKus = input.maxKusInPrompt ?? 32;
+
+  const entity = loadEntity(db, entityId);
+  if (!entity) return 'skipped';
+
+  const liveCount = liveKuCount(db, entityId);
+  if (liveCount === 0) return 'skipped';
+
+  const stale = shouldRegenerateSummary({
+    lastSynthesisAt: entity.last_synthesis_at,
+    cachedKuCount: entity.ku_count_at_last_synthesis,
+    liveKuCount: liveCount,
+    nowIso,
+  });
+  if (!stale) return 'reused';
+
+  const canonical = entity.canonical
+    ? (() => {
+        try {
+          return JSON.parse(entity.canonical!) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+  const title = deriveTitle(entity.entity_type, canonical, entity.entity_id);
+  const kus = loadFacts(db, entityId, maxKus).map((k) => ({
+    text: k.text,
+    validFrom: k.valid_from,
+  }));
+
+  let summary: string;
+  try {
+    const out = await llm(
+      buildSummaryPrompt({
+        title,
+        entityType: entity.entity_type,
+        canonical,
+        kus,
+      }),
+    );
+    summary = out.summary.trim();
+    if (summary.length === 0) {
+      logger.warn(
+        { entityId },
+        'wiki-projection: LLM returned empty summary — keeping existing cache',
+      );
+      return entity.last_synthesis_at ? 'reused' : 'skipped';
+    }
+  } catch (err) {
+    logger.warn(
+      { entityId, err: err instanceof Error ? err.message : String(err) },
+      'wiki-projection: summary LLM call failed — keeping existing cache',
+    );
+    return entity.last_synthesis_at ? 'reused' : 'skipped';
+  }
+
+  // Single UPDATE writes all three cache fields atomically. Skipping a
+  // transaction on purpose — one row, three columns, SQLite UPDATE is
+  // already atomic at the row level.
+  db.prepare(
+    `UPDATE entities
+        SET wiki_summary = ?,
+            last_synthesis_at = ?,
+            ku_count_at_last_synthesis = ?,
+            updated_at = ?
+      WHERE entity_id = ?`,
+  ).run(summary, nowIso, liveCount, nowIso, entityId);
+
+  return 'synthesized';
 }

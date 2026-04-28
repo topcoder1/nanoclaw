@@ -24,8 +24,12 @@ import type Database from 'better-sqlite3';
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import {
   ENTITY_NOT_FOUND,
+  buildSummaryPrompt,
   renderEntityPage,
+  shouldRegenerateSummary,
+  synthesizeEntitySummary,
   type EntityType,
+  type SummaryLlmCaller,
 } from '../wiki-projection.js';
 
 const FIXED_NOW = '2026-04-27T12:00:00Z';
@@ -547,5 +551,404 @@ describe('brain/wiki-projection — renderEntityPage', () => {
       .split('\n')
       .filter((l) => l.match(/^- 2026-\d{2}-\d{2} — `query/));
     expect(queryLines).toHaveLength(2);
+  });
+});
+
+describe('brain/wiki-projection — shouldRegenerateSummary', () => {
+  const NOW = '2026-04-27T12:00:00Z';
+
+  it('regenerates when there is no prior synthesis', () => {
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: null,
+        cachedKuCount: null,
+        liveKuCount: 5,
+        nowIso: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it('reuses when synthesis is fresh and ku count is unchanged', () => {
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z', // 1 day ago
+        cachedKuCount: 10,
+        liveKuCount: 10,
+        nowIso: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it('regenerates when last synthesis is older than 7 days', () => {
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-19T11:00:00Z', // 8 days ago
+        cachedKuCount: 10,
+        liveKuCount: 10,
+        nowIso: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it('regenerates when ku count drifted >20% (gain)', () => {
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z',
+        cachedKuCount: 10,
+        liveKuCount: 13, // 30% gain
+        nowIso: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it('regenerates when ku count drifted >20% (loss, e.g. supersession)', () => {
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z',
+        cachedKuCount: 10,
+        liveKuCount: 7, // 30% loss
+        nowIso: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not regenerate at exactly the 20% drift boundary', () => {
+    // 20% gain — strictly greater required, equal is not enough.
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z',
+        cachedKuCount: 10,
+        liveKuCount: 12,
+        nowIso: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it('regenerates on first KU when cachedKuCount is NULL but lastSynthesisAt is recent (degenerate state)', () => {
+    // This shouldn't happen in practice but be permissive — any drift
+    // from "0 cached" toward live count > 0 should regen.
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z',
+        cachedKuCount: null,
+        liveKuCount: 5,
+        nowIso: NOW,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('brain/wiki-projection — buildSummaryPrompt', () => {
+  it('embeds title, type, and KU dates in chronological cue order', () => {
+    const prompt = buildSummaryPrompt({
+      title: 'Alice Smith',
+      entityType: 'person',
+      canonical: { name: 'Alice Smith', email: 'alice@acme.co' },
+      kus: [
+        { text: 'Recent fact', validFrom: '2026-04-26T10:00:00Z' },
+        { text: 'Older fact', validFrom: '2026-04-15T10:00:00Z' },
+      ],
+    });
+    expect(prompt).toContain('Subject: Alice Smith');
+    expect(prompt).toContain('person');
+    expect(prompt).toContain('email=alice@acme.co');
+    expect(prompt).toContain('[2026-04-26] Recent fact');
+    expect(prompt).toContain('[2026-04-15] Older fact');
+    expect(prompt).toMatch(/2 to 4 plain sentences/);
+    // Must not invite markdown that would corrupt the blockquote.
+    expect(prompt).toMatch(/No bullet lists, no markdown headers/);
+  });
+
+  it('omits the Identifiers line when canonical is null or only has name', () => {
+    const noCanon = buildSummaryPrompt({
+      title: 'Bare',
+      entityType: 'topic',
+      canonical: null,
+      kus: [{ text: 'x', validFrom: '2026-04-20T00:00:00Z' }],
+    });
+    expect(noCanon).not.toContain('Identifiers:');
+
+    const nameOnly = buildSummaryPrompt({
+      title: 'Just a name',
+      entityType: 'person',
+      canonical: { name: 'Just a name' },
+      kus: [{ text: 'x', validFrom: '2026-04-20T00:00:00Z' }],
+    });
+    expect(nameOnly).not.toContain('Identifiers:');
+  });
+});
+
+describe('brain/wiki-projection — synthesizeEntitySummary', () => {
+  const NOW = '2026-04-27T12:00:00Z';
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-wiki-syn-'));
+  });
+
+  afterEach(() => {
+    _closeBrainDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns "skipped" for an unknown entity_id without calling the LLM', async () => {
+    const db = getBrainDb();
+    const llm = vi.fn() as unknown as SummaryLlmCaller;
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'does-not-exist',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('skipped');
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it('returns "skipped" for an entity with zero KUs without calling the LLM', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-empty',
+      entityType: 'person',
+      canonical: { name: 'No Facts Yet' },
+    });
+    const llm = vi.fn() as unknown as SummaryLlmCaller;
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-empty',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('skipped');
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it('synthesizes on first call and writes wiki_summary + cache stamps', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-fresh',
+      entityType: 'person',
+      canonical: { name: 'Fresh Subject', email: 'f@x.co' },
+    });
+    seedKu(db, {
+      id: 'ku-fresh-1',
+      text: 'Closed Q4 deal.',
+      entityId: 'p-fresh',
+      validFrom: '2026-04-20T10:00:00Z',
+    });
+    seedKu(db, {
+      id: 'ku-fresh-2',
+      text: 'Joined the call from Berlin.',
+      entityId: 'p-fresh',
+      validFrom: '2026-04-15T10:00:00Z',
+    });
+
+    let receivedPrompt = '';
+    const llm: SummaryLlmCaller = vi.fn(async (prompt: string) => {
+      receivedPrompt = prompt;
+      return {
+        summary: 'Fresh closed Q4. Based out of Berlin.',
+        inputTokens: 200,
+        outputTokens: 30,
+      };
+    });
+
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-fresh',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('synthesized');
+    expect(llm).toHaveBeenCalledOnce();
+    expect(receivedPrompt).toContain('Subject: Fresh Subject');
+    expect(receivedPrompt).toContain('email=f@x.co');
+
+    const row = db
+      .prepare(
+        `SELECT wiki_summary, last_synthesis_at, ku_count_at_last_synthesis
+           FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-fresh') as {
+      wiki_summary: string;
+      last_synthesis_at: string;
+      ku_count_at_last_synthesis: number;
+    };
+    expect(row.wiki_summary).toBe('Fresh closed Q4. Based out of Berlin.');
+    expect(row.last_synthesis_at).toBe(NOW);
+    expect(row.ku_count_at_last_synthesis).toBe(2);
+  });
+
+  it('returns "reused" when cache is fresh and ku_count is stable, no LLM call', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-cached',
+      entityType: 'person',
+      canonical: { name: 'Cached' },
+      lastSynthesisAt: '2026-04-26T12:00:00Z',
+      kuCountAtLastSynthesis: 2,
+      wikiSummary: 'Stable cached summary.',
+    });
+    seedKu(db, { id: 'k1', text: 'a', entityId: 'p-cached' });
+    seedKu(db, { id: 'k2', text: 'b', entityId: 'p-cached' });
+
+    const llm = vi.fn() as unknown as SummaryLlmCaller;
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-cached',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('reused');
+    expect(llm).not.toHaveBeenCalled();
+
+    // Cache is unchanged.
+    const summary = (
+      db
+        .prepare(`SELECT wiki_summary FROM entities WHERE entity_id = ?`)
+        .get('p-cached') as { wiki_summary: string }
+    ).wiki_summary;
+    expect(summary).toBe('Stable cached summary.');
+  });
+
+  it('regenerates when ku_count drifted >20% since last synthesis', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-grown',
+      entityType: 'person',
+      canonical: { name: 'Grown' },
+      lastSynthesisAt: '2026-04-26T12:00:00Z',
+      kuCountAtLastSynthesis: 10,
+      wikiSummary: 'Stale summary based on 10 facts.',
+    });
+    // Live count is 13 → 30% gain → trigger
+    for (let i = 0; i < 13; i++) {
+      seedKu(db, {
+        id: `k-${i}`,
+        text: `fact ${i}`,
+        entityId: 'p-grown',
+      });
+    }
+    const llm: SummaryLlmCaller = vi.fn(async () => ({
+      summary: 'Updated summary based on 13 facts.',
+      inputTokens: 300,
+      outputTokens: 40,
+    }));
+
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-grown',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('synthesized');
+
+    const row = db
+      .prepare(
+        `SELECT wiki_summary, ku_count_at_last_synthesis FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-grown') as { wiki_summary: string; ku_count_at_last_synthesis: number };
+    expect(row.wiki_summary).toContain('13 facts');
+    expect(row.ku_count_at_last_synthesis).toBe(13);
+  });
+
+  it('keeps existing cache and returns "reused" when LLM throws (degraded)', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-llm-fail',
+      entityType: 'person',
+      canonical: { name: 'Has Cache' },
+      lastSynthesisAt: '2026-04-15T12:00:00Z', // stale (>7d) so regen would fire
+      kuCountAtLastSynthesis: 1,
+      wikiSummary: 'Old cached summary.',
+    });
+    seedKu(db, { id: 'k', text: 'x', entityId: 'p-llm-fail' });
+
+    const llm: SummaryLlmCaller = vi.fn(async () => {
+      throw new Error('upstream timeout');
+    });
+
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-llm-fail',
+      llm,
+      nowIso: NOW,
+    });
+    // LLM failed but the entity HAS prior cache, so we degrade to reused
+    // rather than wiping it. The next pass will retry.
+    expect(outcome).toBe('reused');
+
+    const row = db
+      .prepare(
+        `SELECT wiki_summary, last_synthesis_at FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-llm-fail') as {
+      wiki_summary: string;
+      last_synthesis_at: string;
+    };
+    // Old cache survives — no overwrite, no stamp update.
+    expect(row.wiki_summary).toBe('Old cached summary.');
+    expect(row.last_synthesis_at).toBe('2026-04-15T12:00:00Z');
+  });
+
+  it('returns "skipped" when LLM throws AND there is no prior cache', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-no-cache',
+      entityType: 'person',
+      canonical: { name: 'No Cache' },
+    });
+    seedKu(db, { id: 'k', text: 'x', entityId: 'p-no-cache' });
+
+    const llm: SummaryLlmCaller = vi.fn(async () => {
+      throw new Error('upstream timeout');
+    });
+
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-no-cache',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('skipped');
+    // No fields were written.
+    const row = db
+      .prepare(
+        `SELECT wiki_summary, last_synthesis_at FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-no-cache') as {
+      wiki_summary: string | null;
+      last_synthesis_at: string | null;
+    };
+    expect(row.wiki_summary).toBeNull();
+    expect(row.last_synthesis_at).toBeNull();
+  });
+
+  it('treats an empty LLM response as failure (does not write empty cache)', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-empty-resp',
+      entityType: 'person',
+      canonical: { name: 'Empty Response' },
+    });
+    seedKu(db, { id: 'k', text: 'x', entityId: 'p-empty-resp' });
+
+    const llm: SummaryLlmCaller = vi.fn(async () => ({
+      summary: '   ',
+      inputTokens: 50,
+      outputTokens: 0,
+    }));
+
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-empty-resp',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('skipped');
+    const row = db
+      .prepare(
+        `SELECT wiki_summary FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-empty-resp') as { wiki_summary: string | null };
+    expect(row.wiki_summary).toBeNull();
   });
 });
