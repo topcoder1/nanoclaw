@@ -20,9 +20,7 @@ describe('brain/markdown — escapeMarkdown', () => {
     expect(escapeMarkdown('[External] Action required')).toBe(
       '\\[External\\] Action required',
     );
-    expect(escapeMarkdown('Closing paren) here')).toBe(
-      'Closing paren\\) here',
-    );
+    expect(escapeMarkdown('Closing paren) here')).toBe('Closing paren\\) here');
     expect(escapeMarkdown('(parenthetical aside)')).toBe(
       '\\(parenthetical aside\\)',
     );
