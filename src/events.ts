@@ -806,6 +806,22 @@ export interface ChatMessageDeletedEvent extends NanoClawEvent {
   deleted_at: string;
 }
 
+/**
+ * Emitted when an operator types `claw merge <handle-a> <handle-b>` in an
+ * opted-in chat. The brain-side handler resolves both handles to entity_ids
+ * via entity_aliases / canonical name lookup, calls mergeEntities, and
+ * sends an ack reply to the chat.
+ */
+export interface EntityMergeRequestedEvent extends NanoClawEvent {
+  type: 'entity.merge.requested';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  requested_by_handle: string; // who typed the command
+  handle_a: string;
+  handle_b: string;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -877,6 +893,7 @@ export interface EventMap {
   'chat.window.flushed': ChatWindowFlushedEvent;
   'chat.message.edited': ChatMessageEditedEvent;
   'chat.message.deleted': ChatMessageDeletedEvent;
+  'entity.merge.requested': EntityMergeRequestedEvent;
 }
 
 export type EventType = keyof EventMap;
