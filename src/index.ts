@@ -101,11 +101,13 @@ import { startAlertsSchedule } from './brain/alert-dispatcher.js';
 import { maybeInjectBrainContext } from './brain/auto-recall.js';
 import { startNightlyBackupSchedule } from './brain/backup.js';
 import { handleBrainHealthCommand } from './brain/health.js';
+import { setBrainDriveFetcher } from './brain/drive-resolver.js';
 import {
   setBrainBodyFetcher,
   startBrainIngest,
   stopBrainIngest,
 } from './brain/ingest.js';
+import { productionDriveFetcher } from './drive-fetcher.js';
 import { startProviderProbe } from './brain/provider-probe.js';
 import { ensureBrainCollection } from './brain/qdrant.js';
 import { handleRecallCommand } from './brain/recall-command.js';
@@ -1719,6 +1721,13 @@ async function main(): Promise<void> {
       return null;
     }
   });
+
+  // Wire the inline-Drive-link resolver. Reads OAuth tokens from
+  // ~/.config/google-drive-mcp/<alias>-token.json and exports linked
+  // Docs/Slides/Sheets to plain text, so a "shared with you" email
+  // turns into a real KU on the deck/doc itself instead of just the
+  // boilerplate share announcement.
+  setBrainDriveFetcher(productionDriveFetcher);
 
   // --- Calendar Ops (RSVP support) ---
   const calendarOpsRouter = buildCalendarOpsRouter();
