@@ -760,7 +760,7 @@ export interface ChatWindowFlushedEvent extends NanoClawEvent {
   chat_id: string;
   chat_name?: string;
   window_started_at: string; // ISO
-  window_ended_at: string;   // ISO
+  window_ended_at: string; // ISO
   message_count: number;
   /** Formatted "[ISO] sender: text\n..." with excluded ids omitted. */
   transcript: string;

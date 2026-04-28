@@ -15,7 +15,11 @@ vi.mock('../../config.js', () => ({
   QDRANT_URL: '',
 }));
 
-import { _initTestDatabase, _closeDatabase, setRegisteredGroup } from '../../db.js';
+import {
+  _initTestDatabase,
+  _closeDatabase,
+  setRegisteredGroup,
+} from '../../db.js';
 import {
   readChatIngestConfig,
   resolveGroupForChat,
@@ -69,15 +73,15 @@ describe('group-frontmatter', () => {
   });
 
   it('treats invalid brain_ingest values as off', () => {
-    writeGroupClaudeMd(
-      'bogus',
-      '---\nbrain_ingest: not-a-mode\n---\nbody\n',
-    );
+    writeGroupClaudeMd('bogus', '---\nbrain_ingest: not-a-mode\n---\nbody\n');
     expect(readChatIngestConfig('bogus').brain_ingest).toBe('off');
   });
 
   it('treats malformed YAML as off (no throw)', () => {
-    writeGroupClaudeMd('broken', '---\nbrain_ingest: window\n  bad: indent\n---\n');
+    writeGroupClaudeMd(
+      'broken',
+      '---\nbrain_ingest: window\n  bad: indent\n---\n',
+    );
     expect(readChatIngestConfig('broken').brain_ingest).toBe('off');
   });
 
