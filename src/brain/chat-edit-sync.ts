@@ -13,6 +13,7 @@
 
 import type Database from 'better-sqlite3';
 
+import { eventBus } from '../event-bus.js';
 import type {
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
@@ -334,5 +335,63 @@ export async function handleChatMessageDeleted(
       },
       'chat-edit-sync: tombstoned KUs from deleted message',
     );
+  }
+}
+
+let unsubEdited: (() => void) | null = null;
+let unsubDeleted: (() => void) | null = null;
+
+export interface ChatEditSyncStartOpts {
+  /** Wired by chat-ingest from ChatIngestOpts.llmCaller for re-extraction. */
+  llmCaller?: LlmCaller;
+}
+
+/**
+ * Subscribe to chat.message.edited + chat.message.deleted on the event bus.
+ * Idempotent: a second call before stopChatEditSync() is a no-op.
+ */
+export function startChatEditSync(opts: ChatEditSyncStartOpts = {}): void {
+  if (unsubEdited || unsubDeleted) return;
+  unsubEdited = eventBus.on('chat.message.edited', async (evt) => {
+    try {
+      await handleChatMessageEdited(evt, { llmCaller: opts.llmCaller });
+    } catch (err) {
+      logger.error(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          chat_id: evt.chat_id,
+          message_id: evt.message_id,
+        },
+        'chat-edit-sync: edit handler failed',
+      );
+    }
+  });
+  unsubDeleted = eventBus.on('chat.message.deleted', async (evt) => {
+    try {
+      await handleChatMessageDeleted(evt);
+    } catch (err) {
+      logger.error(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          chat_id: evt.chat_id,
+          message_id: evt.message_id,
+        },
+        'chat-edit-sync: delete handler failed',
+      );
+    }
+  });
+  logger.info(
+    'Chat edit-sync started (chat.message.edited + chat.message.deleted)',
+  );
+}
+
+export function stopChatEditSync(): void {
+  if (unsubEdited) {
+    unsubEdited();
+    unsubEdited = null;
+  }
+  if (unsubDeleted) {
+    unsubDeleted();
+    unsubDeleted = null;
   }
 }

@@ -19,6 +19,10 @@ import type {
 } from '../events.js';
 import { logger } from '../logger.js';
 
+import {
+  startChatEditSync,
+  stopChatEditSync,
+} from './chat-edit-sync.js';
 import { getBrainDb } from './db.js';
 import { embedText, getEmbeddingModelVersion } from './embed.js';
 import { createPersonFromHandle } from './entities.js';
@@ -78,6 +82,7 @@ export function startChatIngest(opts: ChatIngestOpts = {}): void {
     },
   );
   startWindowFlusher();
+  startChatEditSync({ llmCaller: opts.llmCaller });
   logger.info('Chat ingest started (chat.message.saved handler)');
 }
 
@@ -94,6 +99,7 @@ export function stopChatIngest(): void {
     unsubscribeWindow = null;
   }
   stopWindowFlusher();
+  stopChatEditSync();
 }
 
 async function handleChatMessageSaved(

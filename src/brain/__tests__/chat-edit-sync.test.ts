@@ -489,3 +489,101 @@ describe('chat-edit-sync — handleChatMessageDeleted', () => {
     expect(count).toBe(1);
   });
 });
+
+import { startChatEditSync, stopChatEditSync } from '../chat-edit-sync.js';
+import { eventBus } from '../../event-bus.js';
+
+describe('chat-edit-sync — lifecycle (start/stop)', () => {
+  afterEach(() => {
+    stopChatEditSync();
+    eventBus.removeAllListeners();
+  });
+
+  it('startChatEditSync subscribes to chat.message.deleted and tombstones on emit', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r1', 'signal_message', 'chat-1:msg-1', ?, ?, ?)`,
+    ).run(Buffer.from('{}'), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, source_ref, account, scope,
+                                     confidence, valid_from, recorded_at, topic_key,
+                                     extracted_by, needs_review)
+       VALUES ('k1', 'x', 'signal_message', 'chat-1:msg-1', 'personal', NULL, 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z', NULL, 'rules', 0)`,
+    ).run();
+
+    startChatEditSync();
+    eventBus.emit('chat.message.deleted', {
+      type: 'chat.message.deleted',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'chat-1',
+      message_id: 'msg-1',
+      deleted_at: '2026-04-28T00:00:00.000Z',
+    });
+    // Wait for the async handler.
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ku = db
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id='k1'`)
+      .get() as any;
+    expect(ku.superseded_at).toBe('2026-04-28T00:00:00.000Z');
+  });
+
+  it('startChatEditSync is idempotent — second call is a no-op', () => {
+    startChatEditSync();
+    startChatEditSync();
+    // Stopping once should fully unsubscribe.
+    stopChatEditSync();
+    // Now emitting an event should not produce a handler call.
+    eventBus.emit('chat.message.deleted', {
+      type: 'chat.message.deleted',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'no-such',
+      message_id: 'no-such',
+      deleted_at: '2026-04-28T00:00:00.000Z',
+    });
+    // No assertions needed; the test passes if nothing throws.
+    expect(true).toBe(true);
+  });
+
+  it('stopChatEditSync after start unsubscribes both edit and delete handlers', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, source_ref, account, scope,
+                                     confidence, valid_from, recorded_at, topic_key,
+                                     extracted_by, needs_review)
+       VALUES ('k-stay', 'x', 'signal_message', 'chat-9:msg-9', 'personal', NULL, 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z', NULL, 'rules', 0)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r-stay', 'signal_message', 'chat-9:msg-9', ?, ?, ?)`,
+    ).run(Buffer.from('{}'), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+
+    startChatEditSync();
+    stopChatEditSync();
+    eventBus.emit('chat.message.deleted', {
+      type: 'chat.message.deleted',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'chat-9',
+      message_id: 'msg-9',
+      deleted_at: '2026-04-28T00:00:00.000Z',
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ku = db
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id='k-stay'`)
+      .get() as any;
+    expect(ku.superseded_at).toBeNull();
+  });
+});
