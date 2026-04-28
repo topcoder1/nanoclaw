@@ -18,7 +18,7 @@ import { newId } from './ulid.js';
 // --- Cost logging ----------------------------------------------------------
 
 export type CostProvider = 'openai' | 'anthropic' | 'cohere' | 'local';
-export type CostOperation = 'embed' | 'extract' | 'rerank';
+export type CostOperation = 'embed' | 'extract' | 'rerank' | 'reflect';
 
 export interface CostEntry {
   provider: CostProvider;
