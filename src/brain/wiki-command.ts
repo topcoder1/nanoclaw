@@ -158,16 +158,34 @@ function resolveCandidates(
       out.push(r);
     }
   }
-  // Pass 2: case-insensitive name substring match. Same cap.
+  // Pass 2: case-insensitive substring match across the same identifier
+  // fields the page renderer's `deriveTitle` falls back through (name,
+  // email, domain, repo_slug, slug, tag). Searching only `name` would
+  // miss email-only persons and domain-only companies — the exact
+  // entity types `deriveTitle` was extended to handle in PR #37.
+  // Field names are constants (not user input) so direct interpolation
+  // into SQL is safe; the user query is still parameterized.
+  const SEARCH_FIELDS = [
+    'name',
+    'email',
+    'domain',
+    'repo_slug',
+    'slug',
+    'tag',
+  ];
+  const orClause = SEARCH_FIELDS.map(
+    (f) =>
+      `LOWER(json_extract(canonical, '$.${f}')) LIKE LOWER('%' || ? || '%') ESCAPE '\\'`,
+  ).join(' OR ');
   const nameRows = db
     .prepare(
       `SELECT entity_id, entity_type, canonical
          FROM entities
-        WHERE LOWER(json_extract(canonical, '$.name')) LIKE LOWER('%' || ? || '%') ESCAPE '\\'
+        WHERE (${orClause})
         ORDER BY entity_type, entity_id
         LIMIT 6`,
     )
-    .all(escaped) as CandidateRow[];
+    .all(...SEARCH_FIELDS.map(() => escaped)) as CandidateRow[];
   for (const r of nameRows) {
     if (!seen.has(r.entity_id)) {
       seen.add(r.entity_id);
