@@ -36,6 +36,11 @@ import {
 } from './entities.js';
 import { extractPipeline, type Claim } from './extract.js';
 import {
+  extractDriveLinks,
+  getBrainDriveFetcher,
+  ingestDriveDoc,
+} from './drive-resolver.js';
+import {
   EMAILS_SEEN_KEY,
   LAST_INGEST_EVENT_KEY,
   incrementSystemCounter,
@@ -289,6 +294,20 @@ export async function runExtractionPipeline(
     return;
   }
 
+  // Step 0: resolve any inline Google Drive / Docs / Slides / Sheets
+  // links into their own `source_type='drive'` KUs. Shared-doc share
+  // notifications often have minimal email bodies — the value is the
+  // linked deck/doc, not the boilerplate share announcement. Best-effort:
+  // fetch failures (no perms, network, missing fetcher) log warn and
+  // ingestion proceeds with whatever the email body alone yielded.
+  const accountBucket = toAccountBucket(email.account);
+  await resolveAndIngestDriveLinks(
+    email,
+    bodyText,
+    accountBucket,
+    row.received_at,
+  );
+
   // Step 1–2: cheap + LLM extraction.
   const claims = await extractPipeline({
     text,
@@ -341,7 +360,6 @@ export async function runExtractionPipeline(
       entities: entitiesPerClaim[i],
     }));
 
-  const accountBucket = toAccountBucket(email.account);
   const insertKu = db.prepare(
     `INSERT INTO knowledge_units
        (id, text, source_type, source_ref, account, scope, confidence,
@@ -437,6 +455,89 @@ export async function runExtractionPipeline(
           err: err instanceof Error ? err.message : String(err),
         },
         'brain ingest: Qdrant upsert failed — SQLite row retained',
+      );
+    }
+  }
+}
+
+/**
+ * Detect Google Drive / Docs / Slides / Sheets links in the email body,
+ * fetch each via the registered drive fetcher, and ingest one
+ * `source_type='drive'` KU per linked doc. Idempotent on
+ * (source_type='drive', source_ref) so retries / reprocesses don't
+ * duplicate.
+ *
+ * Best-effort: missing fetcher, scope errors, network timeouts, and
+ * permission denials all log warn and continue. The email's own
+ * extraction pipeline runs regardless of how many drive docs resolve.
+ */
+async function resolveAndIngestDriveLinks(
+  email: ParsedEmail,
+  bodyText: string,
+  accountBucket: 'personal' | 'work',
+  receivedAtIso: string,
+): Promise<void> {
+  const driveFetcher = getBrainDriveFetcher();
+  if (!driveFetcher) return;
+  const links = extractDriveLinks(
+    [email.subject ?? '', bodyText].filter(Boolean).join('\n'),
+  );
+  if (links.length === 0) return;
+
+  const account = email.account ?? 'personal';
+  const validFromIso =
+    receivedAtIso && receivedAtIso.length > 0
+      ? receivedAtIso
+      : new Date().toISOString();
+  const db = getBrainDb();
+
+  for (const link of links) {
+    let doc;
+    try {
+      doc = await driveFetcher(account, link);
+    } catch (err) {
+      logger.warn(
+        {
+          threadId: email.thread_id,
+          fileId: link.fileId,
+          kind: link.kind,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'brain ingest: drive fetch failed — skipping linked doc',
+      );
+      continue;
+    }
+    if (!doc || !doc.text || !doc.text.trim()) {
+      logger.debug(
+        { threadId: email.thread_id, fileId: link.fileId, kind: link.kind },
+        'brain ingest: drive fetch returned empty — skipping',
+      );
+      continue;
+    }
+    try {
+      const kuId = await ingestDriveDoc(db, link, doc, {
+        accountBucket,
+        validFromIso,
+        extractedBy: 'drive_resolver',
+        extractionChain: [],
+      });
+      logger.info(
+        {
+          kuId,
+          threadId: email.thread_id,
+          fileId: link.fileId,
+          kind: link.kind,
+        },
+        'brain ingest: drive doc ingested',
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          threadId: email.thread_id,
+          fileId: link.fileId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'brain ingest: ingestDriveDoc failed — skipping linked doc',
       );
     }
   }
