@@ -266,7 +266,9 @@ describe('brain schema — wiki projection migration (Phase 3a.1)', () => {
       )
       .get() as { name: string; sql: string } | undefined;
     expect(idx).toBeDefined();
-    expect(idx!.sql.toLowerCase()).toContain('where last_synthesis_at is not null');
+    expect(idx!.sql.toLowerCase()).toContain(
+      'where last_synthesis_at is not null',
+    );
   });
 
   it('migration is idempotent — re-opening an already-migrated DB is a no-op', async () => {
