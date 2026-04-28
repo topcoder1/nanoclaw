@@ -132,3 +132,86 @@ describe('mergeEntities — happy path', () => {
     expect(r2.to_entity_id).toBe('e-keep');
   });
 });
+
+describe('mergeEntities — rejection cases', () => {
+  it('rejects self-merge', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e1', 'A');
+    await expect(
+      mergeEntities('e1', 'e1', {
+        evidence: { trigger: 'manual' },
+        confidence: 1,
+        mergedBy: 'human:op',
+        db,
+      }),
+    ).rejects.toThrow(/self-merge/);
+  });
+
+  it('rejects when kept entity is missing', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-merge', 'B');
+    await expect(
+      mergeEntities('missing-id', 'e-merge', {
+        evidence: { trigger: 'manual' },
+        confidence: 1,
+        mergedBy: 'human:op',
+        db,
+      }),
+    ).rejects.toThrow(/kept entity .*not found/);
+  });
+
+  it('rejects when merged entity is missing', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-keep', 'A');
+    await expect(
+      mergeEntities('e-keep', 'missing-id', {
+        evidence: { trigger: 'manual' },
+        confidence: 1,
+        mergedBy: 'human:op',
+        db,
+      }),
+    ).rejects.toThrow(/merged entity .*not found/);
+  });
+
+  it('rejects when entities have different types', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
+       VALUES ('p1', 'person', ?, ?), ('c1', 'company', ?, ?)`,
+    ).run(
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:00Z',
+    );
+    await expect(
+      mergeEntities('p1', 'c1', {
+        evidence: { trigger: 'manual' },
+        confidence: 1,
+        mergedBy: 'human:op',
+        db,
+      }),
+    ).rejects.toThrow(/type mismatch/);
+  });
+
+  it('rejects re-merging an already-merged loser (chain detection)', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'a', 'A');
+    seedPerson(db, 'b', 'B');
+    seedPerson(db, 'c', 'C');
+    await mergeEntities('a', 'b', {
+      evidence: { trigger: 'manual' },
+      confidence: 1,
+      mergedBy: 'human:op',
+      db,
+    });
+    await expect(
+      mergeEntities('c', 'b', {
+        evidence: { trigger: 'manual' },
+        confidence: 1,
+        mergedBy: 'human:op',
+        db,
+      }),
+    ).rejects.toThrow(/already merged/);
+  });
+});
