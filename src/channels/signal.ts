@@ -12,6 +12,7 @@ import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
 import type {
   ChatMessageSavedEvent,
   ChatMessageEditedEvent,
+  ChatMessageDeletedEvent,
 } from '../events.js';
 
 export interface SignalChannelOpts {
@@ -262,6 +263,35 @@ export class SignalChannel implements Channel {
         edited_at: editedAtIso,
         sender: sourceJid,
       } satisfies ChatMessageEditedEvent);
+      return;
+    }
+
+    // 5. remoteDelete envelope: emit chat.message.deleted; tombstone cache.
+    if (dataMsg.remoteDelete) {
+      const targetTs = dataMsg.remoteDelete.timestamp;
+      const originalId = String(targetTs);
+      const deletedAtIso = new Date(envelope.timestamp).toISOString();
+      const cached = getChatMessage('signal', chatId, originalId);
+      putChatMessage({
+        platform: 'signal',
+        chat_id: chatId,
+        message_id: originalId,
+        sent_at: cached?.sent_at ?? deletedAtIso,
+        sender: cached?.sender ?? sourceJid,
+        sender_name: cached?.sender_name ?? envelope.sourceName,
+        text: cached?.text,
+        deleted_at: deletedAtIso,
+      });
+      eventBus.emit('chat.message.deleted', {
+        type: 'chat.message.deleted',
+        source: 'signal',
+        timestamp: envelope.timestamp,
+        payload: {},
+        platform: 'signal',
+        chat_id: chatId,
+        message_id: originalId,
+        deleted_at: deletedAtIso,
+      } satisfies ChatMessageDeletedEvent);
       return;
     }
 
