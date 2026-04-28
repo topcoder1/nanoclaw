@@ -495,6 +495,11 @@ export function startWikiSynthesisSchedule(
     running = true;
     const nowIso = now.toISOString();
     const sinceIso = last !== null ? new Date(last).toISOString() : undefined;
+    // Clear the timeout on the success path so the timer doesn't leak past
+    // the awaited race. (Cancelling the underlying materializeFn on
+    // timeout is a deeper change — AbortController plumbed through the
+    // LLM caller — and is intentionally deferred.)
+    let timeoutHandle: NodeJS.Timeout | null = null;
     try {
       const counts = await Promise.race([
         materializeFn(opts.baseDir, {
@@ -504,13 +509,14 @@ export function startWikiSynthesisSchedule(
           db: opts.db,
           nowIso,
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
             () => reject(new Error('wiki synthesis timed out')),
             WIKI_SYNTHESIS_TIMEOUT_MS,
-          ),
-        ),
+          );
+        }),
       ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       setLast(nowIso);
       setCounts(
         {
@@ -534,6 +540,7 @@ export function startWikiSynthesisSchedule(
         );
       }
     } catch (err) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },
         'wiki-writer: scheduled synthesis run failed',

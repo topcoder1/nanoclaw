@@ -123,8 +123,8 @@ describe('CoalescingQueue', () => {
       },
     });
 
-    q.enqueue('x');
-    q.enqueue('y');
+    expect(q.enqueue('x')).toBe(true);
+    expect(q.enqueue('y')).toBe(true);
 
     const shutdownP = q.shutdown();
     await vi.runAllTimersAsync();
@@ -132,9 +132,8 @@ describe('CoalescingQueue', () => {
 
     expect(calls.sort()).toEqual(['x', 'y']);
 
-    // After shutdown, enqueue is a no-op (or throws); the spec leaves it loose,
-    // but at minimum it must not schedule a fresh handler call.
-    q.enqueue('z');
+    // After shutdown, enqueue returns false and schedules nothing.
+    expect(q.enqueue('z')).toBe(false);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(calls.sort()).toEqual(['x', 'y']);
   });

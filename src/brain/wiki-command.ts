@@ -44,8 +44,12 @@ const HELP_TEXT =
   '• `/wiki acme`\n' +
   '• `/wiki 01HALICE` (entity-id prefix)\n';
 
-/** Cap on inline reply size — beyond this we point to the on-disk file. */
-const MAX_INLINE_BYTES = 4096;
+/**
+ * Cap on inline reply size — beyond this we point to the on-disk file.
+ * Measured in characters (not bytes) so the truncation point is a safe
+ * code-point boundary; matches Telegram's 4096-char message ceiling.
+ */
+const MAX_INLINE_CHARS = 4096;
 
 /** Cap on ambiguous-match suggestion count to keep replies readable. */
 const MAX_AMBIGUOUS_SUGGESTIONS = 5;
@@ -109,15 +113,25 @@ export async function handleWikiCommand(
     return `⚠️ Wiki page written but unreadable: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  if (Buffer.byteLength(content) > MAX_INLINE_BYTES) {
+  if (content.length > MAX_INLINE_CHARS) {
     content =
-      content.slice(0, MAX_INLINE_BYTES) +
-      `\n\n_…truncated at ${MAX_INLINE_BYTES} bytes. Full page: \`${result.path}\`_`;
+      content.slice(0, MAX_INLINE_CHARS) +
+      `\n\n_…truncated at ${MAX_INLINE_CHARS} chars. Full page: \`${result.path}\`_`;
   } else {
     content += `\n\n_Full page: \`${result.path}\`_`;
   }
 
   return content;
+}
+
+/**
+ * Escape SQL LIKE metacharacters (`%`, `_`, `\`) in a user query so the
+ * pattern only matches what the user typed. Used with an ESCAPE clause
+ * below. Bindings are still parameterized — this is a correctness fix,
+ * not a SQL-injection fix.
+ */
+function escapeLikePattern(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 function resolveCandidates(
@@ -126,17 +140,18 @@ function resolveCandidates(
 ): CandidateRow[] {
   const seen = new Set<string>();
   const out: CandidateRow[] = [];
+  const escaped = escapeLikePattern(query);
   // Pass 1: entity_id prefix match. Capped to 6 — anything more and we'd
   // rather show "ambiguous" than load the whole table for a one-char query.
   const idRows = db
     .prepare(
       `SELECT entity_id, entity_type, canonical
          FROM entities
-        WHERE entity_id LIKE ? || '%'
+        WHERE entity_id LIKE ? || '%' ESCAPE '\\'
         ORDER BY entity_id ASC
         LIMIT 6`,
     )
-    .all(query) as CandidateRow[];
+    .all(escaped) as CandidateRow[];
   for (const r of idRows) {
     if (!seen.has(r.entity_id)) {
       seen.add(r.entity_id);
@@ -148,11 +163,11 @@ function resolveCandidates(
     .prepare(
       `SELECT entity_id, entity_type, canonical
          FROM entities
-        WHERE LOWER(json_extract(canonical, '$.name')) LIKE LOWER('%' || ? || '%')
+        WHERE LOWER(json_extract(canonical, '$.name')) LIKE LOWER('%' || ? || '%') ESCAPE '\\'
         ORDER BY entity_type, entity_id
         LIMIT 6`,
     )
-    .all(query) as CandidateRow[];
+    .all(escaped) as CandidateRow[];
   for (const r of nameRows) {
     if (!seen.has(r.entity_id)) {
       seen.add(r.entity_id);

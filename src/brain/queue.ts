@@ -186,10 +186,13 @@ export class CoalescingQueue<K> {
   /**
    * Schedule (or reschedule) a handler run for `key`. If a timer already
    * exists for the key, it is cancelled and replaced — that's the coalescing.
-   * No-op once `shutdown()` has been called.
+   * Returns `true` if the key was scheduled, `false` if the queue is shut
+   * down (so callers that care can detect drops without try/catch). The
+   * sole production caller today fire-and-forgets, but keeping a signal
+   * available avoids the silent-drop trap in future callers.
    */
-  enqueue(key: K): void {
-    if (this.shuttingDown) return;
+  enqueue(key: K): boolean {
+    if (this.shuttingDown) return false;
     const existing = this.timers.get(key);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
@@ -197,6 +200,7 @@ export class CoalescingQueue<K> {
       this.runHandler(key);
     }, this.opts.debounceMs);
     this.timers.set(key, timer);
+    return true;
   }
 
   /**
