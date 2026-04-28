@@ -166,6 +166,56 @@ describe('brain/wiki-command', () => {
     expect(reply).toContain('Company/01HCAR.md');
   });
 
+  it('resolves a query that matches canonical.domain (no name) — same fallback chain as the page renderer', async () => {
+    // Regression: production company entities had `canonical={"domain":"…"}`
+    // with no `name` key. /wiki gmo previously returned "no entity found"
+    // because the resolver only searched `canonical.name`. The page render
+    // path's `deriveTitle` already used domain as a fallback, so the
+    // resolver was searching a strictly narrower surface than what users
+    // see in the rendered wiki.
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at,
+                             last_synthesis_at, ku_count_at_last_synthesis, wiki_summary)
+       VALUES ('01HGMO', 'company', ?, ?, ?, NULL, NULL, NULL)`,
+    ).run(
+      JSON.stringify({ domain: 'gmo-cybersecurity.com' }),
+      '2026-04-01T00:00:00Z',
+      '2026-04-01T00:00:00Z',
+    );
+    seedKu(db, {
+      id: 'ku-gmo',
+      text: 'GMO will test discovery',
+      entityId: '01HGMO',
+    });
+
+    const reply = await handleWikiCommand('gmo', { baseDir: tmpDir });
+    expect(reply).toContain('# gmo-cybersecurity.com');
+    expect(reply).toContain('Company/01HGMO.md');
+  });
+
+  it('resolves a query matching canonical.email when name is absent', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at,
+                             last_synthesis_at, ku_count_at_last_synthesis, wiki_summary)
+       VALUES ('01HEML', 'person', ?, ?, ?, NULL, NULL, NULL)`,
+    ).run(
+      JSON.stringify({ email: 'rare-handle@example.com' }),
+      '2026-04-01T00:00:00Z',
+      '2026-04-01T00:00:00Z',
+    );
+    seedKu(db, {
+      id: 'ku-eml',
+      text: 'rare-handle is the contact',
+      entityId: '01HEML',
+    });
+
+    const reply = await handleWikiCommand('rare-handle', { baseDir: tmpDir });
+    expect(reply).toContain('# rare-handle@example.com');
+    expect(reply).toContain('Person/01HEML.md');
+  });
+
   it('resolves an entity-id prefix match (non-name path)', async () => {
     const db = getBrainDb();
     seedEntity(db, {
