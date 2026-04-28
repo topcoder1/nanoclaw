@@ -154,6 +154,14 @@ export async function handleChatMessageEdited(
       { llmCaller: opts.llmCaller, db },
     );
 
+    if (claims.length === 0) {
+      logger.warn(
+        { raw_event_id: raw.id, source_ref: raw.source_ref },
+        'chat-edit-sync: re-extraction returned 0 claims — skipping supersession to preserve existing KUs',
+      );
+      continue;
+    }
+
     const supersededAt = new Date().toISOString();
     const nowIso = new Date().toISOString();
     const validFrom = evt.edited_at;
@@ -241,6 +249,13 @@ function rebuildWindowTranscript(
 ): string {
   const ids: string[] = payload.message_ids ?? [];
   const oldLines: string[] = (payload.transcript ?? '').split('\n');
+  if (ids.length !== oldLines.length) {
+    logger.warn(
+      { idsLen: ids.length, linesLen: oldLines.length },
+      'chat-edit-sync: message_ids/transcript length mismatch — returning raw transcript without substitution',
+    );
+    return payload.transcript ?? '';
+  }
   return ids
     .map((id, i) => {
       const old = oldLines[i] ?? '';

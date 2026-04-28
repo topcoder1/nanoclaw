@@ -301,4 +301,56 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     const oldKu = db.prepare(`SELECT superseded_at FROM knowledge_units WHERE id='w-k1'`).get() as any;
     expect(oldKu.superseded_at).not.toBeNull();
   });
+
+  it('does NOT supersede old KUs when re-extraction returns 0 claims (preserves on budget exhaustion)', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r1', 'signal_message', 'chat-1:msg-1', ?, ?, ?)`,
+    ).run(
+      Buffer.from('{}'),
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:01Z',
+    );
+    db.prepare(
+      `INSERT INTO knowledge_units
+         (id, text, source_type, source_ref, account, scope, confidence,
+          valid_from, recorded_at, topic_key, extracted_by, needs_review)
+       VALUES ('k-keep', 'meeting at 3pm Thursday', 'signal_message', 'chat-1:msg-1',
+               'personal', NULL, 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z',
+               'meeting', 'rules', 0)`,
+    ).run();
+
+    // LLM caller that throws / returns empty so extractPipeline yields no claims.
+    const fakeLlm = vi.fn(async () => ({
+      claims: [],
+      inputTokens: 0,
+      outputTokens: 0,
+    }));
+
+    await handleChatMessageEdited(
+      {
+        type: 'chat.message.edited',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-1',
+        message_id: 'msg-1',
+        old_text: 'meeting at 3pm Thursday',
+        new_text: 'oops never mind',  // contains no patterns the cheap-rules tier matches
+        edited_at: '2026-04-28T00:00:00.000Z',
+        sender: 'alice',
+      },
+      { llmCaller: fakeLlm, db },
+    );
+
+    // Old KU is NOT superseded.
+    const ku = db
+      .prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k-keep'`)
+      .get() as any;
+    expect(ku.superseded_at).toBeNull();
+    expect(ku.superseded_by).toBeNull();
+  });
 });
