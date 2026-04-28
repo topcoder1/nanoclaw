@@ -46,8 +46,55 @@ describe('brain/weekly-digest', () => {
     expect(s.ingestedRawEvents).toBe(0);
     expect(s.topRetrievedKus).toEqual([]);
     expect(s.newEntityCount).toBe(0);
+    expect(s.newProceduralRules).toEqual([]);
     expect(s.deadLetterCount).toBe(0);
     expect(s.staleUnprocessedCount).toBe(0);
+  });
+
+  it('omits the procedural-rules section when none were emitted', () => {
+    const md = formatWeeklyDigestMarkdown(
+      collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' }),
+    );
+    expect(md).not.toContain('procedural rules');
+    expect(md).not.toContain('📐');
+  });
+
+  it('renders the procedural-rules section when rules are present', () => {
+    const md = formatWeeklyDigestMarkdown({
+      windowStartIso: '2026-04-20T12:00:00Z',
+      windowEndIso: '2026-04-27T12:00:00Z',
+      cadence: 'weekly',
+      costWeekUsd: 0,
+      costMonthUsd: 0,
+      rolling7dAvgUsd: 0,
+      ingestedRawEvents: 0,
+      processedRawEvents: 0,
+      topRetrievedKus: [],
+      newEntityCount: 0,
+      newProceduralRules: [
+        {
+          id: 'r-new',
+          rule: 'When user asks about pricing, link the rate sheet',
+          actionClasses: ['email.draft'],
+          confidence: 0.78,
+          supersedesId: 'r-old-12345678abcdef',
+        },
+      ],
+      deadLetterCount: 0,
+      staleUnprocessedCount: 0,
+      emailsSeenByBrain24h: 0,
+      lastIngestEventAt: null,
+      firedTriggers: [],
+      reconcileStats: null,
+    });
+    expect(md).toContain('📐');
+    expect(md).toContain('procedural rules');
+    expect(md).toContain('rate sheet');
+    expect(md).toContain('email.draft');
+    expect(md).toContain('conf 0.78');
+    // Supersession marker shows the first 8 chars of the old rule id.
+    expect(md).toContain('supersedes');
+    expect(md).toContain('r-old-12');
   });
 
   it('aggregates cost, ingestion, top-retrieved, new entities correctly', () => {
