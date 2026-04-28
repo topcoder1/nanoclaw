@@ -78,9 +78,20 @@ export function _peekWindow(
   return windows.get(key(platform, chat_id));
 }
 
-/** Test helper — drop all windows. */
+/**
+ * Test helper — drop all windows AND reset module-level lifecycle state
+ * (`lastDailyFlushDay`, the per-minute `timer`, and `observerRegistered`).
+ * Called from `beforeEach` so each test starts from a clean module state
+ * regardless of whether the prior test went through `stopWindowFlusher()`.
+ */
 export function _resetWindowState(): void {
   windows.clear();
+  lastDailyFlushDay = null;
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  observerRegistered = false;
 }
 
 // --- noteMessage / noteSave -----------------------------------------------
