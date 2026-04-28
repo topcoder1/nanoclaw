@@ -9,10 +9,12 @@ import {
 } from '../types.js';
 import { eventBus } from '../event-bus.js';
 import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
+import { parseMergeArgs } from './parse-merge-args.js';
 import type {
   ChatMessageSavedEvent,
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
+  EntityMergeRequestedEvent,
 } from '../events.js';
 
 export interface SignalChannelOpts {
@@ -312,6 +314,31 @@ export class SignalChannel implements Channel {
         text: tail,
         trigger: 'text',
       } satisfies ChatMessageSavedEvent);
+      return;
+    }
+
+    // 4b. `claw merge <a> <b>` text trigger — operator-issued identity merge.
+    const mergeMatch = body.match(/^claw\s+merge\b\s*(.+)$/i);
+    if (mergeMatch) {
+      const args = parseMergeArgs(mergeMatch[1].trim());
+      if (args.length === 2) {
+        eventBus.emit('entity.merge.requested', {
+          type: 'entity.merge.requested',
+          source: 'signal',
+          timestamp: Date.now(),
+          payload: {},
+          platform: 'signal',
+          chat_id: chatId,
+          requested_by_handle: envelope.sourceName ?? sourceJid,
+          handle_a: args[0],
+          handle_b: args[1],
+        } satisfies EntityMergeRequestedEvent);
+      } else {
+        logger.warn(
+          { body, parsed: args },
+          'signal: claw merge needs exactly two handles — ignoring',
+        );
+      }
       return;
     }
 

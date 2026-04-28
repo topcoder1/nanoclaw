@@ -1171,4 +1171,47 @@ describe('DiscordChannel', () => {
       expect(deletedEmits).toHaveLength(1);
     });
   });
+
+  describe('MessageCreate claw merge text trigger', () => {
+    it('claw merge text emits entity.merge.requested with parsed handles', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        messageId: 'msg_merge',
+        content: 'claw merge alice "j zhang"',
+      });
+      await triggerMessage(msg);
+
+      const mergeEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'entity.merge.requested',
+      );
+      expect(mergeEmits).toHaveLength(1);
+      expect(mergeEmits[0][1]).toMatchObject({
+        type: 'entity.merge.requested',
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        handle_a: 'alice',
+        handle_b: 'j zhang',
+      });
+    });
+
+    it('claw merge with one arg is logged and ignored', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        messageId: 'msg_one',
+        content: 'claw merge alone',
+      });
+      await triggerMessage(msg);
+
+      const mergeEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'entity.merge.requested',
+      );
+      expect(mergeEmits).toHaveLength(0);
+    });
+  });
 });
