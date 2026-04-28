@@ -7,12 +7,17 @@
  * string.
  */
 
+import type Database from 'better-sqlite3';
+
 import { logger } from '../logger.js';
 
+import { type Citation, enrichCitation } from './citations.js';
+import { getBrainDb } from './db.js';
 import { escapeMarkdown } from './markdown.js';
 import { recall, type RecallResult } from './retrieve.js';
 
 export type RecallFn = typeof recall;
+export type AliasResolver = (alias: string) => string | null;
 
 const HELP_TEXT =
   'Usage: `/recall <question>`\n\n' +
@@ -31,6 +36,18 @@ export interface RecallCommandOptions {
    * not silently leak across scopes.
    */
   account?: 'personal' | 'work';
+  /**
+   * Map a payload `account` alias (e.g. `'personal'`, `'attaxion'`) onto
+   * the mailbox address used in Gmail deep links. Wired from `index.ts`
+   * via `gmailOpsRouter.emailAddressForAlias`. When omitted (tests, or
+   * before gmailOps is up), citations fall back to the bare source-ref.
+   */
+  resolveAlias?: AliasResolver;
+  /**
+   * Injected for tests so the citation lookup can be observed without a
+   * live brain.db. Defaults to the real `getBrainDb()`.
+   */
+  dbForCitations?: Database.Database | null;
 }
 
 /**
@@ -62,6 +79,7 @@ export async function handleRecallCommand(
     return `No matches for *${escapeMarkdown(question)}*.`;
   }
 
+  const citations = loadCitations(results, opts);
   const lines: string[] = [
     `🧠 Top ${results.length} match(es) for *${escapeMarkdown(question)}*:`,
   ];
@@ -69,7 +87,7 @@ export async function handleRecallCommand(
     const r = results[i];
     const date = r.valid_from ? r.valid_from.slice(0, 10) : '—';
     const snippet = truncate(r.text, 180);
-    const sourceLine = formatSourceLink(r);
+    const sourceLine = formatSourceLink(r, citations[i]);
     lines.push(
       `\n*${i + 1}.* \`${r.source_type}\` • ${date}  (score ${r.finalScore.toFixed(2)})\n` +
         `${escapeMarkdown(snippet)}${sourceLine ? `\n${sourceLine}` : ''}`,
@@ -84,13 +102,61 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * Best-effort source link. Today we only have thread ids for email. For
- * other sources we fall back to a short reference. Only renders when we
- * have a stable URL-shaped source_ref.
+ * Look up subject/url for every hit in one prepare/run loop. Failures here
+ * are non-fatal — we log once and return empty citations so the recall
+ * reply still renders with the legacy source-ref form.
  */
-function formatSourceLink(r: RecallResult): string {
+function loadCitations(
+  results: RecallResult[],
+  opts: RecallCommandOptions,
+): Citation[] {
+  const empty = (): Citation => ({
+    subject: null,
+    senderEmail: null,
+    url: null,
+  });
+  if (!opts.resolveAlias) return results.map(empty);
+  let db: Database.Database | null;
+  try {
+    db = opts.dbForCitations === undefined ? getBrainDb() : opts.dbForCitations;
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      '/recall: brain.db unavailable — skipping citation enrichment',
+    );
+    return results.map(empty);
+  }
+  if (!db) return results.map(empty);
+  const resolver = opts.resolveAlias;
+  return results.map((r) => {
+    try {
+      return enrichCitation(db, r.source_type, r.source_ref, resolver);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), id: r.ku_id },
+        '/recall: citation lookup failed',
+      );
+      return empty();
+    }
+  });
+}
+
+/**
+ * Best-effort source link. Email hits with a recovered subject + Gmail URL
+ * render as a Markdown link `[Subject — yyyy-mm-dd](url)`; otherwise we
+ * fall back to the legacy bare source_ref form so a degraded environment
+ * (no resolver, no payload row) is still useful.
+ */
+function formatSourceLink(r: RecallResult, c: Citation): string {
   if (!r.source_ref) return '';
   if (r.source_type === 'email') {
+    if (c.subject && c.url) {
+      const date = r.valid_from ? ` · ${r.valid_from.slice(0, 10)}` : '';
+      return `  📎 [${escapeMarkdown(truncate(c.subject, 80))}${date}](${c.url})`;
+    }
+    if (c.url) {
+      return `  📎 [open thread](${c.url})`;
+    }
     return `  _thread:_ \`${r.source_ref}\``;
   }
   return `  _ref:_ \`${r.source_ref}\``;
