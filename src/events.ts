@@ -753,6 +753,27 @@ export interface ChatMessageSavedEvent extends NanoClawEvent {
   payload: Record<string, unknown>;
 }
 
+export interface ChatWindowFlushedEvent extends NanoClawEvent {
+  type: 'chat.window.flushed';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  chat_name?: string;
+  window_started_at: string; // ISO
+  window_ended_at: string; // ISO
+  message_count: number;
+  /** Formatted "[ISO] sender: text\n..." with excluded ids omitted. */
+  transcript: string;
+  /** Message ids included in the transcript (for PR 4 edit-sync). */
+  message_ids: string[];
+  /** Distinct sender display names (or handles) seen in the window. */
+  participants: string[];
+  attachments?: ChatAttachment[];
+  flush_reason: 'idle' | 'cap' | 'daily' | 'shutdown';
+  group_folder: string;
+  payload: Record<string, unknown>;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -821,6 +842,7 @@ export interface EventMap {
   'sign.completed': SignCompletedEvent;
   'sign.failed': SignFailedEvent;
   'chat.message.saved': ChatMessageSavedEvent;
+  'chat.window.flushed': ChatWindowFlushedEvent;
 }
 
 export type EventType = keyof EventMap;

@@ -273,4 +273,165 @@ describe('chat-ingest', () => {
     expect(raw.processed_at).not.toBeNull();
     expect(raw.process_error).toBeNull();
   });
+
+  it('inserts raw_events + KUs + participant links for a flushed window', async () => {
+    const fakeLlm = vi.fn(async () => ({
+      claims: [
+        {
+          text: 'Decided to go with Vendor A for Q3',
+          topic_seed: 'vendor selection',
+          entities_mentioned: [],
+          confidence: 0.9,
+        },
+        {
+          text: 'Vendor B rejected — pricing model incompatible',
+          topic_seed: 'vendor rejection',
+          entities_mentioned: [],
+          confidence: 0.85,
+        },
+      ],
+      inputTokens: 200,
+      outputTokens: 80,
+    }));
+
+    startChatIngest({ llmCaller: fakeLlm });
+
+    const evt = {
+      type: 'chat.window.flushed' as const,
+      source: 'signal' as const,
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal' as const,
+      chat_id: 'group-xyz',
+      window_started_at: '2026-04-27T14:00:00.000Z',
+      window_ended_at: '2026-04-27T14:32:00.000Z',
+      message_count: 18,
+      transcript: '[14:00] Alice: ...\n[14:32] Bob: ...',
+      message_ids: ['m1', 'm2', 'm3'],
+      participants: ['Alice', 'Bob'],
+      flush_reason: 'idle' as const,
+      group_folder: 'opt-window',
+    };
+
+    eventBus.emit('chat.window.flushed', evt);
+    await wait(1500);
+
+    const db = getBrainDb();
+
+    const raw = db
+      .prepare(`SELECT * FROM raw_events WHERE source_type = 'signal_window'`)
+      .get() as { source_ref: string; payload: Buffer } | undefined;
+    expect(raw).toBeDefined();
+    expect(raw!.source_ref).toBe('group-xyz:2026-04-27T14:00:00.000Z');
+    const payload = JSON.parse(raw!.payload.toString('utf8'));
+    expect(payload.message_ids).toEqual(['m1', 'm2', 'm3']);
+
+    const kuCount = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM knowledge_units WHERE source_type = 'signal_window'`,
+        )
+        .get() as { n: number }
+    ).n;
+    expect(kuCount).toBe(2);
+
+    // Both participants exist as person entities, and every KU links to both.
+    const linkRows = db
+      .prepare(
+        `SELECT ku_id, entity_id FROM ku_entities
+         WHERE ku_id IN (SELECT id FROM knowledge_units WHERE source_type='signal_window')`,
+      )
+      .all() as Array<{ ku_id: string; entity_id: string }>;
+    expect(linkRows.length).toBe(4); // 2 KUs × 2 participants
+
+    expect(qdrantUpsertMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a saved message inside an open window is recorded as excluded', async () => {
+    // Mock noteSave to confirm the chat-ingest handler calls it.
+    const noteSaveSpy = vi.fn();
+    vi.doMock('../window-flusher.js', async () => {
+      const real = await vi.importActual<typeof import('../window-flusher.js')>(
+        '../window-flusher.js',
+      );
+      return { ...real, noteSave: noteSaveSpy };
+    });
+    // Re-import chat-ingest so it picks up the mocked noteSave.
+    vi.resetModules();
+    const { startChatIngest: startMocked, stopChatIngest: stopMocked } =
+      await import('../chat-ingest.js');
+    const { eventBus: mockedBus } = await import('../../event-bus.js');
+
+    const fakeLlm = vi.fn(async () => ({
+      claims: [],
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    startMocked({ llmCaller: fakeLlm });
+
+    const evt: ChatMessageSavedEvent = {
+      type: 'chat.message.saved',
+      timestamp: Date.now(),
+      source: 'discord',
+      payload: {},
+      platform: 'discord',
+      chat_id: 'channel-race',
+      message_id: 'msg-race',
+      sender: 'u-race',
+      sent_at: '2026-04-27T16:00:00.000Z',
+      text: 'race-test',
+      trigger: 'emoji',
+    };
+    mockedBus.emit('chat.message.saved', evt);
+    await wait(1500);
+    stopMocked();
+
+    expect(noteSaveSpy).toHaveBeenCalledWith(
+      'discord',
+      'channel-race',
+      'msg-race',
+    );
+
+    vi.doUnmock('../window-flusher.js');
+  });
+
+  it('window flush dedups via raw_events UNIQUE — same window_started_at twice yields one row', async () => {
+    const fakeLlm = vi.fn(async () => ({
+      claims: [],
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    startChatIngest({ llmCaller: fakeLlm });
+
+    const evt = {
+      type: 'chat.window.flushed' as const,
+      source: 'discord' as const,
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'discord' as const,
+      chat_id: 'channel-dup',
+      window_started_at: '2026-04-27T15:00:00.000Z',
+      window_ended_at: '2026-04-27T15:15:00.000Z',
+      message_count: 1,
+      transcript: '[15:00] X: hi',
+      message_ids: ['m1'],
+      participants: ['X'],
+      flush_reason: 'idle' as const,
+      group_folder: 'opt-dup',
+    };
+
+    eventBus.emit('chat.window.flushed', evt);
+    eventBus.emit('chat.window.flushed', evt);
+    await wait(1500);
+
+    const db = getBrainDb();
+    const n = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM raw_events WHERE source_type='discord_window'`,
+        )
+        .get() as { n: number }
+    ).n;
+    expect(n).toBe(1);
+  });
 });

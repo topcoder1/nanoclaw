@@ -1,4 +1,5 @@
 import { getDb } from './db.js';
+import { logger } from './logger.js';
 
 export interface CachedChatMessage {
   platform: 'discord' | 'signal';
@@ -50,6 +51,21 @@ export function putChatMessage(msg: CachedChatMessage): void {
     msg.deleted_at ?? null,
     msg.attachment_download_attempts ?? 0,
   );
+  if (observer) {
+    try {
+      observer(msg);
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          platform: msg.platform,
+          chat_id: msg.chat_id,
+          message_id: msg.message_id,
+        },
+        'chat-message-cache: observer threw — cache write succeeded, ignoring',
+      );
+    }
+  }
 }
 
 export function getChatMessage(
@@ -127,4 +143,18 @@ export function bumpAttachmentAttempts(
     )
     .get(platform, chat_id, message_id) as { n: number } | undefined;
   return r?.n ?? 0;
+}
+
+type ChatMessageObserver = (msg: CachedChatMessage) => void;
+let observer: ChatMessageObserver | null = null;
+
+/**
+ * Register a single observer to be notified after every successful putChatMessage.
+ * Single-slot by design (one consumer = window flusher); call with `null` to
+ * clear (used by tests). Re-registering replaces the prior observer.
+ */
+export function registerChatMessageObserver(
+  fn: ChatMessageObserver | null,
+): void {
+  observer = fn;
 }

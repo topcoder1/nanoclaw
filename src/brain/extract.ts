@@ -6,10 +6,15 @@
  *   Produces a signalScore in [0, 1] plus a list of Claims built from raw
  *   matches. Zero external dependencies.
  *
- * Tier 2 — Claude Haiku 4.5 (gated by signalScore > 0.3 AND daily budget):
+ * Tier 2 — Claude Haiku 4.5 (gated by signalScore > 0.3 for email; chat
+ * modes bypass the signal gate but observe a partitioned budget):
  *   Sends a structured prompt, expects JSON with `claims[]`. Every call
- *   writes its measured cost into `cost_log`. If today's Anthropic
- *   `extract` spend >= $0.05, skips LLM tier and logs warn.
+ *   writes its measured cost into `cost_log` tagged `operation='extract'`
+ *   (email) or `operation='extract_chat'` (chat). Two-tier daily budget:
+ *   the overall ceiling (`BRAIN_LLM_DAILY_BUDGET_USD`) caps the union of
+ *   both, and a chat slice (`BRAIN_LLM_BUDGET_CHAT_PCT`, default 30%)
+ *   caps the chat operation alone. Either gate skips the LLM tier and
+ *   logs warn.
  *
  * Confidence gates are enforced at `extractPipeline` boundary:
  *   > 0.7        → KU stored, needs_review = 0
@@ -264,19 +269,48 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+export type ExtractCategory = 'email' | 'chat';
+
 /**
- * Sum today's Anthropic `extract` spend from cost_log.
+ * Resolve the chat-extraction slice as a fraction of the overall daily LLM
+ * budget. Reads `BRAIN_LLM_BUDGET_CHAT_PCT` (integer percent, 0–100); falls
+ * back to 30 if unset, blank, non-numeric, or out of range.
+ */
+export function getChatBudgetPct(): number {
+  const raw = process.env.BRAIN_LLM_BUDGET_CHAT_PCT;
+  if (!raw) return 30;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return 30;
+  return n;
+}
+
+/**
+ * Sum today's Anthropic extract spend. With no `category`, sums across both
+ * email (`operation='extract'`) and chat (`operation='extract_chat'`). With a
+ * category, filters to that operation tag.
  */
 export function getTodaysExtractSpend(
   db: Database.Database,
   day: string = todayStr(),
+  category?: ExtractCategory,
 ): number {
+  if (!category) {
+    const row = db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log
+         WHERE day = ? AND provider = 'anthropic'
+           AND operation IN ('extract', 'extract_chat')`,
+      )
+      .get(day) as { total: number };
+    return row.total;
+  }
+  const op = category === 'chat' ? 'extract_chat' : 'extract';
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log
-       WHERE day = ? AND provider = 'anthropic' AND operation = 'extract'`,
+       WHERE day = ? AND provider = 'anthropic' AND operation = ?`,
     )
-    .get(day) as { total: number };
+    .get(day, op) as { total: number };
   return row.total;
 }
 
@@ -285,11 +319,13 @@ function writeCost(
   day: string,
   units: number,
   costUsd: number,
+  category: ExtractCategory = 'email',
 ): void {
+  const op = category === 'chat' ? 'extract_chat' : 'extract';
   db.prepare(
     `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
-     VALUES (?, ?, 'anthropic', 'extract', ?, ?, ?)`,
-  ).run(newId(), day, units, costUsd, new Date().toISOString());
+     VALUES (?, ?, 'anthropic', ?, ?, ?, ?)`,
+  ).run(newId(), day, op, units, costUsd, new Date().toISOString());
 }
 
 /**
@@ -424,14 +460,25 @@ export async function extractLLM(
   const day = opts.day ?? todayStr();
   const isChat = input.mode === 'chat_single' || input.mode === 'chat_window';
   if (!isChat && opts.signalScore <= 0.3) return [];
-  const spent = getTodaysExtractSpend(db, day);
   const budget = getDailyLlmBudgetUsd();
-  if (spent >= budget) {
+  const totalSpent = getTodaysExtractSpend(db, day);
+  if (totalSpent >= budget) {
     logger.warn(
-      { spent, budget, day },
+      { spent: totalSpent, budget, day },
       'extractLLM: daily budget exceeded — skipping LLM tier',
     );
     return [];
+  }
+  if (isChat) {
+    const chatBudget = budget * (getChatBudgetPct() / 100);
+    const chatSpent = getTodaysExtractSpend(db, day, 'chat');
+    if (chatSpent >= chatBudget) {
+      logger.warn(
+        { chatSpent, chatBudget, day },
+        'extractLLM: chat-slice budget exceeded — skipping chat LLM tier',
+      );
+      return [];
+    }
   }
 
   const caller = opts.llmCaller ?? defaultLlmCaller;
@@ -439,7 +486,13 @@ export async function extractLLM(
     const prompt = buildPrompt(input);
     const response = await caller(prompt);
     const cost = costForUsage(response.inputTokens, response.outputTokens);
-    writeCost(db, day, response.inputTokens + response.outputTokens, cost);
+    writeCost(
+      db,
+      day,
+      response.inputTokens + response.outputTokens,
+      cost,
+      isChat ? 'chat' : 'email',
+    );
     return response.claims.map<Claim>((raw) => {
       const mentions: EntityMention[] = (raw.entities_mentioned ?? []).map(
         (m) => ({
