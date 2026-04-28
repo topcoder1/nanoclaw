@@ -1214,4 +1214,25 @@ describe('DiscordChannel', () => {
       expect(mergeEmits).toHaveLength(0);
     });
   });
+
+  describe('MessageCreate claw unmerge text trigger', () => {
+    it('emits entity.unmerge.requested with the prefix', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+      const msg = createMessage({
+        messageId: 'msg_unmerge',
+        content: 'claw unmerge 01KQB6K1',
+      });
+      await triggerMessage(msg);
+      const emits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'entity.unmerge.requested',
+      );
+      expect(emits).toHaveLength(1);
+      expect(emits[0][1]).toMatchObject({
+        platform: 'discord',
+        merge_id_or_prefix: '01KQB6K1',
+      });
+    });
+  });
 });

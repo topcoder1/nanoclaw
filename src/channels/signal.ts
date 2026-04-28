@@ -15,6 +15,7 @@ import type {
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
   EntityMergeRequestedEvent,
+  EntityUnmergeRequestedEvent,
 } from '../events.js';
 
 export interface SignalChannelOpts {
@@ -346,6 +347,37 @@ export class SignalChannel implements Channel {
         logger.warn(
           { body, parsed: args },
           'signal: claw merge needs exactly two handles — ignoring',
+        );
+      }
+      return;
+    }
+
+    // 4c. `claw unmerge <merge_id> [--force]` text trigger — operator-issued
+    // undo of a prior merge. Strip a trailing `--force` token, leaving the
+    // rest as the merge_id (or prefix). The handler resolves the prefix.
+    const unmergeMatch = body.match(/^claw\s+unmerge\b\s*(.+)$/i);
+    if (unmergeMatch) {
+      const arg = unmergeMatch[1].trim();
+      if (arg) {
+        const tokens = arg.split(/\s+/);
+        const force =
+          tokens.length > 1 && tokens[tokens.length - 1] === '--force';
+        const prefix = force ? tokens.slice(0, -1).join(' ') : arg;
+        eventBus.emit('entity.unmerge.requested', {
+          type: 'entity.unmerge.requested',
+          source: 'signal',
+          timestamp: Date.now(),
+          payload: {},
+          platform: 'signal',
+          chat_id: chatId,
+          requested_by_handle: envelope.sourceName ?? sourceJid,
+          merge_id_or_prefix: prefix,
+          force,
+        } satisfies EntityUnmergeRequestedEvent);
+      } else {
+        logger.warn(
+          { body },
+          'signal: claw unmerge needs a merge_id or prefix — ignoring',
         );
       }
       return;

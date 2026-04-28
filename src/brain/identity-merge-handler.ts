@@ -1,9 +1,12 @@
 import type Database from 'better-sqlite3';
 import { eventBus } from '../event-bus.js';
-import type { EntityMergeRequestedEvent } from '../events.js';
+import type {
+  EntityMergeRequestedEvent,
+  EntityUnmergeRequestedEvent,
+} from '../events.js';
 import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
-import { mergeEntities } from './identity-merge.js';
+import { mergeEntities, unmergeEntities } from './identity-merge.js';
 
 export interface MergeHandlerOpts {
   db?: Database.Database;
@@ -153,7 +156,88 @@ export async function handleEntityMergeRequested(
   }
 }
 
-let unsub: (() => void) | null = null;
+interface MergeLogRow {
+  merge_id: string;
+  kept_entity_id: string;
+  merged_entity_id: string;
+}
+
+/**
+ * Handle `claw unmerge <merge_id_or_prefix> [--force]`. Resolves the prefix
+ * to a unique entity_merge_log row, calls unmergeEntities, sends an ack.
+ *
+ *  - exact merge_id match wins outright
+ *  - otherwise we match by `merge_id LIKE prefix||'%'`
+ *  - if zero matches → user-friendly error
+ *  - if 2+ matches → ambiguous (lists short ids), refuse
+ *  - if guardrail blocks (post-merge ku_entities), tell operator about --force
+ */
+export async function handleEntityUnmergeRequested(
+  evt: EntityUnmergeRequestedEvent,
+  opts: MergeHandlerOpts = {},
+): Promise<void> {
+  const db = opts.db ?? getBrainDb();
+  const reply = opts.sendReply ?? (async () => {});
+
+  const prefix = evt.merge_id_or_prefix.trim();
+  if (!prefix) {
+    await reply(`claw unmerge: missing merge_id`);
+    return;
+  }
+
+  // Try exact first, then prefix match.
+  let row = db
+    .prepare(
+      `SELECT merge_id, kept_entity_id, merged_entity_id FROM entity_merge_log WHERE merge_id = ?`,
+    )
+    .get(prefix) as MergeLogRow | undefined;
+  if (!row) {
+    const matches = db
+      .prepare(
+        `SELECT merge_id, kept_entity_id, merged_entity_id FROM entity_merge_log
+          WHERE merge_id LIKE ? || '%' LIMIT 5`,
+      )
+      .all(prefix) as MergeLogRow[];
+    if (matches.length === 0) {
+      await reply(`claw unmerge: no merge_log row matches '${prefix}'`);
+      return;
+    }
+    if (matches.length > 1) {
+      const ids = matches.map((m) => m.merge_id.slice(0, 8) + '…').join(', ');
+      await reply(
+        `claw unmerge: prefix '${prefix}' is ambiguous (${matches.length} matches: ${ids}) — pass a longer prefix`,
+      );
+      return;
+    }
+    row = matches[0];
+  }
+
+  try {
+    const result = await unmergeEntities(row.merge_id, {
+      db,
+      force: evt.force ?? false,
+    });
+    await reply(
+      `claw unmerge: ✓ rolled back merge ${result.merge_id.slice(0, 6)}… — kept ${result.kept_entity_id.slice(0, 6)}…, restored ${result.merged_entity_id.slice(0, 6)}…`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err: msg, merge_id: row.merge_id },
+      'identity-merge-handler: unmerge failed',
+    );
+    if (msg.includes('added after the merge')) {
+      await reply(
+        `claw unmerge: refused — ${msg}. Append \` --force\` to override.`,
+      );
+    } else {
+      await reply(`claw unmerge: failed — ${msg}`);
+    }
+  }
+}
+
+let unsubMerge: (() => void) | null = null;
+let unsubUnmerge: (() => void) | null = null;
 
 /**
  * Channel-aware reply sender wired by index.ts after channels connect.
@@ -186,8 +270,8 @@ export interface IdentityMergeStartOpts {
 export function startIdentityMergeHandler(
   opts: IdentityMergeStartOpts = {},
 ): void {
-  if (unsub) return;
-  unsub = eventBus.on('entity.merge.requested', async (evt) => {
+  if (unsubMerge || unsubUnmerge) return;
+  unsubMerge = eventBus.on('entity.merge.requested', async (evt) => {
     try {
       // Per-event reply: prefer the explicit opts.sendReply (tests), else
       // build one from the channel-aware setter, else no-op.
@@ -204,12 +288,31 @@ export function startIdentityMergeHandler(
       );
     }
   });
+  unsubUnmerge = eventBus.on('entity.unmerge.requested', async (evt) => {
+    try {
+      const reply: ((text: string) => Promise<void>) | undefined =
+        opts.sendReply ??
+        (channelReply
+          ? (text: string) => channelReply!(evt.chat_id, evt.platform, text)
+          : undefined);
+      await handleEntityUnmergeRequested(evt, { sendReply: reply });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), evt },
+        'identity-merge-handler: top-level error (unmerge)',
+      );
+    }
+  });
   logger.info('Identity merge handler started');
 }
 
 export function stopIdentityMergeHandler(): void {
-  if (unsub) {
-    unsub();
-    unsub = null;
+  if (unsubMerge) {
+    unsubMerge();
+    unsubMerge = null;
+  }
+  if (unsubUnmerge) {
+    unsubUnmerge();
+    unsubUnmerge = null;
   }
 }

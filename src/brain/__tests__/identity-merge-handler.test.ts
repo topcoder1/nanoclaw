@@ -14,7 +14,10 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { handleEntityMergeRequested } from '../identity-merge-handler.js';
+import {
+  handleEntityMergeRequested,
+  handleEntityUnmergeRequested,
+} from '../identity-merge-handler.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-merge-h-'));
@@ -352,5 +355,202 @@ describe('identity-merge-handler — setIdentityMergeReply (channel-aware)', () 
     expect(channelCalls).toHaveLength(0);
 
     setIdentityMergeReply(null);
+  });
+});
+
+describe('handleEntityUnmergeRequested', () => {
+  // Helper used by the unmerge tests.
+  async function setupMergedEntities(db: any) {
+    seedPerson(db, 'a', 'A');
+    seedPerson(db, 'b', 'B');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, account, confidence,
+         valid_from, recorded_at, extracted_by, needs_review)
+       VALUES ('k-a', 'about A', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0),
+              ('k-b', 'about B', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-a', 'a', 'mentioned')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-b', 'b', 'mentioned')`,
+    ).run();
+    const { mergeEntities } = await import('../identity-merge.js');
+    return mergeEntities('a', 'b', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:op',
+      db,
+    });
+  }
+
+  it('resolves an exact merge_id and rolls back', async () => {
+    const db = getBrainDb();
+    const merge = await setupMergedEntities(db);
+    const sent: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: merge.merge_id,
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
+    );
+    expect(sent[0]).toMatch(/rolled back/i);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any).n,
+    ).toBe(0);
+  });
+
+  it('resolves a unique prefix', async () => {
+    const db = getBrainDb();
+    const merge = await setupMergedEntities(db);
+    const prefix = merge.merge_id.slice(0, 8);
+    const sent: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: prefix,
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
+    );
+    expect(sent[0]).toMatch(/rolled back/i);
+  });
+
+  it('refuses when prefix is ambiguous', async () => {
+    const db = getBrainDb();
+    // Insert two merge_log rows with the same prefix.
+    db.prepare(
+      `INSERT INTO entity_merge_log (merge_id, kept_entity_id, merged_entity_id,
+         pre_merge_snapshot, confidence, evidence, merged_at, merged_by)
+       VALUES ('AAAAAA01', 'x', 'y', '{}', 1.0, '{}', '2026-04-27T00:00:00Z', 'human:op'),
+              ('AAAAAA02', 'p', 'q', '{}', 1.0, '{}', '2026-04-27T00:00:00Z', 'human:op')`,
+    ).run();
+    const sent: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: 'AAAAAA',
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
+    );
+    expect(sent[0]).toMatch(/ambiguous/i);
+  });
+
+  it('refuses when no match', async () => {
+    const db = getBrainDb();
+    const sent: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: 'NONESUCH',
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
+    );
+    expect(sent[0]).toMatch(/no merge_log row matches/i);
+  });
+
+  it('hints --force when guardrail blocks', async () => {
+    const db = getBrainDb();
+    const merge = await setupMergedEntities(db);
+    // Add a post-merge ku_entities row to trigger the guardrail.
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, account, confidence,
+         valid_from, recorded_at, extracted_by, needs_review)
+       VALUES ('k-post', 'post', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-post', 'a', 'mentioned')`,
+    ).run();
+
+    const sent: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: merge.merge_id,
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
+    );
+    expect(sent[0]).toMatch(/--force/i);
+
+    // With force:true it succeeds.
+    const sent2: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: merge.merge_id,
+        force: true,
+      },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent2.push(t);
+        },
+      },
+    );
+    expect(sent2[0]).toMatch(/rolled back/i);
   });
 });
