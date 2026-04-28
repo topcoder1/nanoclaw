@@ -152,19 +152,23 @@ export class SignalChannel implements Channel {
 
     if (!dataMsg) {
       // Diagnostic: Note-to-Self deletes arrive via syncMessage without
-      // sentMessage. Capture the shape so a follow-up can route them.
-      if (envelope.syncMessage) {
-        try {
-          logger.info(
-            {
-              source: envelope.sourceNumber,
-              syncMessageKeys: Object.keys(envelope.syncMessage),
-              syncMessageJson: JSON.stringify(envelope.syncMessage).slice(0, 500),
-            },
-            'Signal: syncMessage with no sentMessage — capturing shape for edit/delete sync investigation',
-          );
-        } catch {}
-      }
+      // sentMessage. Capture the FULL envelope JSON so a follow-up can
+      // identify the exact field signal-cli uses for sync deletes.
+      try {
+        const envJson = JSON.stringify(envelope);
+        logger.info(
+          {
+            source: envelope.sourceNumber,
+            envelopeKeys: Object.keys(envelope),
+            syncMessageKeys: envelope.syncMessage
+              ? Object.keys(envelope.syncMessage)
+              : [],
+            envelopeJsonLen: envJson.length,
+            envelopeJson: envJson.slice(0, 2000),
+          },
+          'Signal: envelope without dataMsg — capturing full shape for edit/delete sync investigation',
+        );
+      } catch {}
       return;
     }
 

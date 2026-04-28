@@ -76,6 +76,8 @@ export class WhatsAppChannel implements Channel {
   /** Resolve/reject the initial connect() on first open or auth failure. */
   private pendingFirstOpen?: () => void;
   private pendingFirstOpenReject?: (err: Error) => void;
+  private reconnectAttempts = 0;
+  private reconnectTimer?: NodeJS.Timeout;
 
   private opts: WhatsAppChannelOpts;
 
@@ -181,15 +183,31 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (cap),
+          // jittered ±25%. Resets to 0 on a successful connection (handled in
+          // the connection === 'open' branch below).
+          this.reconnectAttempts += 1;
+          const baseMs = Math.min(
+            30_000,
+            1000 * 2 ** Math.min(this.reconnectAttempts - 1, 5),
+          );
+          const jitter = baseMs * (0.75 + Math.random() * 0.5);
+          const delayMs = Math.round(jitter);
+          logger.info(
+            { attempt: this.reconnectAttempts, delayMs, reason },
+            'Reconnecting after backoff',
+          );
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error(
+                { err: err instanceof Error ? err.message : String(err) },
+                'Reconnect attempt failed',
+              );
+            });
+          }, delayMs);
+          if (typeof this.reconnectTimer.unref === 'function')
+            this.reconnectTimer.unref();
         } else {
           logger.error('WhatsApp logged out. Run /setup to re-authenticate.');
           this.sock?.end(undefined);
@@ -203,6 +221,13 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        // Successful connection clears the backoff counter so any future
+        // reconnect storm starts from 1s again.
+        this.reconnectAttempts = 0;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = undefined;
+        }
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
