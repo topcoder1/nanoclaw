@@ -25,7 +25,9 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const FRONTMATTER_DELIM = '---';
-const DEFAULT_CONFIG: ChatIngestConfig = { brain_ingest: 'off' };
+const DEFAULT_CONFIG: ChatIngestConfig = Object.freeze({
+  brain_ingest: 'off',
+}) as ChatIngestConfig;
 
 /** Test helper — drop the in-memory cache. */
 export function _resetGroupFrontmatterCache(): void {
