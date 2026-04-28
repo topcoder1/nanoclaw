@@ -28,6 +28,7 @@ import {
 } from '../learning/rules-engine.js';
 
 import { getBrainDb } from './db.js';
+import { logCost } from './metrics.js';
 
 // --- Public types ----------------------------------------------------------
 
@@ -240,11 +241,32 @@ export function buildReflectionPrompt(
   return lines.join('\n');
 }
 
+/** Haiku 4.5 pricing — USD per 1M tokens, as of 2026-Q1. Mirrors extract.ts. */
+const HAIKU_INPUT_PER_MILLION = 1.0;
+const HAIKU_OUTPUT_PER_MILLION = 5.0;
+
+export function estimateHaikuCostUsd(
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  return (
+    (inputTokens / 1_000_000) * HAIKU_INPUT_PER_MILLION +
+    (outputTokens / 1_000_000) * HAIKU_OUTPUT_PER_MILLION
+  );
+}
+
 /**
  * Adapter — reuses extract.ts's defaultLlmCaller plumbing (Haiku, env, JSON
  * parsing) but expects a `rules` payload instead of `claims`. We post-process
  * the parsed text rather than calling extract.ts directly so the prompt and
  * schema can diverge cleanly.
+ *
+ * Writes one `cost_log` row per call with operation='reflect' so the
+ * weekly digest's cost section accounts for reflection spend. Without
+ * this the digest under-reports (the reviewer flagged this on PR #31:
+ * extract.ts logs, reflect.ts didn't — visibility gap of ~$0.50/year).
+ * Cost-log failure is non-fatal — we already have the LLM result;
+ * dropping a cost row shouldn't fail the run.
  */
 export const defaultReflectionLlmCaller: ReflectionLlmCaller = async (
   prompt,
@@ -270,10 +292,25 @@ export const defaultReflectionLlmCaller: ReflectionLlmCaller = async (
   const parsed = JSON.parse(raw) as { rules?: EmittedRule[] };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const usage = (result as any).usage ?? {};
+  const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
+  try {
+    logCost({
+      provider: 'anthropic',
+      operation: 'reflect',
+      units: inputTokens + outputTokens,
+      costUsd: estimateHaikuCostUsd(inputTokens, outputTokens),
+    });
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'procedural-reflect: cost_log write failed (non-fatal)',
+    );
+  }
   return {
     rules: parsed.rules,
-    inputTokens: usage.inputTokens ?? usage.promptTokens ?? 0,
-    outputTokens: usage.outputTokens ?? usage.completionTokens ?? 0,
+    inputTokens,
+    outputTokens,
   };
 };
 

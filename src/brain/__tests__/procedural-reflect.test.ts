@@ -36,6 +36,7 @@ import { _closeBrainDb, getBrainDb } from '../db.js';
 import {
   buildReflectionPrompt,
   collectSignals,
+  estimateHaikuCostUsd,
   findSupersedeCandidates,
   hasUsableSignals,
   reflectAndEmit,
@@ -290,6 +291,25 @@ describe('brain/procedural-reflect', () => {
         fakeRule('r1', ['email.draft'], { supersededAt: NOW }),
       ]);
       expect(candidates).toEqual([]);
+    });
+  });
+
+  describe('estimateHaikuCostUsd', () => {
+    // Pricing pinned to Haiku 4.5 ($1/M input, $5/M output as of 2026-Q1).
+    // If pricing changes, both this test and the constants in
+    // procedural-reflect.ts need updating in lockstep.
+    it('charges $1 per million input tokens and $5 per million output', () => {
+      expect(estimateHaikuCostUsd(1_000_000, 0)).toBeCloseTo(1.0, 6);
+      expect(estimateHaikuCostUsd(0, 1_000_000)).toBeCloseTo(5.0, 6);
+    });
+
+    it('combines input + output proportionally', () => {
+      // Realistic single-call: 2K input + 1K output = $0.002 + $0.005 = $0.007
+      expect(estimateHaikuCostUsd(2_000, 1_000)).toBeCloseTo(0.007, 6);
+    });
+
+    it('returns 0 for zero tokens (LLM no-op)', () => {
+      expect(estimateHaikuCostUsd(0, 0)).toBe(0);
     });
   });
 
