@@ -27,14 +27,21 @@ const HASH_RE = /^[a-f0-9]{64}$/;
 const db = getBrainDb();
 
 // ---- 1. Backfill person canonical from email alias ---------------------
+// Correlated subquery + ORDER BY confidence picks one alias per person
+// deterministically — a LEFT JOIN would multiply rows when a person has
+// more than one un-expired email alias, and the second UPDATE in the
+// loop would silently overwrite the first.
 const personRows = db
   .prepare(
-    `SELECT e.entity_id, a.field_value AS email
+    `SELECT e.entity_id,
+            (SELECT a.field_value
+               FROM entity_aliases a
+              WHERE a.entity_id = e.entity_id
+                AND a.field_name = 'email'
+                AND a.valid_until IS NULL
+              ORDER BY a.confidence DESC, a.valid_from ASC
+              LIMIT 1) AS email
        FROM entities e
-       LEFT JOIN entity_aliases a
-         ON a.entity_id = e.entity_id
-        AND a.field_name = 'email'
-        AND a.valid_until IS NULL
       WHERE e.entity_type = 'person'
         AND e.canonical IS NULL`,
   )

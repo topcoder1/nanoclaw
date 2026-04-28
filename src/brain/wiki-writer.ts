@@ -261,12 +261,24 @@ export async function rebuildIndex(
   opts: { db?: Database.Database } = {},
 ): Promise<void> {
   const db = opts.db ?? getBrainDb();
+  // ORDER BY mirrors `deriveTitle`'s fallback chain so the on-disk index
+  // is sorted by the same string the user reads (otherwise a person with
+  // only `email` in canonical sorts by ULID but displays as the email,
+  // producing a visually unsorted list within the type heading).
   const rows = db
     .prepare(
       `SELECT entity_id, entity_type, canonical, wiki_summary
          FROM entities
          ORDER BY entity_type ASC,
-                  COALESCE(json_extract(canonical, '$.name'), entity_id) ASC`,
+                  COALESCE(
+                    json_extract(canonical, '$.name'),
+                    json_extract(canonical, '$.email'),
+                    json_extract(canonical, '$.domain'),
+                    json_extract(canonical, '$.repo_slug'),
+                    json_extract(canonical, '$.slug'),
+                    json_extract(canonical, '$.tag'),
+                    entity_id
+                  ) ASC`,
     )
     .all() as IndexRow[];
 
