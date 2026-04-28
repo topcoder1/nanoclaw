@@ -17,6 +17,7 @@ import type {
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
   EntityMergeRequestedEvent,
+  EntityUnmergeRequestedEvent,
 } from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -84,6 +85,40 @@ export class DiscordChannel implements Channel {
           logger.warn(
             { content: rawContent, parsed: args },
             'discord: claw merge needs exactly two handles — ignoring',
+          );
+        }
+        return;
+      }
+
+      // `claw unmerge <merge_id> [--force]` text trigger — operator-issued
+      // undo of a prior merge. Strip a trailing `--force` token, leaving the
+      // rest as the merge_id (or prefix). The handler resolves the prefix.
+      const unmergeMatch = rawContent.match(/^claw\s+unmerge\b\s*(.+)$/i);
+      if (unmergeMatch) {
+        const arg = unmergeMatch[1].trim();
+        if (arg) {
+          const tokens = arg.split(/\s+/);
+          const force =
+            tokens.length > 1 && tokens[tokens.length - 1] === '--force';
+          const prefix = force ? tokens.slice(0, -1).join(' ') : arg;
+          eventBus.emit('entity.unmerge.requested', {
+            type: 'entity.unmerge.requested',
+            source: 'discord',
+            timestamp: Date.now(),
+            payload: {},
+            platform: 'discord',
+            chat_id: message.channelId,
+            requested_by_handle:
+              message.member?.displayName ??
+              message.author?.username ??
+              'unknown',
+            merge_id_or_prefix: prefix,
+            force,
+          } satisfies EntityUnmergeRequestedEvent);
+        } else {
+          logger.warn(
+            { content: rawContent },
+            'discord: claw unmerge needs a merge_id or prefix — ignoring',
           );
         }
         return;

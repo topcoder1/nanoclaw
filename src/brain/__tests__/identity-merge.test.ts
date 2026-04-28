@@ -15,7 +15,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { mergeEntities } from '../identity-merge.js';
+import { mergeEntities, unmergeEntities } from '../identity-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-merge-'));
@@ -213,5 +213,151 @@ describe('mergeEntities — rejection cases', () => {
         db,
       }),
     ).rejects.toThrow(/already merged/);
+  });
+});
+
+describe('unmergeEntities — happy path', () => {
+  it('round-trips: merge then unmerge restores original ku_entities and aliases', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'a', 'A');
+    seedPerson(db, 'b', 'B');
+
+    // Seed each with a unique KU + alias.
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, account, confidence,
+         valid_from, recorded_at, extracted_by, needs_review)
+       VALUES ('k-a', 'about A', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0),
+              ('k-b', 'about B', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
+    ).run();
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-a', 'a', 'mentioned')`).run();
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-b', 'b', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al-b', 'b', 'signal', 'phone', '+15550000000', '2026-04-27T00:00:00Z', 1.0)`,
+    ).run();
+
+    const merge = await mergeEntities('a', 'b', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:op',
+      db,
+    });
+
+    // After merge: a has both k-a + k-b; b has none; al-b points at a.
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='a'`).get() as any).n,
+    ).toBe(2);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='b'`).get() as any).n,
+    ).toBe(0);
+    expect(
+      (db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`).get() as any).entity_id,
+    ).toBe('a');
+
+    const result = await unmergeEntities(merge.merge_id, { db });
+    expect(result.merge_id).toBe(merge.merge_id);
+
+    // After unmerge: each back to pre-merge state.
+    const aLinks = db.prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='a'`).all() as Array<{ ku_id: string }>;
+    const bLinks = db.prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='b'`).all() as Array<{ ku_id: string }>;
+    expect(aLinks.map((r) => r.ku_id)).toEqual(['k-a']);
+    expect(bLinks.map((r) => r.ku_id)).toEqual(['k-b']);
+    expect(
+      (db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`).get() as any).entity_id,
+    ).toBe('b');
+
+    // merge_log row removed.
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log WHERE merge_id=?`).get(merge.merge_id) as any).n,
+    ).toBe(0);
+  });
+
+  it('coalesced ku_entities are correctly split back', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'x', 'X');
+    seedPerson(db, 'y', 'Y');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, account, confidence,
+         valid_from, recorded_at, extracted_by, needs_review)
+       VALUES ('k1', 'shared', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
+    ).run();
+    // Both linked to k1 — merge will INSERT OR IGNORE then delete y's row.
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'x', 'mentioned')`).run();
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'y', 'mentioned')`).run();
+
+    const merge = await mergeEntities('x', 'y', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:op',
+      db,
+    });
+    await unmergeEntities(merge.merge_id, { db });
+
+    // Both entities relink to k1 (back to pre-merge state).
+    const xLinks = db.prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`).all() as Array<{ entity_id: string }>;
+    expect(xLinks.map((r) => r.entity_id).sort()).toEqual(['x', 'y']);
+  });
+});
+
+describe('unmergeEntities — rejection cases', () => {
+  it('rejects when merge_id does not exist', async () => {
+    const db = getBrainDb();
+    await expect(unmergeEntities('nonexistent', { db })).rejects.toThrow(
+      /not found/,
+    );
+  });
+
+  it('rejects v1 snapshots (schema_version < 2)', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'a', 'A');
+    seedPerson(db, 'b', 'B');
+    // Insert a v1-style merge log row directly (no schema_version field).
+    db.prepare(
+      `INSERT INTO entity_merge_log (merge_id, kept_entity_id, merged_entity_id,
+         pre_merge_snapshot, confidence, evidence, merged_at, merged_by)
+       VALUES ('legacy', 'a', 'b', '{"kept":{"entity_id":"a"},"merged":{"entity_id":"b"}}',
+               1.0, '{}', '2026-04-27T00:00:00Z', 'human:op')`,
+    ).run();
+    await expect(unmergeEntities('legacy', { db })).rejects.toThrow(
+      /schema_version/,
+    );
+  });
+
+  it('refuses when kept entity has post-merge ku_entities additions (without force)', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'a', 'A');
+    seedPerson(db, 'b', 'B');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, account, confidence,
+         valid_from, recorded_at, extracted_by, needs_review)
+       VALUES ('k-pre', 'pre', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0),
+              ('k-post', 'post', 'signal_message', 'personal', 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
+    ).run();
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-pre', 'a', 'mentioned')`).run();
+
+    const merge = await mergeEntities('a', 'b', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:op',
+      db,
+    });
+    // Simulate a post-merge addition: link k-post to the kept entity 'a'.
+    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-post', 'a', 'mentioned')`).run();
+
+    await expect(unmergeEntities(merge.merge_id, { db })).rejects.toThrow(
+      /added after the merge/,
+    );
+
+    // With force:true it succeeds (and discards k-post link).
+    await unmergeEntities(merge.merge_id, { db, force: true });
+    const postLinks = db
+      .prepare(`SELECT * FROM ku_entities WHERE ku_id='k-post'`)
+      .all() as Array<unknown>;
+    expect(postLinks).toHaveLength(0);
   });
 });

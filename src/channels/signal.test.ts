@@ -845,6 +845,32 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     await channel.disconnect();
   });
 
+  it('claw unmerge text emits entity.unmerge.requested with the prefix', async () => {
+    const opts = createInboundTestOpts();
+    const env = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000000001,
+        message: 'claw unmerge 01KQB6K1',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(env);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const emits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'entity.unmerge.requested',
+    );
+    expect(emits).toHaveLength(1);
+    expect(emits[0][1]).toMatchObject({
+      type: 'entity.unmerge.requested',
+      platform: 'signal',
+      merge_id_or_prefix: '01KQB6K1',
+    });
+    await channel.disconnect();
+  });
+
   it('inbound editMessage emits chat.message.edited and upserts cache with new text + edited_at', async () => {
     const opts = createInboundTestOpts();
     // Pre-cache lookup returns the "before" row.

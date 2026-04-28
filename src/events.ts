@@ -822,6 +822,21 @@ export interface EntityMergeRequestedEvent extends NanoClawEvent {
   handle_b: string;
 }
 
+/**
+ * Emitted when an operator types `claw unmerge <merge_id_or_prefix>` in an
+ * opted-in chat. The brain-side handler resolves the prefix to a merge_log
+ * row, calls unmergeEntities, and sends an ack reply to the chat.
+ */
+export interface EntityUnmergeRequestedEvent extends NanoClawEvent {
+  type: 'entity.unmerge.requested';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  requested_by_handle: string;
+  merge_id_or_prefix: string;
+  force?: boolean;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -894,6 +909,7 @@ export interface EventMap {
   'chat.message.edited': ChatMessageEditedEvent;
   'chat.message.deleted': ChatMessageDeletedEvent;
   'entity.merge.requested': EntityMergeRequestedEvent;
+  'entity.unmerge.requested': EntityUnmergeRequestedEvent;
 }
 
 export type EventType = keyof EventMap;

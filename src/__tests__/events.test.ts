@@ -60,3 +60,19 @@ describe('entity merge event type', () => {
     expect(evt.type).toBe('entity.merge.requested');
   });
 });
+
+describe('entity unmerge event type', () => {
+  it('EntityUnmergeRequestedEvent has all required fields', () => {
+    const evt: import('../events.js').EntityUnmergeRequestedEvent = {
+      type: 'entity.unmerge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      merge_id_or_prefix: '01KQB6',
+    };
+    expect(evt.type).toBe('entity.unmerge.requested');
+  });
+});
