@@ -125,16 +125,35 @@ interface RecentQueryRow {
 // --- Title derivation ------------------------------------------------------
 
 /**
+ * Parse the raw `entities.canonical` string column into a usable object.
+ * Returns null on missing or malformed JSON. Centralized here (rather
+ * than re-implemented per consumer) so wiki-writer, wiki-command, and
+ * any future caller all interpret canonical the same way — prior
+ * versions had three separate copies that drifted as the schema grew.
+ */
+export function parseCanonical(
+  canonical: string | null,
+): Record<string, unknown> | null {
+  if (!canonical) return null;
+  try {
+    return JSON.parse(canonical) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Choose the human-readable title for an entity. Prefers `name`, falls back
  * to whichever canonical field is most identifying for the type, then to
  * the entity_id as a last resort. The entity_id never produces a useful
  * page title but it's better than throwing — a renamed/incomplete entity
  * still gets a page so /wikilint can flag it.
  *
- * Exported so wiki-writer's `rebuildIndex` can apply the identical
- * fallback chain — without sharing this helper, the page title and the
- * index link text drift apart whenever an entity has a non-name
- * identifier (e.g. email-only person, domain-only company).
+ * Single source of truth for entity title text. ALL surfaces that show
+ * the entity to a human (wiki page heading, index link, /wiki ambiguous
+ * list, /wiki resolver match) MUST funnel through this helper —
+ * otherwise email-only persons / domain-only companies render as ULIDs
+ * in some places and emails/domains in others.
  */
 export function deriveTitle(
   entityType: EntityType,

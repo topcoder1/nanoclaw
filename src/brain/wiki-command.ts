@@ -32,6 +32,8 @@ import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
 import { escapeMarkdown } from './markdown.js';
 import {
+  deriveTitle,
+  parseCanonical,
   type EntityType,
   type SummaryLlmCaller,
 } from './wiki-projection.js';
@@ -201,7 +203,13 @@ function formatAmbiguous(query: string, candidates: CandidateRow[]): string {
     '',
   ];
   for (const c of candidates.slice(0, MAX_AMBIGUOUS_SUGGESTIONS)) {
-    const name = parseName(c.canonical) ?? c.entity_id;
+    // Same fallback chain as the page heading + index link, so an
+    // email-only person shows as `alice@example.com`, not as a ULID.
+    const name = deriveTitle(
+      c.entity_type,
+      parseCanonical(c.canonical),
+      c.entity_id,
+    );
     lines.push(
       `- **${escapeMarkdown(name)}** _(${c.entity_type}, \`${c.entity_id}\`)_`,
     );
@@ -215,17 +223,4 @@ function formatAmbiguous(query: string, candidates: CandidateRow[]): string {
     lines.push('', '_Refine your query or pass an entity-id prefix._');
   }
   return lines.join('\n');
-}
-
-function parseName(canonical: string | null): string | null {
-  if (!canonical) return null;
-  try {
-    const parsed = JSON.parse(canonical) as Record<string, unknown>;
-    if (typeof parsed.name === 'string' && parsed.name.trim().length > 0) {
-      return parsed.name.trim();
-    }
-  } catch {
-    /* malformed canonical — fall back to entity_id */
-  }
-  return null;
 }
