@@ -1,4 +1,5 @@
 import { getDb } from './db.js';
+import { logger } from './logger.js';
 
 export interface CachedChatMessage {
   platform: 'discord' | 'signal';
@@ -53,8 +54,16 @@ export function putChatMessage(msg: CachedChatMessage): void {
   if (observer) {
     try {
       observer(msg);
-    } catch {
-      // Observer must never break cache writes. PR 2 logs internally.
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          platform: msg.platform,
+          chat_id: msg.chat_id,
+          message_id: msg.message_id,
+        },
+        'chat-message-cache: observer threw — cache write succeeded, ignoring',
+      );
     }
   }
 }
