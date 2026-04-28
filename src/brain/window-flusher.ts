@@ -66,7 +66,11 @@ function key(platform: string, chat_id: string): string {
   return `${platform}:${chat_id}`;
 }
 
-/** Test helper — inspect a window without mutating it. */
+/**
+ * Test helper — returns the live `WindowState` reference (not a copy) for
+ * the given `(platform, chat_id)`, or `undefined` if no window is open.
+ * Read-only by convention: callers must not mutate the returned object.
+ */
 export function _peekWindow(
   platform: 'discord' | 'signal',
   chat_id: string,
@@ -122,8 +126,8 @@ export function noteMessage(
   }
   if (!w.message_ids.includes(message_id)) {
     w.message_ids.push(message_id);
-    w.last_at = sent_at;
   }
+  w.last_at = sent_at;
   if (w.message_ids.length >= w.cap) {
     flushOne(w, 'cap');
   }
