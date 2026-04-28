@@ -248,8 +248,11 @@ describe('brain/weekly-digest', () => {
     const topKuLine = md.split('\n').find((line) => line.includes('pricing'));
     expect(topKuLine).toBeDefined();
     expect(topKuLine).toContain('\\*very\\*');
-    // Escape covers the formatting triggers _ * ` [ — closing ] is inert.
-    expect(topKuLine).toContain('\\[urgent]');
+    // Escape covers the formatting triggers _ * ` [ ] ( ) — both opening
+    // and closing brackets are escaped now (regression fix in #29 review:
+    // unescaped ] would break Markdown links when subjects are
+    // interpolated as link text).
+    expect(topKuLine).toContain('\\[urgent\\]');
     expect(topKuLine).toContain('\\_');
     // And raw unescaped forms must not appear in that line.
     expect(topKuLine).not.toMatch(/[^\\]\*very\*/);
