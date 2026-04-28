@@ -120,7 +120,7 @@ describe('window-flusher', () => {
     expect(w!.last_at).toBe(t);
   });
 
-  it('flushIdle emits a ChatWindowFlushedEvent for windows past the idle threshold', () => {
+  it('flushIdle emits a ChatWindowFlushedEvent for windows past the idle threshold', async () => {
     setRegisteredGroup('dc:c3', {
       name: 'g3',
       folder: 'opt3',
@@ -151,7 +151,7 @@ describe('window-flusher', () => {
     noteMessage('discord', 'c3', 'm1', new Date(t0).toISOString());
     noteMessage('discord', 'c3', 'm2', new Date(t0 + 30_000).toISOString());
 
-    flushIdle(t0 + 30_000 + 90_000);
+    await flushIdle(t0 + 30_000 + 90_000);
 
     expect(events).toHaveLength(1);
     expect(events[0].flush_reason).toBe('idle');
@@ -194,7 +194,7 @@ describe('window-flusher', () => {
     expect(_peekWindow('discord', 'c4')).toBeUndefined();
   });
 
-  it('excludes message_ids passed to noteSave from the flushed transcript', () => {
+  it('excludes message_ids passed to noteSave from the flushed transcript', async () => {
     setRegisteredGroup('dc:c5', {
       name: 'g5',
       folder: 'opt5',
@@ -217,7 +217,7 @@ describe('window-flusher', () => {
       noteMessage('discord', 'c5', id, new Date(t0).toISOString());
     }
     noteSave('discord', 'c5', 'm2');
-    flushIdle(t0 + 5 * 60_000);
+    await flushIdle(t0 + 5 * 60_000);
 
     expect(events).toHaveLength(1);
     expect(events[0].message_ids).toEqual(['m1', 'm3']);
@@ -226,7 +226,7 @@ describe('window-flusher', () => {
     expect(events[0].transcript).toContain('text m3');
   });
 
-  it('flushAll emits with reason="shutdown" for every open window', () => {
+  it('flushAll emits with reason="shutdown" for every open window', async () => {
     setRegisteredGroup('dc:c6', {
       name: 'g6',
       folder: 'opt6',
@@ -264,7 +264,7 @@ describe('window-flusher', () => {
     });
     noteMessage('signal', 'c7', 'mB', now);
 
-    flushAll('shutdown');
+    await flushAll('shutdown');
 
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.flush_reason === 'shutdown')).toBe(true);
@@ -272,9 +272,9 @@ describe('window-flusher', () => {
     expect(_peekWindow('signal', 'c7')).toBeUndefined();
   });
 
-  it('flushAll on an empty state map is a no-op', () => {
+  it('flushAll on an empty state map is a no-op', async () => {
     const events = captured();
-    flushAll('shutdown');
+    await flushAll('shutdown');
     expect(events).toHaveLength(0);
   });
 
@@ -342,6 +342,38 @@ describe('window-flusher', () => {
     // A second call within the same day should NOT fire again.
     _runDailyCheck(today.getTime() + 60_000);
     expect(events).toHaveLength(1);
+  });
+
+  it('window transcript includes attachment summary lines (filename fallback)', async () => {
+    setRegisteredGroup('dc:c-att', {
+      name: 'g-att',
+      folder: 'opt-att',
+      trigger: '@nano',
+      added_at: new Date().toISOString(),
+    });
+    writeOptIn('opt-att', { idleMin: 1 });
+    const events = captured();
+    const t1 = new Date(Date.now() - 5 * 60_000).toISOString();
+    putChatMessage({
+      platform: 'discord',
+      chat_id: 'c-att',
+      message_id: 'mA',
+      sent_at: t1,
+      sender: 'u',
+      sender_name: 'X',
+      text: 'see attached',
+      attachments: [
+        { kind: 'image', filename: 'receipt.jpg' },
+        { kind: 'file', filename: 'spec.pdf' },
+      ],
+    });
+    noteMessage('discord', 'c-att', 'mA', t1);
+    await flushIdle(Date.now());
+
+    expect(events).toHaveLength(1);
+    expect(events[0].transcript).toContain('see attached');
+    expect(events[0].transcript).toContain('[image: receipt.jpg]');
+    expect(events[0].transcript).toContain('[file: spec.pdf]');
   });
 });
 
