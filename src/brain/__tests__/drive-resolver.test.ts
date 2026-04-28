@@ -111,7 +111,9 @@ Thrice: https://docs.google.com/document/d/dup1234567`;
   it('ignores non-Drive URLs and returns empty for empty input', () => {
     expect(extractDriveLinks('')).toEqual([]);
     expect(
-      extractDriveLinks('Plain email body with https://acme.co and nothing else'),
+      extractDriveLinks(
+        'Plain email body with https://acme.co and nothing else',
+      ),
     ).toEqual([]);
   });
 });
@@ -243,7 +245,7 @@ describe('ingest pipeline — shared-doc email creates drive KU', () => {
             subject: 'Presentation shared with you: "WXA v1.5"',
             sender: 'alex.ronquillo@whoisxmlapi.com',
             snippet:
-              'I\'ve shared an item with you: WXA v1.5 — https://docs.google.com/presentation/d/share123abc/edit',
+              "I've shared an item with you: WXA v1.5 — https://docs.google.com/presentation/d/share123abc/edit",
           },
         ],
         connection: 'test',

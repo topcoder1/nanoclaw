@@ -37,7 +37,11 @@ const CRED_DIR = path.join(os.homedir(), '.config', 'google-drive-mcp');
 const clientCache = new Map<string, OAuth2Client>();
 
 interface InstalledOAuthCreds {
-  installed?: { client_id: string; client_secret: string; redirect_uris?: string[] };
+  installed?: {
+    client_id: string;
+    client_secret: string;
+    redirect_uris?: string[];
+  };
   web?: { client_id: string; client_secret: string; redirect_uris?: string[] };
 }
 
