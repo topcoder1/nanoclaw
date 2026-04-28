@@ -171,12 +171,7 @@ function seedRecallQuery(db: Database.Database, opts: SeedQueryOpts): void {
     `INSERT INTO ku_queries
        (id, query_text, caller, account, scope, result_count, duration_ms, recorded_at)
      VALUES (?, ?, 'recall-command', 'work', NULL, ?, 50, ?)`,
-  ).run(
-    opts.queryId,
-    opts.text,
-    opts.retrievedKuIds.length,
-    opts.recordedAt,
-  );
+  ).run(opts.queryId, opts.text, opts.retrievedKuIds.length, opts.recordedAt);
   for (let i = 0; i < opts.retrievedKuIds.length; i++) {
     db.prepare(
       `INSERT INTO ku_retrievals
@@ -261,7 +256,7 @@ describe('brain/wiki-projection — renderEntityPage', () => {
     });
     seedRecallQuery(db, {
       queryId: 'q-1',
-      text: "what did Alice say about Q4 renewal?",
+      text: 'what did Alice say about Q4 renewal?',
       recordedAt: '2026-04-26T14:00:00Z',
       retrievedKuIds: ['ku-1'],
     });
@@ -272,8 +267,13 @@ describe('brain/wiki-projection — renderEntityPage', () => {
       retrievedKuIds: ['ku-3'],
     });
 
-    const out = renderEntityPage({ db, entityId: 'p-alice', nowIso: FIXED_NOW });
-    if (out === ENTITY_NOT_FOUND) throw new Error('unexpected ENTITY_NOT_FOUND');
+    const out = renderEntityPage({
+      db,
+      entityId: 'p-alice',
+      nowIso: FIXED_NOW,
+    });
+    if (out === ENTITY_NOT_FOUND)
+      throw new Error('unexpected ENTITY_NOT_FOUND');
 
     expect(out.entityType).toBe('person');
     expect(out.liveKuCount).toBe(3);
