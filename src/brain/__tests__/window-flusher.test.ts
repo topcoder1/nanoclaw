@@ -277,4 +277,76 @@ describe('window-flusher', () => {
     flushAll('shutdown');
     expect(events).toHaveLength(0);
   });
+
+  it('startWindowFlusher schedules a tick that triggers idle flushes', async () => {
+    setRegisteredGroup('dc:c8', {
+      name: 'g8',
+      folder: 'opt8',
+      trigger: '@nano',
+      added_at: new Date().toISOString(),
+    });
+    writeOptIn('opt8', { idleMin: 1 });
+    const events = captured();
+    const sentAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    putChatMessage({
+      platform: 'discord',
+      chat_id: 'c8',
+      message_id: 'mT',
+      sent_at: sentAt,
+      sender: 'u',
+      sender_name: 'Tic',
+      text: 'tick test',
+    });
+    noteMessage('discord', 'c8', 'mT', sentAt);
+
+    const { startWindowFlusher, stopWindowFlusher } = await import(
+      '../window-flusher.js'
+    );
+    startWindowFlusher({ tickIntervalMs: 50 });
+    await new Promise((r) => setTimeout(r, 200));
+    stopWindowFlusher();
+
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0].flush_reason).toBe('idle');
+  });
+
+  it('daily flush fires once per day when local hour crosses the threshold', async () => {
+    setRegisteredGroup('dc:c9', {
+      name: 'g9',
+      folder: 'opt9',
+      trigger: '@nano',
+      added_at: new Date().toISOString(),
+    });
+    writeOptIn('opt9');
+    const events = captured();
+    const now = Date.now();
+    putChatMessage({
+      platform: 'discord',
+      chat_id: 'c9',
+      message_id: 'mD',
+      sent_at: new Date(now).toISOString(),
+      sender: 'u',
+      sender_name: 'Day',
+      text: 'daily test',
+    });
+    noteMessage('discord', 'c9', 'mD', new Date(now).toISOString());
+
+    const { _runDailyCheck } = await import('../window-flusher.js');
+    // Pretend it's exactly the daily-flush hour today and we haven't fired.
+    const today = new Date(now);
+    today.setHours(getDailyFlushHourForTest(), 0, 0, 0);
+    _runDailyCheck(today.getTime());
+
+    expect(events).toHaveLength(1);
+    expect(events[0].flush_reason).toBe('daily');
+
+    // A second call within the same day should NOT fire again.
+    _runDailyCheck(today.getTime() + 60_000);
+    expect(events).toHaveLength(1);
+  });
 });
+
+function getDailyFlushHourForTest(): number {
+  const h = Number(process.env.WINDOW_DAILY_FLUSH_HOUR ?? '23');
+  return Number.isFinite(h) && h >= 0 && h < 24 ? h : 23;
+}

@@ -254,3 +254,71 @@ export function _unregisterObserver(): void {
   registerChatMessageObserver(null);
   observerRegistered = false;
 }
+
+// --- Daily flush + ticker --------------------------------------------------
+
+let lastDailyFlushDay: string | null = null;
+
+function localDayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Test/internal: run one daily-flush check at the given wall-clock instant. */
+export function _runDailyCheck(now: number = Date.now()): void {
+  const hour = new Date(now).getHours();
+  if (hour < getDailyFlushHour()) return;
+  const day = localDayKey(now);
+  if (lastDailyFlushDay === day) return;
+  lastDailyFlushDay = day;
+  flushAll('daily');
+}
+
+let timer: NodeJS.Timeout | null = null;
+
+export interface WindowFlusherOptions {
+  /** Override the per-tick interval. Default: 60_000 (one minute). */
+  tickIntervalMs?: number;
+}
+
+/**
+ * Start the per-minute ticker and register the chat-message observer. Safe
+ * to call multiple times — second call is a no-op.
+ */
+export function startWindowFlusher(opts: WindowFlusherOptions = {}): void {
+  if (timer) return;
+  _registerObserver();
+  const interval = opts.tickIntervalMs ?? 60_000;
+  timer = setInterval(() => {
+    try {
+      flushIdle();
+      _runDailyCheck();
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'window-flusher: tick failed',
+      );
+    }
+  }, interval);
+  // Don't keep the event loop alive on its own — tests and graceful
+  // shutdown should not hang on this timer.
+  if (typeof timer.unref === 'function') timer.unref();
+  logger.info(
+    { idle_ms: getIdleMs(), cap: getCap(), daily_hour: getDailyFlushHour() },
+    'Window flusher started',
+  );
+}
+
+/**
+ * Stop the ticker and emit `flush_reason='shutdown'` for every still-open
+ * window. Wired into stopBrainIngest in Task 6.
+ */
+export function stopWindowFlusher(): void {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  _unregisterObserver();
+  flushAll('shutdown');
+  lastDailyFlushDay = null;
+}
