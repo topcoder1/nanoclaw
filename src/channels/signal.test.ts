@@ -897,4 +897,44 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     expect(opts.onMessage).not.toHaveBeenCalled();
     await channel.disconnect();
   });
+
+  it('editMessage takes priority over claw save text trigger when edited body starts with "claw save"', async () => {
+    const opts = createInboundTestOpts();
+    mockGetChatMessage.mockReturnValue({
+      platform: 'signal',
+      chat_id: '+15559876543',
+      message_id: '1700000000000',
+      sent_at: '2026-04-27T00:00:00.000Z',
+      sender: '+15559876543',
+      text: 'claw save Original text',
+    });
+
+    const editEnvelope = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000099999,
+        // The edited message body still starts with "claw save". The
+        // editMessage check MUST run first.
+        message: 'claw save Edited text',
+        editMessage: {
+          targetSentTimestamp: 1700000000000,
+          dataMessage: { message: 'claw save Edited text' },
+        },
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(editEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const editedEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.edited',
+    );
+    const savedEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.saved',
+    );
+    expect(editedEmits).toHaveLength(1);
+    expect(savedEmits).toHaveLength(0);
+    await channel.disconnect();
+  });
 });

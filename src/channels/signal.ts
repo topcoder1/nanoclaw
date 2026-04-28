@@ -148,7 +148,23 @@ export class SignalChannel implements Channel {
       'Signal: processing envelope',
     );
 
-    if (!dataMsg) return;
+    if (!dataMsg) {
+      // Diagnostic: Note-to-Self deletes arrive via syncMessage without
+      // sentMessage. Capture the shape so a follow-up can route them.
+      if (envelope.syncMessage) {
+        try {
+          logger.info(
+            {
+              source: envelope.sourceNumber,
+              syncMessageKeys: Object.keys(envelope.syncMessage),
+              syncMessageJson: JSON.stringify(envelope.syncMessage).slice(0, 500),
+            },
+            'Signal: syncMessage with no sentMessage — capturing shape for edit/delete sync investigation',
+          );
+        } catch {}
+      }
+      return;
+    }
 
     const isSyncMessage = !envelope.dataMessage && !!envelope.syncMessage;
 
@@ -211,29 +227,10 @@ export class SignalChannel implements Channel {
       return;
     }
 
-    // 2. `claw save` text trigger.
-    const body = dataMsg.message?.trim() ?? '';
-    const clawMatch = body.match(/^claw\s+save\b\s*(.*)$/i);
-    if (clawMatch) {
-      const tail = clawMatch[1].trim();
-      eventBus.emit('chat.message.saved', {
-        type: 'chat.message.saved',
-        timestamp: Date.now(),
-        source: 'signal',
-        payload: {},
-        platform: 'signal',
-        chat_id: chatId,
-        message_id: messageId,
-        sender: sourceJid,
-        sender_display: envelope.sourceName,
-        sent_at: sentAt,
-        text: tail,
-        trigger: 'text',
-      } satisfies ChatMessageSavedEvent);
-      return;
-    }
-
-    // 4. editMessage envelope: emit chat.message.edited; UPSERT cache.
+    // 2. editMessage envelope: emit chat.message.edited; UPSERT cache.
+    //    MUST run before content-pattern matchers (e.g. "claw save") so an
+    //    edit whose body still starts with "claw save" routes as an edit,
+    //    not a fresh save.
     if (dataMsg.editMessage) {
       const targetTs = dataMsg.editMessage.targetSentTimestamp;
       const originalId = String(targetTs);
@@ -266,7 +263,8 @@ export class SignalChannel implements Channel {
       return;
     }
 
-    // 5. remoteDelete envelope: emit chat.message.deleted; tombstone cache.
+    // 3. remoteDelete envelope: emit chat.message.deleted; tombstone cache.
+    //    Same priority rationale as editMessage above.
     if (dataMsg.remoteDelete) {
       const targetTs = dataMsg.remoteDelete.timestamp;
       const originalId = String(targetTs);
@@ -295,7 +293,29 @@ export class SignalChannel implements Channel {
       return;
     }
 
-    // 3. Cache the message for future reaction lookups.
+    // 4. `claw save` text trigger.
+    const body = dataMsg.message?.trim() ?? '';
+    const clawMatch = body.match(/^claw\s+save\b\s*(.*)$/i);
+    if (clawMatch) {
+      const tail = clawMatch[1].trim();
+      eventBus.emit('chat.message.saved', {
+        type: 'chat.message.saved',
+        timestamp: Date.now(),
+        source: 'signal',
+        payload: {},
+        platform: 'signal',
+        chat_id: chatId,
+        message_id: messageId,
+        sender: sourceJid,
+        sender_display: envelope.sourceName,
+        sent_at: sentAt,
+        text: tail,
+        trigger: 'text',
+      } satisfies ChatMessageSavedEvent);
+      return;
+    }
+
+    // 5. Cache the message for future reaction lookups.
     if (body || (dataMsg.attachments?.length ?? 0) > 0) {
       putChatMessage({
         platform: 'signal',
