@@ -30,8 +30,9 @@ import type Database from 'better-sqlite3';
 
 import { logger } from '../logger.js';
 
+import { getDailyLlmBudgetUsd } from './extract.js';
 import { escapeMarkdown } from './markdown.js';
-import { logCost } from './metrics.js';
+import { getTodaysAnthropicSpend, logCost } from './metrics.js';
 
 // --- Public types ----------------------------------------------------------
 
@@ -237,7 +238,13 @@ function loadRecentQueries(
   db: Database.Database,
   entityId: string,
   limit: number,
+  nowIso: string,
 ): RecentQueryRow[] {
+  // 30-day window pinned to the caller-supplied `nowIso` rather than
+  // SQLite's `datetime('now')`, so the section renders deterministically
+  // for tests and so two simultaneous renders cross a midnight boundary
+  // produce the same window. `GROUP BY q.id` dedups: a single query that
+  // retrieved multiple KUs for this entity surfaces once, not N times.
   return db
     .prepare(
       `SELECT q.query_text, q.recorded_at
@@ -245,11 +252,12 @@ function loadRecentQueries(
          JOIN ku_retrievals r ON r.query_id = q.id
          JOIN ku_entities ke ON ke.ku_id = r.ku_id
         WHERE ke.entity_id = ?
+          AND q.recorded_at >= datetime(?, '-30 days')
         GROUP BY q.id
         ORDER BY q.recorded_at DESC
         LIMIT ?`,
     )
-    .all(entityId, limit) as RecentQueryRow[];
+    .all(entityId, nowIso, limit) as RecentQueryRow[];
 }
 
 // --- Section renderers -----------------------------------------------------
@@ -264,10 +272,13 @@ function renderFrontmatter(
   lines.push(`entity_type: ${e.entity_type}`);
   lines.push(`title: ${JSON.stringify(title)}`);
   if (e.canonical) {
-    // canonical is already-validated JSON from the entities table; we
-    // re-stringify it on one line so the frontmatter stays parseable by
-    // both YAML and Obsidian Dataview. JSON-as-YAML is a deliberate
-    // simplification — saves writing a YAML emitter for nested objects.
+    // Pass-through: the DB column is the raw JSON string written by
+    // entities.ts, which always goes through `JSON.stringify()` —
+    // single-line, no embedded newlines, valid YAML-as-JSON. If a
+    // future writer ever stores multi-line JSON, the frontmatter will
+    // break and this needs to defensively re-stringify (parse + stringify).
+    // JSON-as-YAML is a deliberate simplification — saves writing a YAML
+    // emitter for nested objects, and Obsidian Dataview parses it fine.
     lines.push(`canonical: ${e.canonical}`);
   }
   lines.push(`ku_count: ${liveCount}`);
@@ -371,6 +382,7 @@ export function renderEntityPage(
   input: RenderInput,
 ): RenderedPage | typeof ENTITY_NOT_FOUND {
   const { db, entityId } = input;
+  const nowIso = input.nowIso ?? new Date().toISOString();
   const maxFacts = input.maxFacts ?? 50;
   const maxRecentQueries = input.maxRecentQueries ?? 10;
 
@@ -392,7 +404,7 @@ export function renderEntityPage(
   const rels = loadRelationships(db, entityId);
   const facts = loadFacts(db, entityId, maxFacts);
   const liveCount = liveKuCount(db, entityId);
-  const recent = loadRecentQueries(db, entityId, maxRecentQueries);
+  const recent = loadRecentQueries(db, entityId, maxRecentQueries, nowIso);
 
   const sections: string[] = [
     renderFrontmatter(entity, liveCount, title),
@@ -492,9 +504,13 @@ export function shouldRegenerateSummary(opts: {
   const lastMs = Date.parse(opts.lastSynthesisAt);
   if (!Number.isFinite(lastMs)) return true;
   const nowMs = Date.parse(opts.nowIso);
-  if (Number.isFinite(nowMs) && nowMs - lastMs > SYNTHESIS_STALE_MS) {
-    return true;
-  }
+  // Fail toward regeneration on a malformed `nowIso` rather than silently
+  // skipping the staleness check. Only `Date.parse(new Date().toISOString())`
+  // ever lands here in production, but if a caller ever passes a garbage
+  // string we'd rather pay for one extra LLM call than reuse a year-old
+  // cache that the staleness check would normally have invalidated.
+  if (!Number.isFinite(nowMs)) return true;
+  if (nowMs - lastMs > SYNTHESIS_STALE_MS) return true;
   const cached = opts.cachedKuCount ?? 0;
   const drift = Math.abs(opts.liveKuCount - cached) / Math.max(1, cached);
   if (drift > KU_DRIFT_THRESHOLD) return true;
@@ -583,9 +599,12 @@ export const defaultSummaryLlmCaller: SummaryLlmCaller = async (prompt) => {
   const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
   const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
   try {
+    // Distinct CostOperation bucket so wiki-summary spend is attributable
+    // separately from `extract` and `reflect` in the digest's cost section.
+    // Mirrors the precedent set when procedural-reflect added `'reflect'`.
     logCost({
       provider: 'anthropic',
-      operation: 'extract',
+      operation: 'wiki_summary',
       units: inputTokens + outputTokens,
       costUsd: estimateHaikuCostUsd(inputTokens, outputTokens),
     });
@@ -635,6 +654,24 @@ export async function synthesizeEntitySummary(
   });
   if (!stale) return 'reused';
 
+  // Daily budget gate. Mirrors extract.ts:428 — fails-closed when today's
+  // total Anthropic spend (across extract + reflect + wiki_summary) is at
+  // or above the configured cap, so a runaway loop in any one workload
+  // can't drain the others' budget. Returns 'reused' when prior cache
+  // exists (so users still see something) and 'skipped' otherwise (so
+  // nothing is over-stamped — next pass after the budget window resets
+  // tries again).
+  const day = nowIso.slice(0, 10);
+  const spent = getTodaysAnthropicSpend(day);
+  const budget = getDailyLlmBudgetUsd();
+  if (spent >= budget) {
+    logger.warn(
+      { entityId, spent, budget, day },
+      'wiki-projection: daily Anthropic budget exceeded — skipping LLM call',
+    );
+    return entity.last_synthesis_at ? 'reused' : 'skipped';
+  }
+
   const canonical = entity.canonical
     ? (() => {
         try {
@@ -645,6 +682,11 @@ export async function synthesizeEntitySummary(
       })()
     : null;
   const title = deriveTitle(entity.entity_type, canonical, entity.entity_id);
+  // Note: `kus` is capped at `maxKus` (default 32) — the LLM may not see
+  // every live KU. `liveCount` (above) reflects the TRUE un-superseded
+  // count and is what gets stamped into `ku_count_at_last_synthesis`.
+  // The drift predicate uses the true count so regen fires whenever new
+  // KUs land, regardless of whether the LLM saw them last time.
   const kus = loadFacts(db, entityId, maxKus).map((k) => ({
     text: k.text,
     validFrom: k.valid_from,

@@ -636,6 +636,20 @@ describe('brain/wiki-projection — shouldRegenerateSummary', () => {
       }),
     ).toBe(true);
   });
+
+  it('regenerates (fail-toward-fresh) when nowIso is malformed', () => {
+    // Defensive — production always passes a valid ISO, but if a caller
+    // ever feeds garbage we'd rather pay for one regen than hold a stale
+    // cache forever.
+    expect(
+      shouldRegenerateSummary({
+        lastSynthesisAt: '2026-04-26T12:00:00Z',
+        cachedKuCount: 10,
+        liveKuCount: 10,
+        nowIso: 'not a date',
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('brain/wiki-projection — buildSummaryPrompt', () => {
@@ -951,5 +965,162 @@ describe('brain/wiki-projection — synthesizeEntitySummary', () => {
       .prepare(`SELECT wiki_summary FROM entities WHERE entity_id = ?`)
       .get('p-empty-resp') as { wiki_summary: string | null };
     expect(row.wiki_summary).toBeNull();
+  });
+
+  it('skips the LLM call when the daily Anthropic budget is exhausted', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-budget',
+      entityType: 'person',
+      canonical: { name: 'Budget Test' },
+    });
+    seedKu(db, { id: 'k', text: 'x', entityId: 'p-budget' });
+
+    // Default budget is $0.05/day. Pre-fill cost_log so today's spend
+    // is already at $0.10 — over the cap. The default uses todayStr()
+    // (UTC), which matches NOW.slice(0, 10) = '2026-04-27'.
+    db.prepare(
+      `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
+       VALUES (?, ?, 'anthropic', 'extract', ?, ?, ?)`,
+    ).run('cost-blocker', '2026-04-27', 100000, 0.1, NOW);
+
+    const llm: SummaryLlmCaller = vi.fn();
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-budget',
+      llm,
+      nowIso: NOW,
+    });
+    // No prior cache → skipped (not 'reused' which would imply cache exists)
+    expect(outcome).toBe('skipped');
+    expect(llm).not.toHaveBeenCalled();
+
+    // No DB stamps were written.
+    const row = db
+      .prepare(
+        `SELECT wiki_summary, last_synthesis_at FROM entities WHERE entity_id = ?`,
+      )
+      .get('p-budget') as {
+      wiki_summary: string | null;
+      last_synthesis_at: string | null;
+    };
+    expect(row.wiki_summary).toBeNull();
+    expect(row.last_synthesis_at).toBeNull();
+  });
+
+  it('budget gate degrades to "reused" when prior cache exists', async () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-budget-cached',
+      entityType: 'person',
+      canonical: { name: 'Budget Cached' },
+      // Stale enough to need regen (>7 days old)
+      lastSynthesisAt: '2026-04-15T12:00:00Z',
+      kuCountAtLastSynthesis: 1,
+      wikiSummary: 'Old summary from before the budget burst.',
+    });
+    seedKu(db, { id: 'k', text: 'x', entityId: 'p-budget-cached' });
+
+    // Same blow-the-budget setup as above
+    db.prepare(
+      `INSERT INTO cost_log (id, day, provider, operation, units, cost_usd, recorded_at)
+       VALUES (?, ?, 'anthropic', 'extract', ?, ?, ?)`,
+    ).run('cost-blocker-2', '2026-04-27', 100000, 0.1, NOW);
+
+    const llm: SummaryLlmCaller = vi.fn();
+    const outcome = await synthesizeEntitySummary({
+      db,
+      entityId: 'p-budget-cached',
+      llm,
+      nowIso: NOW,
+    });
+    expect(outcome).toBe('reused');
+    expect(llm).not.toHaveBeenCalled();
+
+    // Old cache is intact.
+    const summary = (
+      db
+        .prepare(`SELECT wiki_summary FROM entities WHERE entity_id = ?`)
+        .get('p-budget-cached') as { wiki_summary: string }
+    ).wiki_summary;
+    expect(summary).toBe('Old summary from before the budget burst.');
+  });
+});
+
+describe('brain/wiki-projection — Recent activity dedup', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-wiki-recent-'));
+  });
+
+  afterEach(() => {
+    _closeBrainDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('surfaces a single query once even when it retrieved multiple KUs for the entity', () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-dedup',
+      entityType: 'person',
+      canonical: { name: 'Dedup Subject' },
+    });
+    seedKu(db, { id: 'ku-d-1', text: 'fact 1', entityId: 'p-dedup' });
+    seedKu(db, { id: 'ku-d-2', text: 'fact 2', entityId: 'p-dedup' });
+    seedKu(db, { id: 'ku-d-3', text: 'fact 3', entityId: 'p-dedup' });
+    // ONE query that retrieved THREE KUs for this entity. Without
+    // GROUP BY q.id the activity section would render this query
+    // three times.
+    seedRecallQuery(db, {
+      queryId: 'q-multi',
+      text: 'tell me everything about Dedup Subject',
+      recordedAt: '2026-04-26T10:00:00Z',
+      retrievedKuIds: ['ku-d-1', 'ku-d-2', 'ku-d-3'],
+    });
+
+    const out = renderEntityPage({
+      db,
+      entityId: 'p-dedup',
+      nowIso: '2026-04-27T12:00:00Z',
+    });
+    if (out === ENTITY_NOT_FOUND) throw new Error('unexpected');
+
+    const recentLines = out.markdown
+      .split('\n')
+      .filter((l) => l.startsWith('- 2026-04-26'));
+    expect(recentLines).toHaveLength(1);
+    expect(recentLines[0]).toContain('tell me everything');
+  });
+
+  it('honors the 30-day window pinned to nowIso (not SQLite clock)', () => {
+    const db = getBrainDb();
+    seedEntity(db, {
+      entityId: 'p-window',
+      entityType: 'person',
+      canonical: { name: 'Window' },
+    });
+    seedKu(db, { id: 'ku-w', text: 'fact', entityId: 'p-window' });
+    // Inside the 30d window relative to nowIso='2026-04-27'
+    seedRecallQuery(db, {
+      queryId: 'q-recent',
+      text: 'recent query',
+      recordedAt: '2026-04-20T10:00:00Z',
+      retrievedKuIds: ['ku-w'],
+    });
+    // Outside the 30d window
+    seedRecallQuery(db, {
+      queryId: 'q-old',
+      text: 'old query',
+      recordedAt: '2026-03-01T10:00:00Z',
+      retrievedKuIds: ['ku-w'],
+    });
+
+    const out = renderEntityPage({
+      db,
+      entityId: 'p-window',
+      nowIso: '2026-04-27T12:00:00Z',
+    });
+    if (out === ENTITY_NOT_FOUND) throw new Error('unexpected');
+    expect(out.markdown).toContain('recent query');
+    expect(out.markdown).not.toContain('old query');
   });
 });

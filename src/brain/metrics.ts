@@ -18,7 +18,12 @@ import { newId } from './ulid.js';
 // --- Cost logging ----------------------------------------------------------
 
 export type CostProvider = 'openai' | 'anthropic' | 'cohere' | 'local';
-export type CostOperation = 'embed' | 'extract' | 'rerank' | 'reflect';
+export type CostOperation =
+  | 'embed'
+  | 'extract'
+  | 'rerank'
+  | 'reflect'
+  | 'wiki_summary';
 
 export interface CostEntry {
   provider: CostProvider;
@@ -57,6 +62,27 @@ export function getDailyCostUsd(day: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log WHERE day = ?`,
+    )
+    .get(day) as { total: number };
+  return row.total;
+}
+
+/**
+ * Sum a day's Anthropic spend across ALL operations (extract, reflect,
+ * wiki_summary, …). Use this for global per-day budget gates rather than
+ * per-operation checks — a spike in one operation should still pause the
+ * others when the global cap is hit.
+ *
+ * `extract.ts:getTodaysExtractSpend` predates this and only counts
+ * `extract`. Both functions live for now to preserve the extract-specific
+ * gate semantics; new gates should call this one.
+ */
+export function getTodaysAnthropicSpend(day: string): number {
+  const db = getBrainDb();
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS total FROM cost_log
+        WHERE day = ? AND provider = 'anthropic'`,
     )
     .get(day) as { total: number };
   return row.total;
