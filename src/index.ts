@@ -118,6 +118,10 @@ import { handleBrainStreamCommand } from './brain/stream-command.js';
 import { startReconcileSchedule } from './brain/reconcile.js';
 import { handleWikiCommand } from './brain/wiki-command.js';
 import {
+  handleWikilintCommand,
+  maybeRunWikilintCron,
+} from './brain/wikilint-command.js';
+import {
   materializeEntity,
   startWikiSynthesisSchedule,
 } from './brain/wiki-writer.js';
@@ -1399,6 +1403,17 @@ async function main(): Promise<void> {
         'brain digest (no channel)',
       );
     }
+    // Wikilint piggybacks on the digest cadence (7-day debounce via
+    // `system_state.last_wikilint`) so we don't add another setInterval.
+    // Failure here is logged inside the helper and never throws back.
+    void maybeRunWikilintCron({
+      deliver: deliverBrainMessage('wikilint'),
+    }).catch((err) =>
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'wikilint cron failed',
+      ),
+    );
   });
 
   const stopAlertsSched = startAlertsSchedule(deliverBrainMessage('alert'));
@@ -1564,6 +1579,24 @@ async function main(): Promise<void> {
             logger.error({ err, chatJid }, '/recall handler crashed');
           }
         })().catch((err) => logger.error({ err }, '/recall error'));
+        return;
+      }
+
+      // Brain /wikilint — read-only health audit over brain.db. Must be
+      // checked BEFORE the /wiki handler below since `/wikilint` shares
+      // the `/wiki` prefix; a `startsWith('/wiki')` match would otherwise
+      // route `/wikilint` to the entity-resolver and try to look up
+      // entity "lint".
+      if (trimmed === '/wikilint' || trimmed.startsWith('/wikilint ')) {
+        (async () => {
+          try {
+            const reply = await handleWikilintCommand();
+            const ch = findChannel(channels, chatJid);
+            if (ch) await ch.sendMessage(chatJid, reply);
+          } catch (err) {
+            logger.error({ err, chatJid }, '/wikilint handler crashed');
+          }
+        })().catch((err) => logger.error({ err }, '/wikilint error'));
         return;
       }
 
