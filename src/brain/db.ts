@@ -73,6 +73,38 @@ function applyColumnMigrations(database: Database.Database): void {
   database.exec(
     `CREATE INDEX IF NOT EXISTS idx_ku_important ON knowledge_units(important) WHERE important = 1`,
   );
+
+  // Wiki projection layer v1 (Phase 3a.1, design: brain-wiki-and-frontier-v1.md).
+  //
+  // Three columns track per-entity wiki synthesis state:
+  //   - last_synthesis_at         — ISO timestamp of the most recent LLM
+  //                                  summary regen (NULL = never synthesized)
+  //   - ku_count_at_last_synthesis — KU count at last synthesis time, used
+  //                                  for the >20% delta regen trigger
+  //   - wiki_summary              — the cached LLM-written blockquote text
+  //
+  // Plain TEXT/INTEGER columns rather than json_extract on the existing
+  // `canonical` blob because /wikilint (Phase 4) class-4 detector
+  // ("stale wiki page") needs an indexable predicate on last_synthesis_at.
+  for (const sql of [
+    `ALTER TABLE entities ADD COLUMN last_synthesis_at TEXT`,
+    `ALTER TABLE entities ADD COLUMN ku_count_at_last_synthesis INTEGER`,
+    `ALTER TABLE entities ADD COLUMN wiki_summary TEXT`,
+  ]) {
+    try {
+      database.exec(sql);
+    } catch {
+      /* column already exists — idempotent no-op */
+    }
+  }
+  // Partial index to keep /wikilint's "stale wiki page" scan fast — most
+  // entities will have last_synthesis_at IS NULL initially, so the partial
+  // form skips them entirely until they get a synthesis.
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_entities_synthesis_stale
+       ON entities(last_synthesis_at)
+       WHERE last_synthesis_at IS NOT NULL`,
+  );
 }
 
 /**

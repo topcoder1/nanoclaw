@@ -210,3 +210,136 @@ describe('brain schema', () => {
     db = null;
   });
 });
+
+describe('brain schema — wiki projection migration (Phase 3a.1)', () => {
+  // These columns are added via applyColumnMigrations (db.ts), not via
+  // schema.sql. So we go through _openBrainDbForTest (which runs the full
+  // applySchema → applyColumnMigrations chain) rather than the inline
+  // openWithSchema helper above.
+  let db: Database.Database | null = null;
+
+  afterEach(async () => {
+    try {
+      db?.close();
+    } catch {
+      /* ignore */
+    }
+    db = null;
+    // The brain.db singleton from _openBrainDbForTest stays in module scope
+    // so we don't need _closeBrainDb — the helper opens a fresh handle each
+    // time without touching the cache.
+  });
+
+  function entityCols(): Set<string> {
+    const cols = db!.prepare(`PRAGMA table_info(entities)`).all() as Array<{
+      name: string;
+    }>;
+    return new Set(cols.map((c) => c.name));
+  }
+
+  it('adds last_synthesis_at, ku_count_at_last_synthesis, wiki_summary on entities', async () => {
+    const { _openBrainDbForTest } = await import('../db.js');
+    db = _openBrainDbForTest();
+    const names = entityCols();
+    expect(names.has('last_synthesis_at')).toBe(true);
+    expect(names.has('ku_count_at_last_synthesis')).toBe(true);
+    expect(names.has('wiki_summary')).toBe(true);
+  });
+
+  it('creates idx_entities_synthesis_stale partial index', async () => {
+    const { _openBrainDbForTest } = await import('../db.js');
+    db = _openBrainDbForTest();
+    const idx = db
+      .prepare(
+        `SELECT name, sql FROM sqlite_master
+          WHERE type='index' AND name='idx_entities_synthesis_stale'`,
+      )
+      .get() as { name: string; sql: string } | undefined;
+    expect(idx).toBeDefined();
+    expect(idx!.sql.toLowerCase()).toContain('where last_synthesis_at is not null');
+  });
+
+  it('migration is idempotent — re-opening an already-migrated DB is a no-op', async () => {
+    const { _openBrainDbForTest } = await import('../db.js');
+    // First open creates + migrates.
+    db = _openBrainDbForTest();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, created_at, updated_at,
+                             last_synthesis_at, ku_count_at_last_synthesis, wiki_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'e-mig-1',
+      'person',
+      '2026-04-01T00:00:00Z',
+      '2026-04-01T00:00:00Z',
+      '2026-04-20T09:00:00Z',
+      12,
+      'Cached summary text',
+    );
+    db.close();
+    // Second open re-runs applyColumnMigrations against the same on-disk DB.
+    // Use a temp file so we can reopen — :memory: would be a fresh DB each
+    // time, defeating the point.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-mig-idem-'));
+    const file = path.join(tmp, 'brain.db');
+    db = _openBrainDbForTest(file);
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run('e-mig-2', 'person', 'now', 'now');
+    db.close();
+    // Reopen the same file — second pass through applyColumnMigrations
+    // should silently no-op (the ALTER TABLE throws "duplicate column",
+    // caught by the try/catch).
+    db = _openBrainDbForTest(file);
+    const names = entityCols();
+    expect(names.has('last_synthesis_at')).toBe(true);
+    // Row from first session must still be there — migration didn't drop data.
+    const row = db
+      .prepare(`SELECT entity_id FROM entities WHERE entity_id = ?`)
+      .get('e-mig-2') as { entity_id: string } | undefined;
+    expect(row?.entity_id).toBe('e-mig-2');
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('new columns accept NULL by default and arbitrary values when set', async () => {
+    const { _openBrainDbForTest } = await import('../db.js');
+    db = _openBrainDbForTest();
+    // Insert without the new columns — all three default to NULL.
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run('e-null', 'person', 'now', 'now');
+    const r1 = db
+      .prepare(
+        `SELECT last_synthesis_at, ku_count_at_last_synthesis, wiki_summary
+           FROM entities WHERE entity_id = ?`,
+      )
+      .get('e-null') as {
+      last_synthesis_at: string | null;
+      ku_count_at_last_synthesis: number | null;
+      wiki_summary: string | null;
+    };
+    expect(r1.last_synthesis_at).toBeNull();
+    expect(r1.ku_count_at_last_synthesis).toBeNull();
+    expect(r1.wiki_summary).toBeNull();
+
+    // UPDATE the columns — values round-trip cleanly.
+    db.prepare(
+      `UPDATE entities
+          SET last_synthesis_at = ?,
+              ku_count_at_last_synthesis = ?,
+              wiki_summary = ?
+        WHERE entity_id = ?`,
+    ).run('2026-04-27T10:00:00Z', 42, '> Brief summary text', 'e-null');
+    const r2 = db
+      .prepare(
+        `SELECT last_synthesis_at, ku_count_at_last_synthesis, wiki_summary
+           FROM entities WHERE entity_id = ?`,
+      )
+      .get('e-null') as typeof r1;
+    expect(r2.last_synthesis_at).toBe('2026-04-27T10:00:00Z');
+    expect(r2.ku_count_at_last_synthesis).toBe(42);
+    expect(r2.wiki_summary).toBe('> Brief summary text');
+  });
+});
