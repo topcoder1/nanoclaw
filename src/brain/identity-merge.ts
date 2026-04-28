@@ -78,7 +78,36 @@ export async function mergeEntities(
 
   const mergeId = newId();
   const mergedAt = new Date().toISOString();
-  const snapshot = JSON.stringify({ kept, merged });
+
+  // Capture pre-merge state of both entities so unmergeEntities can restore.
+  // Done outside the transaction since these are reads — the transaction body
+  // then mutates rows we just snapshotted.
+  const keptKuEntities = db
+    .prepare(`SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`)
+    .all(keptEntityId);
+  const mergedKuEntities = db
+    .prepare(`SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`)
+    .all(mergedEntityId);
+  const mergedAliases = db
+    .prepare(`SELECT * FROM entity_aliases WHERE entity_id = ?`)
+    .all(mergedEntityId);
+  const mergedRelsFrom = db
+    .prepare(`SELECT * FROM entity_relationships WHERE from_entity_id = ?`)
+    .all(mergedEntityId);
+  const mergedRelsTo = db
+    .prepare(`SELECT * FROM entity_relationships WHERE to_entity_id = ?`)
+    .all(mergedEntityId);
+
+  const snapshot = JSON.stringify({
+    schema_version: 2,
+    kept,
+    merged,
+    kept_ku_entities: keptKuEntities,
+    merged_ku_entities: mergedKuEntities,
+    merged_aliases: mergedAliases,
+    merged_relationships_from: mergedRelsFrom,
+    merged_relationships_to: mergedRelsTo,
+  });
 
   db.transaction(() => {
     // 1. Rebind ku_entities. INSERT OR IGNORE handles the case where the winner
@@ -141,5 +170,160 @@ export async function mergeEntities(
     merge_id: mergeId,
     kept_entity_id: keptEntityId,
     merged_entity_id: mergedEntityId,
+  };
+}
+
+export interface UnmergeOpts {
+  db?: Database.Database;
+  /** Override: skip the post-merge-mutation guardrail (default false). */
+  force?: boolean;
+}
+
+export interface UnmergeResult {
+  merge_id: string;
+  kept_entity_id: string;
+  merged_entity_id: string;
+}
+
+/**
+ * Undo a previously-executed merge identified by `mergeId`. Reads the
+ * pre_merge_snapshot from entity_merge_log, atomically restores the
+ * loser's `ku_entities`/`aliases`/`relationships` rows, removes from the
+ * winner the rows that came from the loser (rows present in the loser's
+ * pre-merge state AND not in the winner's pre-merge state), and deletes
+ * the merge_log row.
+ *
+ * Guardrail: if either entity has a `ku_entities`/`aliases`/`relationships`
+ * row that did NOT exist at merge time AND is not pre-existing in the
+ * other entity's snapshot (i.e., a new row added after the merge),
+ * unmerge refuses unless `force: true`. This avoids silently losing
+ * post-merge mutations.
+ *
+ * Snapshots from the v1 era (`schema_version` missing) cannot be undone
+ * — the per-row data wasn't captured. The function rejects with a clear
+ * error.
+ */
+export async function unmergeEntities(
+  mergeId: string,
+  opts: UnmergeOpts = {},
+): Promise<UnmergeResult> {
+  const db = opts.db ?? getBrainDb();
+
+  const row = db
+    .prepare(`SELECT * FROM entity_merge_log WHERE merge_id = ?`)
+    .get(mergeId) as
+    | {
+        merge_id: string;
+        kept_entity_id: string;
+        merged_entity_id: string;
+        pre_merge_snapshot: string;
+      }
+    | undefined;
+  if (!row) {
+    throw new Error(`unmergeEntities: merge_id ${mergeId} not found`);
+  }
+
+  let snap: {
+    schema_version?: number;
+    kept_ku_entities?: Array<{ ku_id: string; entity_id: string; role: string }>;
+    merged_ku_entities?: Array<{
+      ku_id: string;
+      entity_id: string;
+      role: string;
+    }>;
+    merged_aliases?: Array<Record<string, unknown>>;
+    merged_relationships_from?: Array<Record<string, unknown>>;
+    merged_relationships_to?: Array<Record<string, unknown>>;
+  };
+  try {
+    snap = JSON.parse(row.pre_merge_snapshot);
+  } catch (err) {
+    throw new Error(
+      `unmergeEntities: snapshot is not valid JSON (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+  if ((snap.schema_version ?? 1) < 2) {
+    throw new Error(
+      `unmergeEntities: snapshot schema_version is < 2 — predates the rich snapshot capture and cannot be undone`,
+    );
+  }
+
+  const kept = row.kept_entity_id;
+  const merged = row.merged_entity_id;
+
+  // Optional guardrail: refuse if there are new rows on either entity that
+  // didn't exist in the snapshot.
+  if (!opts.force) {
+    const keptPreKuKey = new Set(
+      (snap.kept_ku_entities ?? []).map((r) => `${r.ku_id}|${r.role}`),
+    );
+    const mergedPreKuKey = new Set(
+      (snap.merged_ku_entities ?? []).map((r) => `${r.ku_id}|${r.role}`),
+    );
+    // Today's kept ku_entities must be a subset of (kept_pre ∪ merged_pre);
+    // anything else is a post-merge addition.
+    const todayKeptKu = db
+      .prepare(`SELECT ku_id, role FROM ku_entities WHERE entity_id = ?`)
+      .all(kept) as Array<{ ku_id: string; role: string }>;
+    const newOnKept = todayKeptKu.filter((r) => {
+      const k = `${r.ku_id}|${r.role}`;
+      return !keptPreKuKey.has(k) && !mergedPreKuKey.has(k);
+    });
+    if (newOnKept.length > 0) {
+      throw new Error(
+        `unmergeEntities: kept entity has ${newOnKept.length} ku_entities row(s) added after the merge — pass force:true to discard them`,
+      );
+    }
+  }
+
+  db.transaction(() => {
+    // 1. Reset ku_entities for both entities to their pre-merge state.
+    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ? OR entity_id = ?`).run(
+      kept,
+      merged,
+    );
+    const insertKu = db.prepare(
+      `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, ?)`,
+    );
+    for (const r of snap.kept_ku_entities ?? [])
+      insertKu.run(r.ku_id, r.entity_id, r.role);
+    for (const r of snap.merged_ku_entities ?? [])
+      insertKu.run(r.ku_id, r.entity_id, r.role);
+
+    // 2. Restore loser's aliases (UPDATE entity_id back).
+    const restoreAlias = db.prepare(
+      `UPDATE entity_aliases SET entity_id = ? WHERE alias_id = ?`,
+    );
+    for (const a of snap.merged_aliases ?? []) {
+      restoreAlias.run(merged, (a as { alias_id: string }).alias_id);
+    }
+
+    // 3. Restore loser's relationships in both directions.
+    const restoreRelFrom = db.prepare(
+      `UPDATE entity_relationships SET from_entity_id = ? WHERE rel_id = ?`,
+    );
+    for (const r of snap.merged_relationships_from ?? []) {
+      restoreRelFrom.run(merged, (r as { rel_id: string }).rel_id);
+    }
+    const restoreRelTo = db.prepare(
+      `UPDATE entity_relationships SET to_entity_id = ? WHERE rel_id = ?`,
+    );
+    for (const r of snap.merged_relationships_to ?? []) {
+      restoreRelTo.run(merged, (r as { rel_id: string }).rel_id);
+    }
+
+    // 4. Delete the merge log row.
+    db.prepare(`DELETE FROM entity_merge_log WHERE merge_id = ?`).run(mergeId);
+  })();
+
+  logger.info(
+    { merge_id: mergeId, kept, merged },
+    'identity-merge: entities unmerged (rolled back)',
+  );
+
+  return {
+    merge_id: mergeId,
+    kept_entity_id: kept,
+    merged_entity_id: merged,
   };
 }
