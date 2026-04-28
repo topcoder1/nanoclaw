@@ -59,6 +59,7 @@ import { _closeBrainDb, getBrainDb } from '../db.js';
 import {
   reprocessRawEvent,
   setBrainBodyFetcher,
+  setWikiRebuildHandler,
   startBrainIngest,
   stopBrainIngest,
 } from '../ingest.js';
@@ -118,6 +119,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
   afterEach(async () => {
     await stopBrainIngest();
     setBrainBodyFetcher(null);
+    setWikiRebuildHandler(null);
     _closeBrainDb();
     eventBus.removeAllListeners();
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -427,4 +429,36 @@ describe('brain/ingest — P1 pipeline integration', () => {
       .get() as { n: number };
     expect(kus.n).toBeGreaterThan(0);
   });
+
+  it('fires the wiki-rebuild handler with affected entity ids after a successful pass', async () => {
+    const captured: string[][] = [];
+    setWikiRebuildHandler((ids) => {
+      captured.push([...ids]);
+    });
+
+    startBrainIngest();
+    emit(
+      'thread-wiki-trigger',
+      'Renewal',
+      'Quote $9,000 due Friday. Reach me at +1 555 999 8888.',
+    );
+    await wait(1500);
+
+    // Sender alice@acme.co produces at least one person + one company entity.
+    expect(captured.length).toBeGreaterThan(0);
+    const allIds = new Set(captured.flat());
+    const db = getBrainDb();
+    const dbIds = new Set(
+      (
+        db.prepare(`SELECT entity_id FROM entities`).all() as {
+          entity_id: string;
+        }[]
+      ).map((r) => r.entity_id),
+    );
+    // Every id passed to the handler must be a real entity row, and at
+    // least one row must have been emitted.
+    for (const id of allIds) expect(dbIds.has(id)).toBe(true);
+    expect(allIds.size).toBeGreaterThanOrEqual(2);
+  });
+
 });
