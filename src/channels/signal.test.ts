@@ -791,4 +791,59 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     expect(opts.onMessage).not.toHaveBeenCalled();
     await channel.disconnect();
   });
+
+  it('inbound editMessage emits chat.message.edited and upserts cache with new text + edited_at', async () => {
+    const opts = createInboundTestOpts();
+    // Pre-cache lookup returns the "before" row.
+    mockGetChatMessage.mockReturnValue({
+      platform: 'signal',
+      chat_id: '+15559876543',
+      message_id: '1700000000000',
+      sent_at: '2026-04-27T00:00:00.000Z',
+      sender: '+15559876543',
+      text: 'original text',
+    });
+
+    const editEnvelope = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000099999,
+        editMessage: {
+          targetSentTimestamp: 1700000000000,
+          dataMessage: { message: 'edited text' },
+        },
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(editEnvelope);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    // Cache UPSERT: same chat_id + message_id, new text, edited_at set.
+    expect(mockPutChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'signal',
+        chat_id: '+15559876543',
+        message_id: '1700000000000',
+        text: 'edited text',
+        edited_at: expect.any(String),
+      }),
+    );
+    // Event emitted on the bus.
+    const editedEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.edited',
+    );
+    expect(editedEmits).toHaveLength(1);
+    expect(editedEmits[0][1]).toMatchObject({
+      type: 'chat.message.edited',
+      platform: 'signal',
+      chat_id: '+15559876543',
+      message_id: '1700000000000',
+      old_text: 'original text',
+      new_text: 'edited text',
+    });
+    // The agent's onMessage should NOT have been called for an edit envelope.
+    expect(opts.onMessage).not.toHaveBeenCalled();
+    await channel.disconnect();
+  });
 });
