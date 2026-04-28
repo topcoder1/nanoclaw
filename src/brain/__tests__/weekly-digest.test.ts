@@ -459,6 +459,33 @@ describe('brain/weekly-digest', () => {
     expect(getSystemState('last_weekly_digest')).not.toBeNull();
   });
 
+  it('renders the wiki pass counts line when last_wiki_pass_counts is set', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)`,
+    ).run(
+      'last_wiki_pass_counts',
+      JSON.stringify({ created: 3, updated: 7, unchanged: 4, failed: 1 }),
+      '2026-04-23T10:00:00Z',
+    );
+    const summary = collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' });
+    expect(summary.wikiPassCounts).toEqual({
+      created: 3,
+      updated: 7,
+      unchanged: 4,
+      failed: 1,
+    });
+    const md = formatWeeklyDigestMarkdown(summary);
+    expect(md).toMatch(/📚 \*Wiki:\* 3 created, 7 updated, 4 unchanged, 1 failed/);
+  });
+
+  it('renders the "no synthesis pass yet" wiki line when system_state is empty', () => {
+    const summary = collectWeeklyDigest({ nowIso: '2026-04-23T12:00:00Z' });
+    expect(summary.wikiPassCounts).toBeNull();
+    const md = formatWeeklyDigestMarkdown(summary);
+    expect(md).toMatch(/📚 \*Wiki:\* no synthesis pass yet/);
+  });
+
   it('truncates long KU text at 120 chars in the formatted output', () => {
     const db = getBrainDb();
     const long = 'x'.repeat(500);

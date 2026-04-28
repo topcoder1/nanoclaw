@@ -117,12 +117,36 @@ let queue: AsyncWriteQueue<RawEventRow> | null = null;
 let bodyFetcher: BrainBodyFetcher | null = null;
 
 /**
+ * Hook called with the entity IDs touched by a successful KU insert pass.
+ * Wired from `src/index.ts` to a singleton `CoalescingQueue<string>` whose
+ * handler runs `materializeEntity` (Phase 3b.3 trigger A). Kept as an
+ * injection point so this module doesn't have to know about the wiki
+ * layer or the queue's debounce window.
+ *
+ * Implementations MUST NOT throw — the ingest path treats this as
+ * fire-and-forget. Synchronous return type so the queue can enqueue
+ * without awaiting; actual materialization is debounced + async.
+ */
+export type WikiRebuildHandler = (entityIds: string[]) => void;
+
+let wikiRebuildHandler: WikiRebuildHandler | null = null;
+
+/**
  * Register (or clear) the full-body fetcher. Wired from `src/index.ts`
  * once the GmailOpsRouter is populated. Safe to call multiple times — the
  * latest fetcher wins.
  */
 export function setBrainBodyFetcher(fn: BrainBodyFetcher | null): void {
   bodyFetcher = fn;
+}
+
+/**
+ * Register (or clear) the wiki-rebuild handler. Wired from `src/index.ts`
+ * once the wiki coalescing queue is constructed. Null = no-op (safe
+ * default for tests / startup ordering).
+ */
+export function setWikiRebuildHandler(fn: WikiRebuildHandler | null): void {
+  wikiRebuildHandler = fn;
 }
 
 async function processRawEvent(
@@ -134,8 +158,21 @@ async function processRawEvent(
     return;
   }
   try {
-    await runExtractionPipeline(db, row);
+    const result = await runExtractionPipeline(db, row);
     markProcessed(db, row.source_type, row.source_ref);
+    if (wikiRebuildHandler && result.affectedEntities.length > 0) {
+      // Fire-and-forget: handler enqueues into a debounced queue, never
+      // blocks the ingest hot path. Defensive try/catch in case a future
+      // handler implementation regresses the no-throw contract.
+      try {
+        wikiRebuildHandler(result.affectedEntities);
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'brain ingest: wiki-rebuild handler threw — dropping (next KU will re-enqueue)',
+        );
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -202,10 +239,22 @@ function flushRawEvents(
  * ensure they don't double-process the same raw_event or duplicate KUs
  * will result.
  */
+/** Outcome surfaced for downstream wiki-rebuild plumbing (Phase 3b.3 trigger A). */
+export interface ExtractionOutcome {
+  /**
+   * Distinct entity IDs that gained a `ku_entities` link in this pass.
+   * Empty when extraction was skipped / produced no claims. Order is
+   * insertion order; callers shouldn't rely on it being meaningful.
+   */
+  affectedEntities: string[];
+}
+
+const NO_AFFECTED: ExtractionOutcome = { affectedEntities: [] };
+
 export async function runExtractionPipeline(
   db: Database.Database,
   row: RawEventRow,
-): Promise<void> {
+): Promise<ExtractionOutcome> {
   const email = row.parsedEmail!;
 
   // Pull the full body via Gmail when a fetcher is registered. The SSE
@@ -269,7 +318,7 @@ export async function runExtractionPipeline(
       { threadId: email.thread_id },
       'brain ingest: empty text — skipping',
     );
-    return;
+    return NO_AFFECTED;
   }
 
   // Skip transactional / already-classified-as-digest emails before paying
@@ -291,7 +340,7 @@ export async function runExtractionPipeline(
       { threadId: email.thread_id, reason: skipReason, sender: email.sender },
       'brain ingest: transactional/digest — skipping extraction',
     );
-    return;
+    return NO_AFFECTED;
   }
 
   // Step 0: resolve any inline Google Drive / Docs / Slides / Sheets
@@ -314,7 +363,7 @@ export async function runExtractionPipeline(
     subject: email.subject,
     sender: email.sender,
   });
-  if (claims.length === 0) return;
+  if (claims.length === 0) return NO_AFFECTED;
 
   // Step 3: deterministic entity resolution for sender + any email/domain
   // mentions on each claim.
@@ -458,6 +507,15 @@ export async function runExtractionPipeline(
       );
     }
   }
+
+  // Collect distinct entity IDs touched in this pass for the wiki-rebuild
+  // hook. SQLite write succeeded above; Qdrant failures don't affect the
+  // entity set since `ku_entities` is part of the same transaction.
+  const affected = new Set<string>();
+  for (const ku of kuRows) {
+    for (const ent of ku.entities) affected.add(ent.entity_id);
+  }
+  return { affectedEntities: [...affected] };
 }
 
 /**
