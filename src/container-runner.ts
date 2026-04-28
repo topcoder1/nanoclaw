@@ -995,14 +995,18 @@ async function spawnContainer(
       }
     });
 
+    let lastStderrAt = startTime;
     container.stderr.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
+      // Track stderr activity for the liveness check below — the SDK
+      // writes tool-call debug logs continuously while doing real work,
+      // so stderr churn IS evidence the agent is alive even when it
+      // hasn't emitted a user-facing OUTPUT_MARKER chunk yet.
+      lastStderrAt = Date.now();
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -1024,6 +1028,22 @@ async function spawnContainer(
     // graceful _close sentinel has time to trigger before the hard kill fires.
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
+    // Liveness logic (replaces the prior single-shot stdout-only timer):
+    //   - kill if stdout has been quiet for `timeoutMs` AND stderr has
+    //     been quiet for `STDERR_GRACE_MS`. Both streams quiet → genuinely
+    //     hung. Stderr active → agent still doing tool-call work, keep alive.
+    //   - hard-cap at `HARD_CAP_MS` so a runaway-but-noisy container can't
+    //     run forever. 2× the configured timeout, minimum 1h.
+    //
+    // Why: previous code reset only on stdout OUTPUT_MARKER chunks. A 30+
+    // min chain of /recall calls + LLM iterations with no intermediate
+    // user-facing emission tripped the timer despite the agent being
+    // alive — caused chronic 'Email intelligence trigger failed' alerts
+    // on email triggers requiring deep research.
+    const STDERR_GRACE_MS = 5 * 60 * 1000;
+    const HARD_CAP_MS = Math.max(timeoutMs * 2, 60 * 60 * 1000);
+    let lastStdoutAt = startTime;
+
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
@@ -1041,16 +1061,31 @@ async function spawnContainer(
       }
     };
 
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
+    const checkInterval = Math.min(timeoutMs / 10, 60_000);
+    let timeout: NodeJS.Timeout = setInterval(() => {
+      if (timedOut) return;
+      const now = Date.now();
+      const totalRunning = now - startTime;
+      const stdoutIdle = now - lastStdoutAt;
+      const stderrIdle = now - lastStderrAt;
+      if (
+        totalRunning > HARD_CAP_MS ||
+        (stdoutIdle > timeoutMs && stderrIdle > STDERR_GRACE_MS)
+      ) {
+        clearInterval(timeout);
+        killOnTimeout();
+      }
+    }, checkInterval);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // Reset the stdout activity timestamp on streaming output. (Stderr
+    // resets via its own handler above.) Kept as a function for the
+    // existing call site in the stdout chunk parser.
     const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
+      lastStdoutAt = Date.now();
     };
 
     container.on('close', (code) => {
-      clearTimeout(timeout);
+      clearInterval(timeout);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -1292,7 +1327,7 @@ async function spawnContainer(
     });
 
     container.on('error', (err) => {
-      clearTimeout(timeout);
+      clearInterval(timeout);
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

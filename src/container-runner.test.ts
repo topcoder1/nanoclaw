@@ -24,15 +24,16 @@ vi.mock('./config.js', () => ({
   BROWSER_CDP_URL: 'http://localhost:9223',
 }));
 
-// Mock logger
-vi.mock('./logger.js', () => ({
-  logger: {
+// Mock logger — exposed via vi.hoisted so tests can introspect calls.
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
 }));
+vi.mock('./logger.js', () => ({ logger: loggerMock }));
 
 // Mock fs
 vi.mock('fs', async () => {
@@ -144,11 +145,22 @@ describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    loggerMock.debug.mockClear();
+    loggerMock.info.mockClear();
+    loggerMock.warn.mockClear();
+    loggerMock.error.mockClear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
+
+  function timeoutKillFired(): boolean {
+    // killOnTimeout is the only place that logs error 'Container timeout, stopping gracefully'.
+    return loggerMock.error.mock.calls.some(([, msg]) =>
+      typeof msg === 'string' && msg.includes('Container timeout, stopping gracefully'),
+    );
+  }
 
   it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
@@ -195,10 +207,13 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // No output emitted — fire the hard timeout
-    await vi.advanceTimersByTimeAsync(1830000);
+    // No output on either stream — must hit the idle kill. The
+    // interval-based liveness check ticks every 60s, so we may need to
+    // advance up to one extra interval past the IDLE_TIMEOUT + 30s
+    // grace before the kill actually fires.
+    await vi.advanceTimersByTimeAsync(1830000 + 60_000);
 
-    // Emit close event
+    // Emit close event (as if container was stopped by the timeout)
     fakeProc.emit('close', 137);
 
     await vi.advanceTimersByTimeAsync(10);
@@ -207,6 +222,102 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  it('keeps the container alive past IDLE_TIMEOUT when stderr is still active (agent doing tool calls)', async () => {
+    // Regression for the chronic email-trigger timeout fire: the SDK
+    // writes tool-call debug logs to stderr while doing real work
+    // (deep research, multiple /recall calls). Previously the timer
+    // only reset on stdout OUTPUT_MARKER chunks, so a 30-minute
+    // chain of tool calls with no intermediate user-facing emission
+    // got killed. Now stderr activity within STDERR_GRACE_MS keeps
+    // the container alive.
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Simulate 50 minutes of stderr activity, no stdout. Push a
+    // chunk every minute to mimic the SDK's continuous debug stream.
+    for (let minute = 0; minute < 50; minute++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      fakeProc.stderr.push(`[debug] tool call iteration ${minute}\n`);
+    }
+
+    // Container must still be alive — timeout-kill must NOT have fired.
+    expect(timeoutKillFired()).toBe(false);
+
+    // Now emit the long-awaited result.
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Final answer after 50min',
+      newSessionId: 'session-long',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(timeoutKillFired()).toBe(false);
+  });
+
+  it('kills at HARD_CAP_MS even when stderr is busy continuously', async () => {
+    // Bound runaway agents — stderr being active forever can't keep
+    // a hung-but-noisy container alive indefinitely.
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Simulate 65 minutes of continuous stderr churn, never any stdout.
+    for (let minute = 0; minute < 65; minute++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      fakeProc.stderr.push(`[debug] still working ${minute}\n`);
+    }
+
+    // Hard cap should have fired.
+    expect(timeoutKillFired()).toBe(true);
+    fakeProc.emit('close', 137);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('timed out');
+  });
+
+  it('kills at IDLE_TIMEOUT when both stdout and stderr go silent', async () => {
+    // Real hang: agent stops producing on both streams. Stderr
+    // activity in the past doesn't help if there has been no
+    // recent activity on either stream.
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Some stderr activity early on, then both streams go silent.
+    fakeProc.stderr.push('[debug] starting\n');
+    await vi.advanceTimersByTimeAsync(60_000);
+    fakeProc.stderr.push('[debug] one tool call\n');
+
+    // Now silence on both streams. Fire past IDLE_TIMEOUT + STDERR_GRACE.
+    await vi.advanceTimersByTimeAsync(1830000);
+
+    fakeProc.emit('close', 137);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('timed out');
   });
 
   it('normal exit after output resolves as success', async () => {
