@@ -215,3 +215,43 @@ export async function searchSemantic(
     };
   });
 }
+
+/**
+ * Fetch raw vectors for the given KU ids in a single Qdrant `retrieve`.
+ * Returns a `Map<kuId, vector>` so callers can match results back to the
+ * logical ULID without re-deriving point ids. Missing ids are simply
+ * absent from the map (Qdrant silently drops unknown point ids).
+ *
+ * Used by `/wikilint`'s duplicate-KU detector for pairwise cosine
+ * computation. No-op (returns empty map) when QDRANT_URL is unset.
+ */
+export async function fetchKuVectors(
+  kuIds: string[],
+): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  if (kuIds.length === 0) return out;
+  const c = getClient();
+  if (!c) return out;
+  const pointIds = kuIds.map(kuPointId);
+  const points = (await c.retrieve(BRAIN_COLLECTION, {
+    ids: pointIds,
+    with_vector: true,
+    with_payload: true,
+  })) as Array<{
+    id: string | number;
+    vector?: number[] | Record<string, number[]> | null;
+    payload?: Record<string, unknown> | null;
+  }>;
+  for (const p of points) {
+    const payload = (p.payload ?? {}) as KuPayload;
+    const logicalId =
+      typeof payload.ku_id === 'string' && payload.ku_id.length > 0
+        ? payload.ku_id
+        : String(p.id);
+    // `vector` may be a flat array (default vector config) or an object
+    // (named-vector config). Brain collection uses the flat form.
+    const vec = Array.isArray(p.vector) ? p.vector : null;
+    if (vec) out.set(logicalId, vec);
+  }
+  return out;
+}
