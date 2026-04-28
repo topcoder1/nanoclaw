@@ -122,13 +122,23 @@ export async function handleChatMessageEdited(
     const isWindow = raw.source_type.endsWith('_window');
     const mode = isWindow ? ('chat_window' as const) : ('chat_single' as const);
 
-    let text = evt.new_text;
+    // Strip `claw save` / `claw merge` text-trigger prefix to match what the
+    // original ingest path stored. signal.ts / discord.ts emit
+    // `chat.message.saved` with `text = body.replace(/^claw\s+save\b\s*/i,
+    // '')` (the regex tail), but edit envelopes carry the FULL edited body
+    // — without this strip, re-extraction sees `claw save Pay $X` whereas
+    // the original KU was extracted from `Pay $X`. Inconsistent KU text and
+    // a small accuracy hit (extractor's cheap rules treat the prefix as
+    // noise but it still affects topic_seed normalization).
+    const strippedNewText = stripClawTriggerPrefix(evt.new_text);
+
+    let text = strippedNewText;
     let participants: string[] | undefined;
     if (isWindow) {
       try {
         const payload = JSON.parse(raw.payload.toString('utf8'));
         participants = payload.participants;
-        text = rebuildWindowTranscript(payload, evt.message_id, evt.new_text);
+        text = rebuildWindowTranscript(payload, evt.message_id, strippedNewText);
       } catch (err) {
         logger.warn(
           {
@@ -237,6 +247,16 @@ export async function handleChatMessageEdited(
       }
     }
   }
+}
+
+/**
+ * Remove a leading `claw save` or `claw merge` text-trigger prefix.
+ * Mirrors the regex match the channel-side text-trigger uses to extract
+ * the tail before emitting `chat.message.saved`. No-op if the trigger
+ * isn't present.
+ */
+function stripClawTriggerPrefix(s: string): string {
+  return s.replace(/^claw\s+(save|merge)\b\s*/i, '');
 }
 
 /**
