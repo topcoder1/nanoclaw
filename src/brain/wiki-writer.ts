@@ -356,6 +356,198 @@ async function pathExists(p: string): Promise<boolean> {
  * directory; on macOS / Linux this is generally safe for non-database
  * workloads.
  */
+// ===========================================================================
+// Phase 3b.3 trigger B — daily synthesis scheduler
+// ===========================================================================
+//
+// Drives `materializeAll` once per day inside a 09:00–11:59 local window.
+// LLM-synthesizing pass — the on-insert trigger A intentionally never calls
+// the LLM (bounds tail latency to disk speed); this is where the cached
+// `wiki_summary` blockquote actually gets refreshed.
+//
+// Lives here (not in wiki-projection.ts) because the scheduler's job is to
+// drive `materializeAll`, which lives here. wiki-projection.ts stays
+// I/O-free; pulling the scheduler over there would force it to import the
+// I/O module and invert the layer dependency.
+
+/** ISO timestamp of the last successful synthesis pass. */
+const WIKI_SYNTHESIS_STATE_KEY = 'last_wiki_synthesis';
+/**
+ * JSON of the most recent pass's `{created, updated, unchanged, failed}`.
+ * Read by the weekly digest formatter (Phase 3b.4) to add a one-line
+ * "📚 Wiki: N created, M updated" summary.
+ */
+const WIKI_SYNTHESIS_COUNTS_KEY = 'last_wiki_pass_counts';
+/** 22h debounce — leaves a 2h window for a missed Sunday tick to retry. */
+const WIKI_SYNTHESIS_DEBOUNCE_MS = 22 * 60 * 60 * 1000;
+/** Cap one pass at 5 minutes — bounded so a stuck LLM can't wedge ingest. */
+const WIKI_SYNTHESIS_TIMEOUT_MS = 5 * 60 * 1000;
+/** Window: 09:00–11:59 local. Daily, not weekly (procedural-reflect is weekly). */
+const WIKI_SYNTHESIS_WINDOW_START_HOUR = 9;
+const WIKI_SYNTHESIS_WINDOW_END_HOUR = 12;
+
+export interface WikiSynthesisScheduleOptions {
+  /** STORE_DIR (the wiki/ subdir is appended inside the materializer). */
+  baseDir: string;
+  /** Interval between window checks. Default 1h. */
+  checkIntervalMs?: number;
+  /** Inject for deterministic tests. */
+  nowFn?: () => Date;
+  /** Inject for tests / cost gating. Falls through to defaultSummaryLlmCaller. */
+  llm?: SummaryLlmCaller;
+  /** Inject DB handle for tests. */
+  db?: Database.Database;
+  /**
+   * Inject the materialize implementation for tests. Defaults to the real
+   * `materializeAll`. Tests stub this to avoid running the full pipeline.
+   */
+  materializeFn?: typeof materializeAll;
+}
+
+/**
+ * Hourly tick that runs `materializeAll` once per day inside the window.
+ * Returns a `stop()` that clears the interval — match the
+ * `procedural-reflect` shape so wiring/teardown looks identical.
+ *
+ * Failure semantics:
+ *  - On-disk debounce stamp is written ONLY on success → a failed pass is
+ *    retryable on the next hourly tick within the window.
+ *  - In-process `running` flag prevents the startup tick from racing the
+ *    first interval tick.
+ *  - 5-minute Promise.race timeout prevents a stuck LLM from wedging the
+ *    scheduler.
+ *  - Per-entity failures don't bubble — `materializeAll` already isolates
+ *    them and reports counts.
+ */
+export function startWikiSynthesisSchedule(
+  opts: WikiSynthesisScheduleOptions,
+): () => void {
+  const checkIntervalMs = opts.checkIntervalMs ?? 60 * 60 * 1000;
+  const nowFn = opts.nowFn ?? (() => new Date());
+  const materializeFn = opts.materializeFn ?? materializeAll;
+
+  const getLast = (): number | null => {
+    try {
+      const db = opts.db ?? getBrainDb();
+      const row = db
+        .prepare(`SELECT value FROM system_state WHERE key = ?`)
+        .get(WIKI_SYNTHESIS_STATE_KEY) as { value: string } | undefined;
+      if (!row) return null;
+      const ms = Date.parse(row.value);
+      return Number.isFinite(ms) ? ms : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const setLast = (iso: string): void => {
+    try {
+      const db = opts.db ?? getBrainDb();
+      db.prepare(
+        `INSERT INTO system_state (key, value, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`,
+      ).run(WIKI_SYNTHESIS_STATE_KEY, iso, iso);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'wiki-writer: failed to record last-fire timestamp',
+      );
+    }
+  };
+
+  const setCounts = (
+    counts: { created: number; updated: number; unchanged: number; failed: number },
+    iso: string,
+  ): void => {
+    try {
+      const db = opts.db ?? getBrainDb();
+      db.prepare(
+        `INSERT INTO system_state (key, value, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`,
+      ).run(WIKI_SYNTHESIS_COUNTS_KEY, JSON.stringify(counts), iso);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'wiki-writer: failed to record pass counts',
+      );
+    }
+  };
+
+  let running = false;
+
+  const tick = async (): Promise<void> => {
+    const now = nowFn();
+    const inWindow =
+      now.getHours() >= WIKI_SYNTHESIS_WINDOW_START_HOUR &&
+      now.getHours() < WIKI_SYNTHESIS_WINDOW_END_HOUR;
+    if (!inWindow) return;
+    if (running) return;
+    const last = getLast();
+    if (last !== null && now.getTime() - last < WIKI_SYNTHESIS_DEBOUNCE_MS)
+      return;
+
+    running = true;
+    const nowIso = now.toISOString();
+    const sinceIso = last !== null ? new Date(last).toISOString() : undefined;
+    try {
+      const counts = await Promise.race([
+        materializeFn(opts.baseDir, {
+          since: sinceIso,
+          synthesize: true,
+          llm: opts.llm,
+          db: opts.db,
+          nowIso,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('wiki synthesis timed out')),
+            WIKI_SYNTHESIS_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+      setLast(nowIso);
+      setCounts(
+        {
+          created: counts.created,
+          updated: counts.updated,
+          unchanged: counts.unchanged,
+          failed: counts.failed,
+        },
+        nowIso,
+      );
+      // Best-effort log line — not critical, swallow errors.
+      try {
+        await appendLog(
+          opts.baseDir,
+          `[${nowIso}] synthesis pass: created=${counts.created} updated=${counts.updated} unchanged=${counts.unchanged} failed=${counts.failed}`,
+        );
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'wiki-writer: appendLog failed (non-fatal)',
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'wiki-writer: scheduled synthesis run failed',
+      );
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const handle = setInterval(() => void tick(), checkIntervalMs);
+  return () => clearInterval(handle);
+}
+
 async function atomicWrite(finalPath: string, content: string): Promise<void> {
   const tmpPath = `${finalPath}.tmp.${process.pid}.${crypto
     .randomBytes(6)

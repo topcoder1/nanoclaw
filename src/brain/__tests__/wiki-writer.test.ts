@@ -47,6 +47,7 @@ import {
   materializeAll,
   materializeEntity,
   rebuildIndex,
+  startWikiSynthesisSchedule,
 } from '../wiki-writer.js';
 
 // --- Seeders (subset of those in wiki-projection.test.ts; duplicated here
@@ -372,5 +373,104 @@ describe('brain/wiki-writer', () => {
     expect(fs.readFileSync(path.join(wikiDir, archives[0]), 'utf-8')).toBe(
       filler,
     );
+  });
+});
+
+describe('brain/wiki-writer — startWikiSynthesisSchedule', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-wiki-sched-'));
+  });
+
+  afterEach(() => {
+    _closeBrainDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function fakeMaterializeAll(): {
+    fn: typeof materializeAll;
+    callCount: () => number;
+  } {
+    let calls = 0;
+    return {
+      fn: (async () => {
+        calls++;
+        return { created: 1, updated: 0, unchanged: 0, failed: 0, failures: [] };
+      }) as typeof materializeAll,
+      callCount: () => calls,
+    };
+  }
+
+  it('runs materializeAll inside the 09:00–11:59 window when no debounce stamp exists', async () => {
+    const fake = fakeMaterializeAll();
+    const fixedNow = new Date('2026-04-27T10:30:00');
+    const stop = startWikiSynthesisSchedule({
+      baseDir: tmpDir,
+      checkIntervalMs: 60 * 60 * 1000,
+      nowFn: () => fixedNow,
+      materializeFn: fake.fn,
+    });
+    // The startup tick fires synchronously but materializeAll is async; flush.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    stop();
+
+    expect(fake.callCount()).toBe(1);
+
+    const db = getBrainDb();
+    const stamp = db
+      .prepare(`SELECT value FROM system_state WHERE key = 'last_wiki_synthesis'`)
+      .get() as { value: string } | undefined;
+    expect(stamp?.value).toBe(fixedNow.toISOString());
+
+    const counts = db
+      .prepare(
+        `SELECT value FROM system_state WHERE key = 'last_wiki_pass_counts'`,
+      )
+      .get() as { value: string } | undefined;
+    expect(JSON.parse(counts!.value)).toEqual({
+      created: 1,
+      updated: 0,
+      unchanged: 0,
+      failed: 0,
+    });
+  });
+
+  it('skips when last run is within the 22h debounce window', async () => {
+    const db = getBrainDb();
+    // Stamp a synthesis run from 2 hours ago — well inside the 22h debounce.
+    const fixedNow = new Date('2026-04-27T10:30:00');
+    const recent = new Date(fixedNow.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)`,
+    ).run('last_wiki_synthesis', recent, recent);
+
+    const fake = fakeMaterializeAll();
+    const stop = startWikiSynthesisSchedule({
+      baseDir: tmpDir,
+      checkIntervalMs: 60 * 60 * 1000,
+      nowFn: () => fixedNow,
+      materializeFn: fake.fn,
+    });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    stop();
+
+    expect(fake.callCount()).toBe(0);
+  });
+
+  it('skips when outside the 09:00–11:59 window', async () => {
+    const fake = fakeMaterializeAll();
+    const fixedNow = new Date('2026-04-27T13:00:00'); // 1 PM — outside.
+    const stop = startWikiSynthesisSchedule({
+      baseDir: tmpDir,
+      checkIntervalMs: 60 * 60 * 1000,
+      nowFn: () => fixedNow,
+      materializeFn: fake.fn,
+    });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    stop();
+
+    expect(fake.callCount()).toBe(0);
   });
 });
