@@ -25,7 +25,11 @@ import { createPersonFromHandle } from './entities.js';
 import { extractPipeline, type LlmCaller } from './extract.js';
 import { upsertKu } from './qdrant.js';
 import { newId } from './ulid.js';
-import { startWindowFlusher, stopWindowFlusher } from './window-flusher.js';
+import {
+  startWindowFlusher,
+  stopWindowFlusher,
+  noteSave,
+} from './window-flusher.js';
 
 export interface ChatIngestOpts {
   llmCaller?: LlmCaller;
@@ -120,6 +124,10 @@ async function handleChatMessageSaved(
     logger.debug({ sourceRef }, 'chat ingest: duplicate raw_event, skipping');
     return;
   }
+
+  // Race resolution: if a window is open for this chat, mark this message
+  // as excluded so the windowed flush at idle/cap/daily doesn't re-ingest it.
+  noteSave(evt.platform, evt.chat_id, evt.message_id);
 
   // Step 2: run extraction pipeline (chat_single mode always gates through
   // to LLM regardless of signal score — see extract.ts isChat check).

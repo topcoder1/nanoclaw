@@ -347,6 +347,54 @@ describe('chat-ingest', () => {
     expect(qdrantUpsertMock).toHaveBeenCalledTimes(2);
   });
 
+  it('a saved message inside an open window is recorded as excluded', async () => {
+    // Mock noteSave to confirm the chat-ingest handler calls it.
+    const noteSaveSpy = vi.fn();
+    vi.doMock('../window-flusher.js', async () => {
+      const real = await vi.importActual<typeof import('../window-flusher.js')>(
+        '../window-flusher.js',
+      );
+      return { ...real, noteSave: noteSaveSpy };
+    });
+    // Re-import chat-ingest so it picks up the mocked noteSave.
+    vi.resetModules();
+    const { startChatIngest: startMocked, stopChatIngest: stopMocked } =
+      await import('../chat-ingest.js');
+    const { eventBus: mockedBus } = await import('../../event-bus.js');
+
+    const fakeLlm = vi.fn(async () => ({
+      claims: [],
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    startMocked({ llmCaller: fakeLlm });
+
+    const evt: ChatMessageSavedEvent = {
+      type: 'chat.message.saved',
+      timestamp: Date.now(),
+      source: 'discord',
+      payload: {},
+      platform: 'discord',
+      chat_id: 'channel-race',
+      message_id: 'msg-race',
+      sender: 'u-race',
+      sent_at: '2026-04-27T16:00:00.000Z',
+      text: 'race-test',
+      trigger: 'emoji',
+    };
+    mockedBus.emit('chat.message.saved', evt);
+    await wait(1500);
+    stopMocked();
+
+    expect(noteSaveSpy).toHaveBeenCalledWith(
+      'discord',
+      'channel-race',
+      'msg-race',
+    );
+
+    vi.doUnmock('../window-flusher.js');
+  });
+
   it('window flush dedups via raw_events UNIQUE — same window_started_at twice yields one row', async () => {
     const fakeLlm = vi.fn(async () => ({
       claims: [],
