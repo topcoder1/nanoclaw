@@ -845,7 +845,10 @@ describe('brain/wiki-projection — synthesizeEntitySummary', () => {
       .prepare(
         `SELECT wiki_summary, ku_count_at_last_synthesis FROM entities WHERE entity_id = ?`,
       )
-      .get('p-grown') as { wiki_summary: string; ku_count_at_last_synthesis: number };
+      .get('p-grown') as {
+      wiki_summary: string;
+      ku_count_at_last_synthesis: number;
+    };
     expect(row.wiki_summary).toContain('13 facts');
     expect(row.ku_count_at_last_synthesis).toBe(13);
   });
@@ -945,9 +948,7 @@ describe('brain/wiki-projection — synthesizeEntitySummary', () => {
     });
     expect(outcome).toBe('skipped');
     const row = db
-      .prepare(
-        `SELECT wiki_summary FROM entities WHERE entity_id = ?`,
-      )
+      .prepare(`SELECT wiki_summary FROM entities WHERE entity_id = ?`)
       .get('p-empty-resp') as { wiki_summary: string | null };
     expect(row.wiki_summary).toBeNull();
   });
