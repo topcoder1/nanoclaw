@@ -56,6 +56,7 @@ function seedQuery(
     recordedAt: string;
     queryId?: string;
     retrievedKuIds?: string[];
+    caller?: string;
   },
 ): string {
   const queryId = opts.queryId ?? newId();
@@ -66,7 +67,7 @@ function seedQuery(
   ).run(
     queryId,
     opts.text,
-    'recall-command',
+    opts.caller ?? 'recall-command',
     'work',
     null,
     opts.resultCount,
@@ -159,6 +160,68 @@ describe('brain/procedural-reflect', () => {
       });
       const s = collectSignals(db, WINDOW_START, NOW);
       expect(s.zeroResultQueries[0].text.length).toBeLessThanOrEqual(120);
+    });
+
+    it('excludes agent-auto callers from zero-result queries', () => {
+      // Auto-recall fires on every incoming chat message — its query_text
+      // is the chat envelope, not a user-typed question. Surfacing those
+      // through the prompt taught Haiku to emit "rules" that just echo KU
+      // IDs back. Filter at the SQL layer so the prompt only sees real
+      // user-initiated queries.
+      const db = getBrainDb();
+      seedQuery(db, {
+        text: 'real user query — deserves a rule',
+        resultCount: 0,
+        recordedAt: '2026-04-22T10:00:00Z',
+        caller: 'recall-command',
+      });
+      seedQuery(db, {
+        text: '<context timezone="America/Cancun" />\n<messages>...',
+        resultCount: 0,
+        recordedAt: '2026-04-22T11:00:00Z',
+        caller: 'agent-auto',
+      });
+      const s = collectSignals(db, WINDOW_START, NOW);
+      expect(s.zeroResultQueries).toHaveLength(1);
+      expect(s.zeroResultQueries[0].text).toContain('real user query');
+    });
+
+    it('excludes agent-auto callers from recurring-retrieval signal', () => {
+      const db = getBrainDb();
+      const ku = 'KU-noisy';
+      // Three agent-auto queries hitting the same KU — pre-fix this would
+      // have surfaced as "recurring concern", but it's just chat noise.
+      for (let i = 0; i < 3; i++) {
+        seedQuery(db, {
+          text: '<message>chat ' + i + '</message>',
+          resultCount: 1,
+          recordedAt: `2026-04-22T0${i}:00:00Z`,
+          retrievedKuIds: [ku],
+          caller: 'agent-auto',
+        });
+      }
+      const s = collectSignals(db, WINDOW_START, NOW);
+      expect(s.recurringRetrievals).toEqual([]);
+    });
+
+    it('strips chat-window XML envelope from surfaced query_text', () => {
+      // Some non-auto-recall callers (cli-claw-know wrapping context, future
+      // wrappers) may still send XML-shaped query_text. Strip the envelope
+      // so the surfaced text is the user's actual message.
+      const db = getBrainDb();
+      const wrapped =
+        '<context timezone="America/Cancun" />\n' +
+        '<messages>\n' +
+        '<message sender="Jonathan" time="Apr 28, 2026, 10:08 AM">where is auth handled?</message>\n' +
+        '</messages>';
+      seedQuery(db, {
+        text: wrapped,
+        resultCount: 0,
+        recordedAt: '2026-04-22T10:00:00Z',
+      });
+      const s = collectSignals(db, WINDOW_START, NOW);
+      expect(s.zeroResultQueries).toHaveLength(1);
+      expect(s.zeroResultQueries[0].text).toBe('where is auth handled?');
     });
 
     it('pulls recent user_feedback rules from the rules-engine', () => {
