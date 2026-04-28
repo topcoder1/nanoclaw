@@ -160,3 +160,89 @@ export class AsyncWriteQueue<T> {
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+/**
+ * Per-key debouncing queue. Multiple enqueues for the same key within
+ * `debounceMs` collapse to a single handler execution. Distinct from
+ * `AsyncWriteQueue<T>` (which is batch-flush across heterogeneous items,
+ * not key-coalescing).
+ *
+ * Use case: wiki regen on KU insert. Email storm with 12 KUs for one
+ * entity → 1 wiki rebuild, not 12.
+ */
+export interface CoalescingQueueOptions<K> {
+  debounceMs: number;
+  handler: (key: K) => Promise<void>;
+  onError?: (err: unknown, key: K) => void;
+}
+
+export class CoalescingQueue<K> {
+  private readonly timers = new Map<K, NodeJS.Timeout>();
+  private readonly inFlight = new Set<Promise<void>>();
+  private shuttingDown = false;
+
+  constructor(private readonly opts: CoalescingQueueOptions<K>) {}
+
+  /**
+   * Schedule (or reschedule) a handler run for `key`. If a timer already
+   * exists for the key, it is cancelled and replaced — that's the coalescing.
+   * No-op once `shutdown()` has been called.
+   */
+  enqueue(key: K): void {
+    if (this.shuttingDown) return;
+    const existing = this.timers.get(key);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.timers.delete(key);
+      this.runHandler(key);
+    }, this.opts.debounceMs);
+    this.timers.set(key, timer);
+  }
+
+  /**
+   * Fire all pending timers immediately and resolve once every triggered
+   * handler (plus any already-in-flight handlers) has settled.
+   */
+  async flushAll(): Promise<void> {
+    for (const [key, timer] of this.timers) {
+      clearTimeout(timer);
+      this.timers.delete(key);
+      this.runHandler(key);
+    }
+    while (this.inFlight.size > 0) {
+      await Promise.allSettled([...this.inFlight]);
+    }
+  }
+
+  /**
+   * Drain pending keys, then mark the queue shut down so subsequent
+   * `enqueue` calls are ignored.
+   */
+  async shutdown(): Promise<void> {
+    await this.flushAll();
+    this.shuttingDown = true;
+  }
+
+  /** @internal — number of keys with a pending timer. Exposed for tests. */
+  pendingSize(): number {
+    return this.timers.size;
+  }
+
+  private runHandler(key: K): void {
+    const p = (async () => {
+      try {
+        await this.opts.handler(key);
+      } catch (err) {
+        if (this.opts.onError) {
+          try {
+            this.opts.onError(err, key);
+          } catch {
+            // Swallow onError throws — reporter must not break the queue.
+          }
+        }
+      }
+    })();
+    this.inFlight.add(p);
+    void p.finally(() => this.inFlight.delete(p));
+  }
+}
