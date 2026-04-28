@@ -13,7 +13,10 @@
 
 import type Database from 'better-sqlite3';
 
-import type { ChatMessageEditedEvent } from '../events.js';
+import type {
+  ChatMessageEditedEvent,
+  ChatMessageDeletedEvent,
+} from '../events.js';
 import { logger } from '../logger.js';
 import { getBrainDb } from './db.js';
 import { embedText, getEmbeddingModelVersion } from './embed.js';
@@ -266,4 +269,70 @@ function rebuildWindowTranscript(
       return `${old.slice(0, idx)}: ${newText}`;
     })
     .join('\n');
+}
+
+/**
+ * Handle a chat.message.deleted event.
+ *
+ * 1. ALWAYS insert a deletion-marker raw_event (source_type
+ *    `<platform>_deletion`, source_ref `<chat_id>:<message_id>`, payload =
+ *    event JSON) — even if no KUs derived from this message — so the audit
+ *    trail is complete. Idempotent via INSERT OR IGNORE on the existing
+ *    UNIQUE (source_type, source_ref) constraint.
+ * 2. Find raw_events derived from the message and mark all non-superseded
+ *    KUs `superseded_at = evt.deleted_at, superseded_by = NULL`. No
+ *    re-extraction; no replacement KU.
+ *
+ * All writes run in a single transaction.
+ */
+export async function handleChatMessageDeleted(
+  evt: ChatMessageDeletedEvent,
+  opts: ChatEditSyncOpts = {},
+): Promise<void> {
+  const db = opts.db ?? getBrainDb();
+  const matches = findRawEventsForMessage(
+    db,
+    evt.platform,
+    evt.chat_id,
+    evt.message_id,
+  );
+
+  db.transaction(() => {
+    // 1. Deletion marker — always inserted, idempotent via INSERT OR IGNORE.
+    db.prepare(
+      `INSERT OR IGNORE INTO raw_events
+         (id, source_type, source_ref, payload, received_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      newId(),
+      `${evt.platform}_deletion`,
+      `${evt.chat_id}:${evt.message_id}`,
+      Buffer.from(JSON.stringify(evt)),
+      evt.deleted_at,
+    );
+
+    // 2. Tombstone derived KUs.
+    if (matches.length > 0) {
+      const updateKu = db.prepare(
+        `UPDATE knowledge_units
+            SET superseded_at = ?, superseded_by = NULL
+          WHERE source_type = ? AND source_ref = ? AND superseded_at IS NULL`,
+      );
+      for (const raw of matches) {
+        updateKu.run(evt.deleted_at, raw.source_type, raw.source_ref);
+      }
+    }
+  })();
+
+  if (matches.length > 0) {
+    logger.info(
+      {
+        platform: evt.platform,
+        chat_id: evt.chat_id,
+        message_id: evt.message_id,
+        raw_event_count: matches.length,
+      },
+      'chat-edit-sync: tombstoned KUs from deleted message',
+    );
+  }
 }

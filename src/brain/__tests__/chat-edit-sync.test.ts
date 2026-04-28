@@ -354,3 +354,138 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     expect(ku.superseded_by).toBeNull();
   });
 });
+
+import { handleChatMessageDeleted } from '../chat-edit-sync.js';
+
+describe('chat-edit-sync — handleChatMessageDeleted', () => {
+  it('tombstones KUs derived from a deleted single-message raw_event', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r1', 'signal_message', 'chat-1:msg-1', ?, ?, ?)`,
+    ).run(Buffer.from('{}'), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, source_ref, account, scope,
+                                     confidence, valid_from, recorded_at, topic_key,
+                                     extracted_by, needs_review)
+       VALUES ('k1', 'sensitive', 'signal_message', 'chat-1:msg-1', 'personal', NULL,
+               0.9, '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z', NULL, 'rules', 0)`,
+    ).run();
+
+    await handleChatMessageDeleted(
+      {
+        type: 'chat.message.deleted',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-1',
+        message_id: 'msg-1',
+        deleted_at: '2026-04-28T00:00:00.000Z',
+      },
+      { db },
+    );
+
+    const ku = db
+      .prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`)
+      .get() as any;
+    expect(ku.superseded_at).toBe('2026-04-28T00:00:00.000Z');
+    expect(ku.superseded_by).toBeNull();
+
+    const marker = db
+      .prepare(
+        `SELECT * FROM raw_events WHERE source_type='signal_deletion' AND source_ref='chat-1:msg-1'`,
+      )
+      .get() as any;
+    expect(marker).toBeDefined();
+    expect(marker.received_at).toBe('2026-04-28T00:00:00.000Z');
+  });
+
+  it('inserts the deletion marker even when no KUs derived from this message', async () => {
+    const db = getBrainDb();
+    await handleChatMessageDeleted(
+      {
+        type: 'chat.message.deleted',
+        source: 'discord',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'discord',
+        chat_id: 'chan-X',
+        message_id: 'msg-orphan',
+        deleted_at: '2026-04-28T00:00:00.000Z',
+      },
+      { db },
+    );
+    const marker = db
+      .prepare(
+        `SELECT * FROM raw_events WHERE source_type='discord_deletion' AND source_ref='chan-X:msg-orphan'`,
+      )
+      .get() as any;
+    expect(marker).toBeDefined();
+  });
+
+  it('tombstones KUs derived from a windowed raw_event whose payload includes the message_id', async () => {
+    const db = getBrainDb();
+    const winPayload = JSON.stringify({
+      type: 'chat.window.flushed',
+      message_ids: ['m1', 'm2', 'm3'],
+      transcript: 'lines...',
+    });
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('w1', 'signal_window', 'chat-2:2026-04-27T00:00:00.000Z', ?, ?, ?)`,
+    ).run(Buffer.from(winPayload), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+    db.prepare(
+      `INSERT INTO knowledge_units (id, text, source_type, source_ref, account, scope,
+                                     confidence, valid_from, recorded_at, topic_key,
+                                     extracted_by, needs_review)
+       VALUES ('w-k1', 'something', 'signal_window', 'chat-2:2026-04-27T00:00:00.000Z',
+               'personal', NULL, 0.9,
+               '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z', NULL, 'rules', 0)`,
+    ).run();
+
+    await handleChatMessageDeleted(
+      {
+        type: 'chat.message.deleted',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-2',
+        message_id: 'm2',
+        deleted_at: '2026-04-28T00:00:00.000Z',
+      },
+      { db },
+    );
+
+    const ku = db
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id='w-k1'`)
+      .get() as any;
+    expect(ku.superseded_at).toBe('2026-04-28T00:00:00.000Z');
+  });
+
+  it('idempotent — inserting the same deletion twice does not duplicate the marker', async () => {
+    const db = getBrainDb();
+    const evt = {
+      type: 'chat.message.deleted' as const,
+      source: 'signal' as const,
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal' as const,
+      chat_id: 'chat-3',
+      message_id: 'msg-x',
+      deleted_at: '2026-04-28T00:00:00.000Z',
+    };
+    await handleChatMessageDeleted(evt, { db });
+    await handleChatMessageDeleted(evt, { db });
+    const count = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM raw_events
+           WHERE source_type='signal_deletion' AND source_ref='chat-3:msg-x'`,
+        )
+        .get() as any
+    ).n;
+    expect(count).toBe(1);
+  });
+});
