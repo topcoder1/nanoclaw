@@ -6,10 +6,15 @@
  *   Produces a signalScore in [0, 1] plus a list of Claims built from raw
  *   matches. Zero external dependencies.
  *
- * Tier 2 — Claude Haiku 4.5 (gated by signalScore > 0.3 AND daily budget):
+ * Tier 2 — Claude Haiku 4.5 (gated by signalScore > 0.3 for email; chat
+ * modes bypass the signal gate but observe a partitioned budget):
  *   Sends a structured prompt, expects JSON with `claims[]`. Every call
- *   writes its measured cost into `cost_log`. If today's Anthropic
- *   `extract` spend >= $0.05, skips LLM tier and logs warn.
+ *   writes its measured cost into `cost_log` tagged `operation='extract'`
+ *   (email) or `operation='extract_chat'` (chat). Two-tier daily budget:
+ *   the overall ceiling (`BRAIN_LLM_DAILY_BUDGET_USD`) caps the union of
+ *   both, and a chat slice (`BRAIN_LLM_BUDGET_CHAT_PCT`, default 30%)
+ *   caps the chat operation alone. Either gate skips the LLM tier and
+ *   logs warn.
  *
  * Confidence gates are enforced at `extractPipeline` boundary:
  *   > 0.7        → KU stored, needs_review = 0
