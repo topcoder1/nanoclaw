@@ -1752,6 +1752,48 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // --- claw merge ack reply wiring ---
+  // The identity-merge handler in chat-ingest fires asynchronously on
+  // entity.merge.requested. Wire a channel-aware reply sender so the user
+  // sees an ack/error in the same chat where they typed `claw merge`.
+  {
+    const { setIdentityMergeReply } = await import(
+      './brain/identity-merge-handler.js'
+    );
+    setIdentityMergeReply(async (chat_id, platform, text) => {
+      const channel = channels.find((c) => c.name === platform);
+      if (!channel) {
+        logger.warn(
+          { platform, chat_id },
+          'claw merge ack: no matching channel — reply dropped',
+        );
+        return;
+      }
+      // Build the JID per channel convention.
+      let jid: string;
+      if (platform === 'discord') {
+        jid = `dc:${chat_id}`;
+      } else {
+        // Signal: phone numbers start with '+'; group IDs are base64 (end with '=').
+        jid = chat_id.startsWith('+')
+          ? `sig:${chat_id}`
+          : `sig:group:${chat_id}`;
+      }
+      try {
+        await channel.sendMessage(jid, text);
+      } catch (err) {
+        logger.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            platform,
+            jid,
+          },
+          'claw merge ack: sendMessage failed',
+        );
+      }
+    });
+  }
+
   // --- GmailOps router: expose Gmail API operations to UX modules ---
   const gmailOpsRouter = new GmailOpsRouter();
   gmailOpsRouterRef.current = gmailOpsRouter;

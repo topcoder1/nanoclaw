@@ -155,8 +155,31 @@ export async function handleEntityMergeRequested(
 
 let unsub: (() => void) | null = null;
 
+/**
+ * Channel-aware reply sender wired by index.ts after channels connect.
+ * Stored as a module-level ref so the bus subscription (which has already
+ * been registered by startIdentityMergeHandler) reads the latest function
+ * at fire time. This keeps the wiring loose: chat-ingest doesn't need to
+ * know about channel routing.
+ */
+type ChannelReply = (
+  chat_id: string,
+  platform: 'discord' | 'signal',
+  text: string,
+) => Promise<void>;
+
+let channelReply: ChannelReply | null = null;
+
+/**
+ * Register a channel-aware reply sender. Called from index.ts after
+ * channels connect. Idempotent — replaces any prior registration.
+ */
+export function setIdentityMergeReply(fn: ChannelReply | null): void {
+  channelReply = fn;
+}
+
 export interface IdentityMergeStartOpts {
-  /** Optional reply sender. Wired by future PR; today no-op in production. */
+  /** Override the per-text reply (tests inject this; production uses setIdentityMergeReply). */
   sendReply?: (text: string) => Promise<void>;
 }
 
@@ -166,7 +189,14 @@ export function startIdentityMergeHandler(
   if (unsub) return;
   unsub = eventBus.on('entity.merge.requested', async (evt) => {
     try {
-      await handleEntityMergeRequested(evt, { sendReply: opts.sendReply });
+      // Per-event reply: prefer the explicit opts.sendReply (tests), else
+      // build one from the channel-aware setter, else no-op.
+      const reply: ((text: string) => Promise<void>) | undefined =
+        opts.sendReply ??
+        (channelReply
+          ? (text: string) => channelReply!(evt.chat_id, evt.platform, text)
+          : undefined);
+      await handleEntityMergeRequested(evt, { sendReply: reply });
     } catch (err) {
       logger.error(
         { err: err instanceof Error ? err.message : String(err), evt },
