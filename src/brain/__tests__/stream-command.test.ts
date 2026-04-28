@@ -227,8 +227,12 @@ describe('brain/stream-command', () => {
 
     const reply = await handleBrainStreamCommand('', { nowFn });
     // Raw stars/brackets/underscores from source_ref and entity name must be escaped.
-    expect(reply).toContain('thr\\*nasty\\_\\[ref]');
-    expect(reply).toContain('Weird\\*Co\\_\\[x]');
+    // Both opening AND closing brackets are escaped after the #29 review
+    // fix to escapeMarkdown — needed so subjects can be safely
+    // interpolated as Markdown link text without prematurely closing the
+    // link. Same for parens.
+    expect(reply).toContain('thr\\*nasty\\_\\[ref\\]');
+    expect(reply).toContain('Weird\\*Co\\_\\[x\\]');
   });
 
   it('excludes rows older than 24h', async () => {
