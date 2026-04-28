@@ -11,7 +11,11 @@ import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { eventBus } from '../event-bus.js';
 import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
-import type { ChatMessageSavedEvent } from '../events.js';
+import type {
+  ChatMessageSavedEvent,
+  ChatMessageEditedEvent,
+  ChatMessageDeletedEvent,
+} from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -185,7 +189,7 @@ export class DiscordChannel implements Channel {
       );
     });
 
-    // Cache updates for edited messages (brain edit-sync handled in PR 4)
+    // Cache updates for edited messages + emit chat.message.edited (PR 4).
     this.client.on(Events.MessageUpdate, async (_old, message) => {
       if (message.partial) {
         try {
@@ -195,6 +199,14 @@ export class DiscordChannel implements Channel {
         }
       }
       if (message.author?.bot) return;
+      // Capture pre-edit cache row BEFORE we overwrite it.
+      const previous = getChatMessage(
+        'discord',
+        message.channelId,
+        message.id,
+      );
+      const editedAtIso =
+        message.editedAt?.toISOString() ?? new Date().toISOString();
       putChatMessage({
         platform: 'discord',
         chat_id: message.channelId,
@@ -203,8 +215,48 @@ export class DiscordChannel implements Channel {
         sender: message.author?.id ?? 'unknown',
         sender_name: message.member?.displayName ?? message.author?.username,
         text: message.content,
-        edited_at: message.editedAt?.toISOString() ?? new Date().toISOString(),
+        edited_at: editedAtIso,
       });
+      eventBus.emit('chat.message.edited', {
+        type: 'chat.message.edited',
+        source: 'discord',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'discord',
+        chat_id: message.channelId,
+        message_id: message.id,
+        old_text: previous?.text ?? null,
+        new_text: message.content ?? '',
+        edited_at: editedAtIso,
+        sender: message.author?.id ?? 'unknown',
+      } satisfies ChatMessageEditedEvent);
+    });
+
+    // MessageDelete: tombstone cache + emit chat.message.deleted (PR 4).
+    this.client.on(Events.MessageDelete, async (message) => {
+      const deletedAtIso = new Date().toISOString();
+      const cached = getChatMessage(
+        'discord',
+        message.channelId,
+        message.id,
+      );
+      if (cached) {
+        // Preserve prior fields; just set deleted_at.
+        putChatMessage({
+          ...cached,
+          deleted_at: deletedAtIso,
+        });
+      }
+      eventBus.emit('chat.message.deleted', {
+        type: 'chat.message.deleted',
+        source: 'discord',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'discord',
+        chat_id: message.channelId,
+        message_id: message.id,
+        deleted_at: deletedAtIso,
+      } satisfies ChatMessageDeletedEvent);
     });
 
     // 🧠 emoji reaction → emit ChatMessageSavedEvent

@@ -52,6 +52,7 @@ vi.mock('discord.js', () => {
   const Events = {
     MessageCreate: 'messageCreate',
     MessageUpdate: 'messageUpdate',
+    MessageDelete: 'messageDelete',
     MessageReactionAdd: 'messageReactionAdd',
     InteractionCreate: 'interactionCreate',
     ClientReady: 'ready',
@@ -157,6 +158,7 @@ function createMessage(overrides: {
   channelName?: string;
   messageId?: string;
   createdAt?: Date;
+  editedAt?: Date | null;
   attachments?: Map<string, any>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
@@ -175,6 +177,7 @@ function createMessage(overrides: {
     id: overrides.messageId ?? 'msg_001',
     content: overrides.content ?? 'Hello everyone',
     createdAt: overrides.createdAt ?? new Date('2024-01-01T00:00:00.000Z'),
+    editedAt: overrides.editedAt !== undefined ? overrides.editedAt : null,
     author: {
       id: authorId,
       username: overrides.authorUsername ?? 'alice',
@@ -208,6 +211,16 @@ function currentClient() {
 
 async function triggerMessage(message: any) {
   const handlers = currentClient().eventHandlers.get('messageCreate') || [];
+  for (const h of handlers) await h(message);
+}
+
+async function triggerMessageUpdate(oldMessage: any, newMessage: any) {
+  const handlers = currentClient().eventHandlers.get('messageUpdate') || [];
+  for (const h of handlers) await h(oldMessage, newMessage);
+}
+
+async function triggerMessageDelete(message: any) {
+  const handlers = currentClient().eventHandlers.get('messageDelete') || [];
   for (const h of handlers) await h(message);
 }
 
@@ -1020,6 +1033,142 @@ describe('DiscordChannel', () => {
         content: expect.stringContaining('saved'),
         ephemeral: true,
       });
+    });
+  });
+
+  describe('MessageUpdate cache + chat.message.edited emission', () => {
+    it('updates cache with new content and emits chat.message.edited carrying old_text', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Pre-cache the original.
+      mockGetChatMessage.mockReturnValue({
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_edit_001',
+        sent_at: '2024-01-01T00:00:00.000Z',
+        sender: '55512345',
+        text: 'before edit',
+        attachment_download_attempts: 0,
+      });
+
+      const oldMsg = createMessage({
+        messageId: 'msg_edit_001',
+        content: 'before edit',
+      });
+      const newMsg = createMessage({
+        messageId: 'msg_edit_001',
+        content: 'after edit',
+        editedAt: new Date('2024-01-02T00:00:00.000Z'),
+      });
+      await triggerMessageUpdate(oldMsg, newMsg);
+
+      // Cache UPSERT happened.
+      expect(mockPutChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platform: 'discord',
+          chat_id: '1234567890123456',
+          message_id: 'msg_edit_001',
+          text: 'after edit',
+          edited_at: '2024-01-02T00:00:00.000Z',
+        }),
+      );
+      // Event emitted.
+      const editedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.edited',
+      );
+      expect(editedEmits).toHaveLength(1);
+      expect(editedEmits[0][1]).toMatchObject({
+        type: 'chat.message.edited',
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_edit_001',
+        old_text: 'before edit',
+        new_text: 'after edit',
+      });
+    });
+
+    it('does not emit when message author is a bot', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const oldMsg = createMessage({ messageId: 'm1', isBot: true });
+      const newMsg = createMessage({
+        messageId: 'm1',
+        content: 'changed',
+        isBot: true,
+        editedAt: new Date('2024-01-02T00:00:00.000Z'),
+      });
+      await triggerMessageUpdate(oldMsg, newMsg);
+
+      const editedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.edited',
+      );
+      expect(editedEmits).toHaveLength(0);
+    });
+  });
+
+  describe('MessageDelete cache tombstone + chat.message.deleted emission', () => {
+    it('tombstones cache row (preserves prior fields, sets deleted_at) and emits event', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue({
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_del_001',
+        sent_at: '2024-01-01T00:00:00.000Z',
+        sender: '55512345',
+        sender_name: 'Alice',
+        text: 'something',
+        attachment_download_attempts: 0,
+      });
+
+      const message = createMessage({ messageId: 'msg_del_001' });
+      await triggerMessageDelete(message);
+
+      // Cache UPSERT preserves prior text/sender, sets deleted_at.
+      expect(mockPutChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platform: 'discord',
+          chat_id: '1234567890123456',
+          message_id: 'msg_del_001',
+          text: 'something',
+          deleted_at: expect.any(String),
+        }),
+      );
+      // Event emitted.
+      const deletedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.deleted',
+      );
+      expect(deletedEmits).toHaveLength(1);
+      expect(deletedEmits[0][1]).toMatchObject({
+        type: 'chat.message.deleted',
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_del_001',
+      });
+    });
+
+    it('emits chat.message.deleted even when nothing was cached (best-effort)', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue(undefined);
+
+      const message = createMessage({ messageId: 'msg_del_002' });
+      await triggerMessageDelete(message);
+
+      // No cache write needed when there's no row to tombstone.
+      // Event still fires.
+      const deletedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.deleted',
+      );
+      expect(deletedEmits).toHaveLength(1);
     });
   });
 });

@@ -774,6 +774,38 @@ export interface ChatWindowFlushedEvent extends NanoClawEvent {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Emitted when a previously-cached chat message is edited remotely.
+ * Carries enough context for chat-edit-sync to locate KUs derived from
+ * this message_id (single-message and windowed) and supersede them with
+ * a re-extraction from `new_text`.
+ */
+export interface ChatMessageEditedEvent extends NanoClawEvent {
+  type: 'chat.message.edited';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  message_id: string;
+  old_text: string | null; // pre-edit text from cache (null if cache was evicted)
+  new_text: string;
+  edited_at: string; // ISO timestamp from the platform
+  sender: string;
+}
+
+/**
+ * Emitted when a chat message is remote-deleted. The chat-edit-sync
+ * handler looks up matching KUs and tombstones them (sets superseded_at,
+ * inserts a marker raw_event so the audit trail is complete).
+ */
+export interface ChatMessageDeletedEvent extends NanoClawEvent {
+  type: 'chat.message.deleted';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  message_id: string;
+  deleted_at: string;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -843,6 +875,11 @@ export interface EventMap {
   'sign.failed': SignFailedEvent;
   'chat.message.saved': ChatMessageSavedEvent;
   'chat.window.flushed': ChatWindowFlushedEvent;
+  'chat.message.edited': ChatMessageEditedEvent;
+  'chat.message.deleted': ChatMessageDeletedEvent;
 }
 
 export type EventType = keyof EventMap;
+
+/** Alias used by typed event-bus consumers. */
+export type NanoClawEventMap = EventMap;
