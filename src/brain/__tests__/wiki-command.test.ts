@@ -109,6 +109,39 @@ describe('brain/wiki-command', () => {
     expect(reply).toContain('Refine your query');
   });
 
+  it('ambiguous-list display uses deriveTitle fallback chain (not just canonical.name)', async () => {
+    // Regression: a `/wiki gmo` against the production brain.db hit
+    // both gmo-cybersecurity.com (company, no name) and a person at
+    // ryo.ichikawa@gmo-cybersecurity.com. The list previously showed
+    // both as ULID-bolded entries because formatAmbiguous called the
+    // local parseName helper that only checked canonical.name.
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at,
+                             last_synthesis_at, ku_count_at_last_synthesis, wiki_summary)
+       VALUES ('01HCO', 'company', ?, ?, ?, NULL, NULL, NULL),
+              ('01HPP', 'person',  ?, ?, ?, NULL, NULL, NULL)`,
+    ).run(
+      JSON.stringify({ domain: 'foo-corp.com' }),
+      '2026-04-01T00:00:00Z',
+      '2026-04-01T00:00:00Z',
+      JSON.stringify({ email: 'foo@foo-corp.com' }),
+      '2026-04-01T00:00:00Z',
+      '2026-04-01T00:00:00Z',
+    );
+
+    const reply = await handleWikiCommand('foo', { baseDir: tmpDir });
+    expect(reply).toContain('Multiple matches');
+    // Both candidates render with their fallback title, not the ULID.
+    expect(reply).toContain('**foo-corp.com**');
+    expect(reply).toContain('**foo@foo-corp.com**');
+    // ULIDs should NOT be the bolded label (they still appear in the
+    // trailing `(person, \`01HPP\`)` parenthetical, which is intentional
+    // — the user needs the id for entity-id-prefix follow-up — so we
+    // assert specifically on the **bold** portion.
+    expect(reply).not.toMatch(/\*\*01H[A-Z0-9]+\*\*/);
+  });
+
   it('materializes the page and returns content for a single match (synthesis injected)', async () => {
     const db = getBrainDb();
     seedEntity(db, {

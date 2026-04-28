@@ -30,6 +30,7 @@ import { getBrainDb } from './db.js';
 import {
   ENTITY_NOT_FOUND,
   deriveTitle,
+  parseCanonical,
   renderEntityPage,
   synthesizeEntitySummary,
   type EntityType,
@@ -302,17 +303,6 @@ export async function rebuildIndex(
   lines.push('');
 
   await atomicWrite(path.join(wikiDir, 'index.md'), lines.join('\n'));
-}
-
-function parseCanonical(
-  canonical: string | null,
-): Record<string, unknown> | null {
-  if (!canonical) return null;
-  try {
-    return JSON.parse(canonical) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 /**
