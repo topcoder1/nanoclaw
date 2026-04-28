@@ -319,9 +319,7 @@ describe('chat-ingest', () => {
     const db = getBrainDb();
 
     const raw = db
-      .prepare(
-        `SELECT * FROM raw_events WHERE source_type = 'signal_window'`,
-      )
+      .prepare(`SELECT * FROM raw_events WHERE source_type = 'signal_window'`)
       .get() as { source_ref: string; payload: Buffer } | undefined;
     expect(raw).toBeDefined();
     expect(raw!.source_ref).toBe('group-xyz:2026-04-27T14:00:00.000Z');
