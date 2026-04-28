@@ -92,6 +92,44 @@ export type ReflectionLlmCaller = (prompt: string) => Promise<{
 const RECURRING_RETRIEVAL_THRESHOLD = 3;
 const QUERY_TEXT_PREVIEW_CHARS = 120;
 
+/**
+ * Callers excluded from reflection signals. `agent-auto` fires on every
+ * incoming chat message — its `query_text` is the chat envelope
+ * (`<context>...<messages>...</messages>`), not a user-typed question.
+ * Surfacing those taught Haiku to emit hollow "rules" that just echoed
+ * retrieved KU IDs back; the reflection prompt only needs user-initiated
+ * queries. Add new noisy callers here as they appear.
+ */
+const NOISY_CALLERS: readonly string[] = ['agent-auto'];
+
+const NOISY_CALLER_PLACEHOLDERS = NOISY_CALLERS.map(() => '?').join(',');
+
+/**
+ * Strip a chat-window XML envelope from `query_text`, returning the most
+ * recent `<message>` content. Some non-auto-recall callers may still wrap
+ * in this shape (CLI wrappers, future producers); surfacing the inner
+ * message lets Haiku reason about user intent rather than envelope
+ * formatting. Falls through to the original text when no `<message>` tag
+ * is found, so plain query strings pass through untouched.
+ */
+export function stripChatEnvelope(text: string): string {
+  // `[\s\S]` matches across newlines without a dotall flag (better Node
+  // compatibility). Non-greedy `*?` so the closing tag is the nearest
+  // one. The lookahead `(?=\s|>)` is the load-bearing piece: without it,
+  // `<message[^>]*>` happily matches the wrapper `<messages>` too (the
+  // trailing `s>` falls under `[^>]*` then `>`), and the regex captures
+  // from after `<messages>` through `</message>` — i.e. the inner
+  // `<message …>` open tag becomes part of the "captured" content. The
+  // lookahead anchors to a real `<message>` or `<message …>` token.
+  const re = /<message(?=\s|>)[^>]*>([\s\S]*?)<\/message>/g;
+  let last: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    last = m[1];
+  }
+  return (last ?? text).trim();
+}
+
 export function collectSignals(
   brainDb: Database.Database,
   windowStartIso: string,
@@ -104,10 +142,11 @@ export function collectSignals(
         WHERE recorded_at >= ?
           AND recorded_at < ?
           AND result_count = 0
+          AND caller NOT IN (${NOISY_CALLER_PLACEHOLDERS})
         ORDER BY recorded_at DESC
         LIMIT 50`,
     )
-    .all(windowStartIso, nowIso) as Array<{
+    .all(windowStartIso, nowIso, ...NOISY_CALLERS) as Array<{
     id: string;
     query_text: string;
     recorded_at: string;
@@ -121,12 +160,18 @@ export function collectSignals(
          JOIN ku_queries q ON q.id = r.query_id
         WHERE q.recorded_at >= ?
           AND q.recorded_at < ?
+          AND q.caller NOT IN (${NOISY_CALLER_PLACEHOLDERS})
         GROUP BY r.ku_id
        HAVING query_count >= ?
         ORDER BY query_count DESC
         LIMIT 20`,
     )
-    .all(windowStartIso, nowIso, RECURRING_RETRIEVAL_THRESHOLD) as Array<{
+    .all(
+      windowStartIso,
+      nowIso,
+      ...NOISY_CALLERS,
+      RECURRING_RETRIEVAL_THRESHOLD,
+    ) as Array<{
     ku_id: string;
     query_count: number;
   }>;
@@ -140,15 +185,18 @@ export function collectSignals(
           WHERE r.ku_id = ?
             AND q.recorded_at >= ?
             AND q.recorded_at < ?
+            AND q.caller NOT IN (${NOISY_CALLER_PLACEHOLDERS})
           ORDER BY q.recorded_at DESC
           LIMIT 3`,
       )
-      .all(row.ku_id, windowStartIso, nowIso) as Array<{ query_text: string }>;
+      .all(row.ku_id, windowStartIso, nowIso, ...NOISY_CALLERS) as Array<{
+      query_text: string;
+    }>;
     return {
       kuId: row.ku_id,
       queryCount: row.query_count,
       sampleQueries: samples.map((s) =>
-        s.query_text.slice(0, QUERY_TEXT_PREVIEW_CHARS),
+        stripChatEnvelope(s.query_text).slice(0, QUERY_TEXT_PREVIEW_CHARS),
       ),
     };
   });
@@ -177,7 +225,7 @@ export function collectSignals(
   return {
     zeroResultQueries: zeroResultQueries.map((r) => ({
       id: r.id,
-      text: r.query_text.slice(0, QUERY_TEXT_PREVIEW_CHARS),
+      text: stripChatEnvelope(r.query_text).slice(0, QUERY_TEXT_PREVIEW_CHARS),
       recordedAt: r.recorded_at,
     })),
     recurringRetrievals: recurring,
