@@ -23,6 +23,7 @@ vi.mock('../../config.js', () => ({
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import { handleBrainStreamCommand } from '../stream-command.js';
 import { newId } from '../ulid.js';
+import type { EntityType } from '../wiki-projection.js';
 
 describe('brain/stream-command', () => {
   beforeEach(() => {
@@ -243,7 +244,7 @@ describe('brain/stream-command', () => {
     const db = getBrainDb();
     const insertEntityRaw = (
       id: string,
-      type: string,
+      type: EntityType,
       canonicalJson: string,
       createdAt: string,
     ): void => {
