@@ -22,6 +22,7 @@ import { createPersonFromHandle } from './entities.js';
 import { extractPipeline, type LlmCaller } from './extract.js';
 import { upsertKu } from './qdrant.js';
 import { newId } from './ulid.js';
+import { startWindowFlusher, stopWindowFlusher } from './window-flusher.js';
 
 export interface ChatIngestOpts {
   llmCaller?: LlmCaller;
@@ -51,6 +52,7 @@ export function startChatIngest(opts: ChatIngestOpts = {}): void {
       }
     },
   );
+  startWindowFlusher();
   logger.info('Chat ingest started (chat.message.saved handler)');
 }
 
@@ -62,6 +64,7 @@ export function stopChatIngest(): void {
     unsubscribe();
     unsubscribe = null;
   }
+  stopWindowFlusher();
 }
 
 async function handleChatMessageSaved(
