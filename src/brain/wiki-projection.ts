@@ -151,9 +151,9 @@ export function parseCanonical(
  *
  * Single source of truth for entity title text. ALL surfaces that show
  * the entity to a human (wiki page heading, index link, /wiki ambiguous
- * list, /wiki resolver match) MUST funnel through this helper —
- * otherwise email-only persons / domain-only companies render as ULIDs
- * in some places and emails/domains in others.
+ * list, /wiki resolver match, /brainstream entity rows) MUST funnel
+ * through this helper — otherwise email-only persons / domain-only
+ * companies render as ULIDs in some places and emails/domains in others.
  */
 export function deriveTitle(
   entityType: EntityType,
