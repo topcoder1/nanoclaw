@@ -82,6 +82,19 @@ export interface WeeklyDigestSummary {
   lastIngestEventAt: string | null;
   firedTriggers: string[];
   reconcileStats: unknown | null;
+  /**
+   * Counts from the most recent wiki synthesis pass (Phase 3b.3 trigger B),
+   * stored in `system_state.last_wiki_pass_counts`. Null if no pass has
+   * run yet — the digest formatter renders "no pass yet" rather than
+   * suppressing the line entirely so the operator notices when the
+   * scheduler hasn't fired.
+   */
+  wikiPassCounts: {
+    created: number;
+    updated: number;
+    unchanged: number;
+    failed: number;
+  } | null;
 }
 
 function windowStart(nowIso: string, days: number): string {
@@ -172,6 +185,32 @@ export function collectWeeklyDigest(
     }
   }
 
+  const wikiCountsRow = getSystemState('last_wiki_pass_counts');
+  let wikiPassCounts: WeeklyDigestSummary['wikiPassCounts'] = null;
+  if (wikiCountsRow) {
+    try {
+      const parsed = JSON.parse(wikiCountsRow.value) as Record<string, unknown>;
+      // Defensive: only accept fully-shaped payloads. Partial / corrupted
+      // JSON falls back to null so the digest renders "no pass yet" rather
+      // than displaying NaN.
+      if (
+        typeof parsed.created === 'number' &&
+        typeof parsed.updated === 'number' &&
+        typeof parsed.unchanged === 'number' &&
+        typeof parsed.failed === 'number'
+      ) {
+        wikiPassCounts = {
+          created: parsed.created,
+          updated: parsed.updated,
+          unchanged: parsed.unchanged,
+          failed: parsed.failed,
+        };
+      }
+    } catch {
+      wikiPassCounts = null;
+    }
+  }
+
   const health = getBrainHealthReport(nowIso);
   const firedTriggers = health.reEvalTriggers
     .filter((t) => t.fired)
@@ -219,6 +258,7 @@ export function collectWeeklyDigest(
     lastIngestEventAt: lastIngest?.value ?? null,
     firedTriggers,
     reconcileStats,
+    wikiPassCounts,
   };
 }
 
@@ -274,6 +314,17 @@ export function formatWeeklyDigestMarkdown(
   }
 
   lines.push(`\n*New entities (${windowLabel}):* ${s.newEntityCount}`);
+
+  if (s.wikiPassCounts) {
+    lines.push(
+      `\n📚 *Wiki:* ${s.wikiPassCounts.created} created, ` +
+        `${s.wikiPassCounts.updated} updated, ` +
+        `${s.wikiPassCounts.unchanged} unchanged` +
+        (s.wikiPassCounts.failed > 0 ? `, ${s.wikiPassCounts.failed} failed` : ''),
+    );
+  } else {
+    lines.push(`\n📚 *Wiki:* no synthesis pass yet`);
+  }
 
   if (s.newProceduralRules.length > 0) {
     lines.push(`\n📐 *New procedural rules (${windowLabel}):*`);
