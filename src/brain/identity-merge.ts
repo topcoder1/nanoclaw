@@ -193,11 +193,13 @@ export interface UnmergeResult {
  * pre-merge state AND not in the winner's pre-merge state), and deletes
  * the merge_log row.
  *
- * Guardrail: if either entity has a `ku_entities`/`aliases`/`relationships`
- * row that did NOT exist at merge time AND is not pre-existing in the
- * other entity's snapshot (i.e., a new row added after the merge),
- * unmerge refuses unless `force: true`. This avoids silently losing
- * post-merge mutations.
+ * Guardrail (ku_entities only today): if the kept entity has a
+ * `ku_entities` row that did NOT exist at merge time AND is not
+ * pre-existing in the loser's snapshot (i.e., added after the merge),
+ * unmerge refuses unless `force: true`. Aliases and relationships are
+ * NOT checked yet — post-merge additions to those will be silently
+ * reverted by the restore logic. Tighten if/when this command is
+ * exposed beyond manual ops.
  *
  * Snapshots from the v1 era (`schema_version` missing) cannot be undone
  * — the per-row data wasn't captured. The function rejects with a clear
