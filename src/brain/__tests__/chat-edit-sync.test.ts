@@ -353,6 +353,147 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     expect(ku.superseded_at).toBeNull();
     expect(ku.superseded_by).toBeNull();
   });
+
+  it('strips leading "claw save" trigger prefix from new_text before re-extraction', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r-claw', 'signal_message', 'chat-c:msg-c', ?, ?, ?)`,
+    ).run(
+      Buffer.from(
+        JSON.stringify({
+          type: 'chat.message.saved',
+          platform: 'signal',
+          chat_id: 'chat-c',
+          message_id: 'msg-c',
+          text: 'Pay $5,000 to Acme by Friday',
+          sender: 'Jonathan',
+        }),
+      ),
+      '2026-04-28T00:00:00Z',
+      '2026-04-28T00:00:01Z',
+    );
+    db.prepare(
+      `INSERT INTO knowledge_units
+         (id, text, source_type, source_ref, account, scope, confidence,
+          valid_from, recorded_at, topic_key, extracted_by, needs_review)
+       VALUES ('k-old', 'Pay $5,000 to Acme by Friday', 'signal_message',
+               'chat-c:msg-c', 'personal', NULL, 0.9,
+               '2026-04-28T00:00:00Z', '2026-04-28T00:00:01Z',
+               NULL, 'rules', 0)`,
+    ).run();
+
+    // Capture the actual text passed to extractPipeline so the test proves
+    // the strip happened. Use the LLM caller as a spy.
+    let observedPrompt = '';
+    const spyLlm = vi.fn(async (prompt: string) => {
+      observedPrompt = prompt;
+      return {
+        claims: [
+          {
+            text: 'Pay $7,500 to Acme by Monday',
+            topic_seed: 'payment',
+            entities_mentioned: [],
+            confidence: 0.9,
+          },
+        ],
+        inputTokens: 10,
+        outputTokens: 5,
+      };
+    });
+
+    await handleChatMessageEdited(
+      {
+        type: 'chat.message.edited',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-c',
+        message_id: 'msg-c',
+        old_text: 'claw save Pay $5,000 to Acme by Friday',
+        // Note the leading `claw save ` — should NOT appear in the
+        // text that reaches extractPipeline.
+        new_text: 'claw save Pay $7,500 to Acme by Monday',
+        edited_at: '2026-04-29T00:00:00.000Z',
+        sender: 'Jonathan',
+      },
+      { llmCaller: spyLlm, db },
+    );
+
+    // The prompt the LLM tier saw must NOT contain "claw save".
+    expect(observedPrompt).not.toContain('claw save');
+    // And it must contain the actual content.
+    expect(observedPrompt).toContain('Pay $7,500');
+
+    // Old KU is superseded by a new KU whose text does NOT carry the prefix.
+    const oldKu = db
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k-old'`,
+      )
+      .get() as any;
+    expect(oldKu.superseded_at).not.toBeNull();
+    expect(oldKu.superseded_by).not.toBeNull();
+    const newKus = db
+      .prepare(
+        `SELECT text FROM knowledge_units WHERE source_ref='chat-c:msg-c' AND id != 'k-old'`,
+      )
+      .all() as Array<{ text: string }>;
+    for (const k of newKus) {
+      expect(k.text).not.toMatch(/^claw\s+save\b/i);
+    }
+  });
+
+  it('strips leading "claw merge" trigger prefix too (defensive)', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
+       VALUES ('r-merge', 'signal_message', 'chat-d:msg-d', ?, ?, ?)`,
+    ).run(
+      Buffer.from('{}'),
+      '2026-04-28T00:00:00Z',
+      '2026-04-28T00:00:01Z',
+    );
+    db.prepare(
+      `INSERT INTO knowledge_units
+         (id, text, source_type, source_ref, account, scope, confidence,
+          valid_from, recorded_at, topic_key, extracted_by, needs_review)
+       VALUES ('k-m', 'something', 'signal_message',
+               'chat-d:msg-d', 'personal', NULL, 0.9,
+               '2026-04-28T00:00:00Z', '2026-04-28T00:00:01Z',
+               NULL, 'rules', 0)`,
+    ).run();
+
+    let observedPrompt = '';
+    const spyLlm = vi.fn(async (prompt: string) => {
+      observedPrompt = prompt;
+      return {
+        claims: [{ text: 'x', topic_seed: 't', entities_mentioned: [], confidence: 0.9 }],
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    });
+
+    await handleChatMessageEdited(
+      {
+        type: 'chat.message.edited',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-d',
+        message_id: 'msg-d',
+        old_text: null,
+        new_text: 'claw MERGE alice bob',
+        edited_at: '2026-04-29T00:00:00.000Z',
+        sender: 'Jonathan',
+      },
+      { llmCaller: spyLlm, db },
+    );
+
+    expect(observedPrompt).not.toMatch(/claw\s+merge/i);
+    expect(observedPrompt).toContain('alice bob');
+  });
 });
 
 import { handleChatMessageDeleted } from '../chat-edit-sync.js';
