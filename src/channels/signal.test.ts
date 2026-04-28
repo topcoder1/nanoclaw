@@ -792,6 +792,59 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     await channel.disconnect();
   });
 
+  it('claw merge text emits entity.merge.requested with parsed handles', async () => {
+    const opts = createInboundTestOpts();
+    const env = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'claw merge Jonathan "J Zhang"',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(env);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const mergeEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'entity.merge.requested',
+    );
+    expect(mergeEmits).toHaveLength(1);
+    expect(mergeEmits[0][1]).toMatchObject({
+      type: 'entity.merge.requested',
+      platform: 'signal',
+      handle_a: 'Jonathan',
+      handle_b: 'J Zhang',
+    });
+    // Should NOT emit chat.message.saved.
+    const saveEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'chat.message.saved',
+    );
+    expect(saveEmits).toHaveLength(0);
+    await channel.disconnect();
+  });
+
+  it('claw merge with wrong arg count is logged and ignored (no event)', async () => {
+    const opts = createInboundTestOpts();
+    const env = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'claw merge OnlyOneArg',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(env);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const mergeEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'entity.merge.requested',
+    );
+    expect(mergeEmits).toHaveLength(0);
+    await channel.disconnect();
+  });
+
   it('inbound editMessage emits chat.message.edited and upserts cache with new text + edited_at', async () => {
     const opts = createInboundTestOpts();
     // Pre-cache lookup returns the "before" row.

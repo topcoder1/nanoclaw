@@ -11,10 +11,12 @@ import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { eventBus } from '../event-bus.js';
 import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
+import { parseMergeArgs } from './parse-merge-args.js';
 import type {
   ChatMessageSavedEvent,
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
+  EntityMergeRequestedEvent,
 } from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -57,6 +59,35 @@ export class DiscordChannel implements Channel {
     this.client.on(Events.MessageCreate, async (message: Message) => {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
+
+      // `claw merge <a> <b>` text trigger — operator-issued identity merge.
+      const rawContent = message.content ?? '';
+      const mergeMatch = rawContent.match(/^claw\s+merge\b\s*(.+)$/i);
+      if (mergeMatch) {
+        const args = parseMergeArgs(mergeMatch[1].trim());
+        if (args.length === 2) {
+          eventBus.emit('entity.merge.requested', {
+            type: 'entity.merge.requested',
+            source: 'discord',
+            timestamp: Date.now(),
+            payload: {},
+            platform: 'discord',
+            chat_id: message.channelId,
+            requested_by_handle:
+              message.member?.displayName ??
+              message.author?.username ??
+              'unknown',
+            handle_a: args[0],
+            handle_b: args[1],
+          } satisfies EntityMergeRequestedEvent);
+        } else {
+          logger.warn(
+            { content: rawContent, parsed: args },
+            'discord: claw merge needs exactly two handles — ignoring',
+          );
+        }
+        return;
+      }
 
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;

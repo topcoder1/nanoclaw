@@ -24,6 +24,10 @@ import {
   stopChatEditSync,
 } from './chat-edit-sync.js';
 import { getBrainDb } from './db.js';
+import {
+  startIdentityMergeHandler,
+  stopIdentityMergeHandler,
+} from './identity-merge-handler.js';
 import { embedText, getEmbeddingModelVersion } from './embed.js';
 import { createPersonFromHandle } from './entities.js';
 import { extractPipeline, type LlmCaller } from './extract.js';
@@ -83,6 +87,7 @@ export function startChatIngest(opts: ChatIngestOpts = {}): void {
   );
   startWindowFlusher();
   startChatEditSync({ llmCaller: opts.llmCaller });
+  startIdentityMergeHandler();
   logger.info('Chat ingest started (chat.message.saved handler)');
 }
 
@@ -100,6 +105,7 @@ export function stopChatIngest(): void {
   }
   stopWindowFlusher();
   stopChatEditSync();
+  stopIdentityMergeHandler();
 }
 
 async function handleChatMessageSaved(

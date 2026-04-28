@@ -20,6 +20,10 @@ import {
   readChatIngestConfig,
   resolveGroupForChat,
 } from './group-frontmatter.js';
+import {
+  summarizeAttachment,
+  type AttachmentInput,
+} from './attachment-summary.js';
 
 // --- Defaults / env --------------------------------------------------------
 
@@ -140,7 +144,7 @@ export function noteMessage(
   }
   w.last_at = sent_at;
   if (w.message_ids.length >= w.cap) {
-    flushOne(w, 'cap');
+    void flushOne(w, 'cap');
   }
 }
 
@@ -166,10 +170,10 @@ export function noteSave(
  * Builds the transcript from cache, omitting excluded ids. Skips emission if
  * no non-excluded messages remain.
  */
-function flushOne(
+async function flushOne(
   w: WindowState,
   reason: ChatWindowFlushedEvent['flush_reason'],
-): void {
+): Promise<void> {
   windows.delete(key(w.platform, w.chat_id));
   const includedIds = w.message_ids.filter(
     (id) => !w.excluded_message_ids.has(id),
@@ -199,11 +203,18 @@ function flushOne(
     return;
   }
 
-  const transcript = rows
-    .map((r) =>
-      `[${r.sent_at}] ${r.sender_name ?? r.sender}: ${r.text ?? ''}`.trim(),
-    )
-    .join('\n');
+  const visionEnabled = process.env.BRAIN_IMAGE_VISION === 'true';
+  const lines: string[] = [];
+  for (const r of rows) {
+    const sender = r.sender_name ?? r.sender;
+    lines.push(`[${r.sent_at}] ${sender}: ${r.text ?? ''}`.trim());
+    const atts = (r.attachments as AttachmentInput[] | undefined) ?? [];
+    for (const att of atts) {
+      const summary = await summarizeAttachment(att, { visionEnabled });
+      lines.push(`[${r.sent_at}] ${sender}: ${summary}`);
+    }
+  }
+  const transcript = lines.join('\n');
   const participantSet = new Set<string>();
   for (const r of rows) participantSet.add(r.sender_name ?? r.sender);
   const participants = [...participantSet];
@@ -231,19 +242,21 @@ function flushOne(
  * Walk every open window; emit on those whose last_at is older than idle_ms.
  * `now` is injectable for tests.
  */
-export function flushIdle(now: number = Date.now()): void {
+export async function flushIdle(now: number = Date.now()): Promise<void> {
   for (const w of [...windows.values()]) {
     const lastMs = Date.parse(w.last_at);
     if (Number.isFinite(lastMs) && now - lastMs >= w.idle_ms) {
-      flushOne(w, 'idle');
+      await flushOne(w, 'idle');
     }
   }
 }
 
 /** Flush every open window with the given reason. Used for daily/shutdown. */
-export function flushAll(reason: ChatWindowFlushedEvent['flush_reason']): void {
+export async function flushAll(
+  reason: ChatWindowFlushedEvent['flush_reason'],
+): Promise<void> {
   for (const w of [...windows.values()]) {
-    flushOne(w, reason);
+    await flushOne(w, reason);
   }
 }
 
@@ -282,7 +295,7 @@ export function _runDailyCheck(now: number = Date.now()): void {
   const day = localDayKey(now);
   if (lastDailyFlushDay === day) return;
   lastDailyFlushDay = day;
-  flushAll('daily');
+  void flushAll('daily');
 }
 
 let timer: NodeJS.Timeout | null = null;
@@ -302,7 +315,7 @@ export function startWindowFlusher(opts: WindowFlusherOptions = {}): void {
   const interval = opts.tickIntervalMs ?? 60_000;
   timer = setInterval(() => {
     try {
-      flushIdle();
+      void flushIdle();
       _runDailyCheck();
     } catch (err) {
       logger.error(
@@ -330,6 +343,6 @@ export function stopWindowFlusher(): void {
     timer = null;
   }
   _unregisterObserver();
-  flushAll('shutdown');
+  void flushAll('shutdown');
   lastDailyFlushDay = null;
 }

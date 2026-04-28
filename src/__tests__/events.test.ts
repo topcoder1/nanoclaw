@@ -43,3 +43,20 @@ describe('chat edit/delete event types', () => {
     expect(true).toBe(true);
   });
 });
+
+describe('entity merge event type', () => {
+  it('EntityMergeRequestedEvent has all required fields', () => {
+    const evt: import('../events.js').EntityMergeRequestedEvent = {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'alice',
+      handle_a: 'jonathan',
+      handle_b: 'j zhang',
+    };
+    expect(evt.type).toBe('entity.merge.requested');
+  });
+});
