@@ -52,6 +52,7 @@ vi.mock('discord.js', () => {
   const Events = {
     MessageCreate: 'messageCreate',
     MessageUpdate: 'messageUpdate',
+    MessageDelete: 'messageDelete',
     MessageReactionAdd: 'messageReactionAdd',
     InteractionCreate: 'interactionCreate',
     ClientReady: 'ready',
@@ -1106,6 +1107,68 @@ describe('DiscordChannel', () => {
         (c) => c[0] === 'chat.message.edited',
       );
       expect(editedEmits).toHaveLength(0);
+    });
+  });
+
+  describe('MessageDelete cache tombstone + chat.message.deleted emission', () => {
+    it('tombstones cache row (preserves prior fields, sets deleted_at) and emits event', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue({
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_del_001',
+        sent_at: '2024-01-01T00:00:00.000Z',
+        sender: '55512345',
+        sender_name: 'Alice',
+        text: 'something',
+        attachment_download_attempts: 0,
+      });
+
+      const message = createMessage({ messageId: 'msg_del_001' });
+      await triggerMessageDelete(message);
+
+      // Cache UPSERT preserves prior text/sender, sets deleted_at.
+      expect(mockPutChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platform: 'discord',
+          chat_id: '1234567890123456',
+          message_id: 'msg_del_001',
+          text: 'something',
+          deleted_at: expect.any(String),
+        }),
+      );
+      // Event emitted.
+      const deletedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.deleted',
+      );
+      expect(deletedEmits).toHaveLength(1);
+      expect(deletedEmits[0][1]).toMatchObject({
+        type: 'chat.message.deleted',
+        platform: 'discord',
+        chat_id: '1234567890123456',
+        message_id: 'msg_del_001',
+      });
+    });
+
+    it('emits chat.message.deleted even when nothing was cached (best-effort)', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      mockGetChatMessage.mockReturnValue(undefined);
+
+      const message = createMessage({ messageId: 'msg_del_002' });
+      await triggerMessageDelete(message);
+
+      // No cache write needed when there's no row to tombstone.
+      // Event still fires.
+      const deletedEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'chat.message.deleted',
+      );
+      expect(deletedEmits).toHaveLength(1);
     });
   });
 });

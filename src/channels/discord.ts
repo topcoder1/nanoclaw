@@ -14,6 +14,7 @@ import { putChatMessage, getChatMessage } from '../chat-message-cache.js';
 import type {
   ChatMessageSavedEvent,
   ChatMessageEditedEvent,
+  ChatMessageDeletedEvent,
 } from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -229,6 +230,33 @@ export class DiscordChannel implements Channel {
         edited_at: editedAtIso,
         sender: message.author?.id ?? 'unknown',
       } satisfies ChatMessageEditedEvent);
+    });
+
+    // MessageDelete: tombstone cache + emit chat.message.deleted (PR 4).
+    this.client.on(Events.MessageDelete, async (message) => {
+      const deletedAtIso = new Date().toISOString();
+      const cached = getChatMessage(
+        'discord',
+        message.channelId,
+        message.id,
+      );
+      if (cached) {
+        // Preserve prior fields; just set deleted_at.
+        putChatMessage({
+          ...cached,
+          deleted_at: deletedAtIso,
+        });
+      }
+      eventBus.emit('chat.message.deleted', {
+        type: 'chat.message.deleted',
+        source: 'discord',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'discord',
+        chat_id: message.channelId,
+        message_id: message.id,
+        deleted_at: deletedAtIso,
+      } satisfies ChatMessageDeletedEvent);
     });
 
     // 🧠 emoji reaction → emit ChatMessageSavedEvent
