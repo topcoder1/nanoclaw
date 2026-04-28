@@ -23,6 +23,7 @@ vi.mock('../../config.js', () => ({
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import { handleBrainStreamCommand } from '../stream-command.js';
 import { newId } from '../ulid.js';
+import type { EntityType } from '../wiki-projection.js';
 
 describe('brain/stream-command', () => {
   beforeEach(() => {
@@ -233,6 +234,54 @@ describe('brain/stream-command', () => {
     // link. Same for parens.
     expect(reply).toContain('thr\\*nasty\\_\\[ref\\]');
     expect(reply).toContain('Weird\\*Co\\_\\[x\\]');
+  });
+
+  it('renders email-only persons and domain-only companies via deriveTitle fallback', async () => {
+    // Regression for the consumer-drift pattern that produced PRs #37–#39:
+    // when canonical lacks `name`, `/brainstream` MUST fall back through
+    // the same chain as the wiki page heading (email for person, domain
+    // for company) — never the raw ULID.
+    const db = getBrainDb();
+    const insertEntityRaw = (
+      id: string,
+      type: EntityType,
+      canonicalJson: string,
+      createdAt: string,
+    ): void => {
+      db.prepare(
+        `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run(id, type, canonicalJson, createdAt, createdAt);
+    };
+
+    const personId = newId();
+    insertEntityRaw(
+      personId,
+      'person',
+      JSON.stringify({ email: 'alice@example.com' }),
+      '2026-04-23T19:30:00Z',
+    );
+    const companyId = newId();
+    insertEntityRaw(
+      companyId,
+      'company',
+      JSON.stringify({ domain: 'acme.test' }),
+      '2026-04-23T19:31:00Z',
+    );
+    // Link both via a KU so they appear in the inline-entity preview path.
+    const rawId = newId();
+    const kuId = newId();
+    insertRaw(rawId, 'thr-fallback', '2026-04-23T19:29:00Z');
+    insertKu(kuId, 'fallback claim', 'thr-fallback', '2026-04-23T19:29:30Z');
+    linkKuEntity(kuId, personId);
+    linkKuEntity(kuId, companyId);
+
+    const reply = await handleBrainStreamCommand('', { nowFn });
+
+    expect(reply).toContain('alice@example.com');
+    expect(reply).toContain('acme.test');
+    expect(reply).not.toContain(personId);
+    expect(reply).not.toContain(companyId);
   });
 
   it('excludes rows older than 24h', async () => {

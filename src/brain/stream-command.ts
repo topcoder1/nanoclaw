@@ -22,6 +22,11 @@ import { logger } from '../logger.js';
 
 import { getBrainDb } from './db.js';
 import { escapeMarkdown } from './markdown.js';
+import {
+  deriveTitle,
+  type EntityType,
+  parseCanonical,
+} from './wiki-projection.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -55,7 +60,7 @@ interface KuRow {
 
 interface EntityRow {
   entity_id: string;
-  entity_type: string;
+  entity_type: EntityType;
   canonical: string | null;
   created_at: string;
 }
@@ -77,19 +82,13 @@ function parseLimit(rawArgs: string): number {
   return Math.min(n, MAX_LIMIT);
 }
 
-/** Best-effort extraction of a human-readable name from the entity `canonical` JSON. */
+/** Human-readable name for an entity row, via the shared `deriveTitle` fallback chain. */
 function entityDisplayName(row: EntityRow): string {
-  if (!row.canonical) return row.entity_id;
-  try {
-    const parsed = JSON.parse(row.canonical) as {
-      name?: string;
-      domain?: string;
-      email?: string;
-    };
-    return parsed.name || parsed.domain || parsed.email || row.entity_id;
-  } catch {
-    return row.entity_id;
-  }
+  return deriveTitle(
+    row.entity_type,
+    parseCanonical(row.canonical),
+    row.entity_id,
+  );
 }
 
 function shortTime(iso: string): string {
@@ -121,7 +120,7 @@ export async function handleBrainStreamCommand(
     ku_id: string;
     entity_id: string;
     role: string;
-    entity_type: string;
+    entity_type: EntityType;
     canonical: string | null;
   }> = [];
   try {
