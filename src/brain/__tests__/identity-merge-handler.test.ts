@@ -272,3 +272,85 @@ describe('identity-merge-handler — lifecycle', () => {
     expect(log.n).toBe(0);
   });
 });
+
+describe('identity-merge-handler — setIdentityMergeReply (channel-aware)', () => {
+  afterEach(() => {
+    stopIdentityMergeHandler();
+    eventBus.removeAllListeners();
+  });
+
+  it('uses channelReply when set, passing chat_id and platform per-event', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Alice');
+    seedPerson(db, 'e-2', 'Alicia');
+
+    const calls: Array<{ chat_id: string; platform: string; text: string }> =
+      [];
+    const { setIdentityMergeReply } = await import(
+      '../identity-merge-handler.js'
+    );
+    setIdentityMergeReply(async (chat_id, platform, text) => {
+      calls.push({ chat_id, platform, text });
+    });
+
+    startIdentityMergeHandler();
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'sig-chat-99',
+      requested_by_handle: 'op',
+      handle_a: 'Alice',
+      handle_b: 'Alicia',
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].chat_id).toBe('sig-chat-99');
+    expect(calls[0].platform).toBe('signal');
+    expect(calls[0].text).toMatch(/merged/i);
+
+    // Cleanup so the ref doesn't leak into other tests.
+    setIdentityMergeReply(null);
+  });
+
+  it('opts.sendReply (test override) takes priority over channelReply', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Alice');
+    seedPerson(db, 'e-2', 'Alicia');
+
+    const channelCalls: string[] = [];
+    const optsCalls: string[] = [];
+    const { setIdentityMergeReply } = await import(
+      '../identity-merge-handler.js'
+    );
+    setIdentityMergeReply(async (_c, _p, text) => {
+      channelCalls.push(text);
+    });
+
+    startIdentityMergeHandler({
+      sendReply: async (text) => {
+        optsCalls.push(text);
+      },
+    });
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'Alice',
+      handle_b: 'Alicia',
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(optsCalls).toHaveLength(1);
+    expect(channelCalls).toHaveLength(0);
+
+    setIdentityMergeReply(null);
+  });
+});
