@@ -363,3 +363,21 @@ describe('runAutoMergeSweep — idempotency', () => {
     expect(cnt.n).toBe(1);
   });
 });
+
+describe('runAutoMergeSweep — env gate', () => {
+  it('is a no-op when enabled=false', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+
+    const result = await runAutoMergeSweep({ db, enabled: false });
+    expect(result.high_conf_merged).toBe(0);
+    expect(result.medium_conf_suggested).toBe(0);
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
+  });
+});
