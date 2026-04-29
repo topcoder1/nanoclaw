@@ -382,4 +382,11 @@ export async function runAutoMergeSweep(
   return result;
 }
 
-type MergeEvidenceField = 'email' | 'phone' | 'name' | 'slack_id' | 'signal_uuid';
+type MergeEvidenceField =
+  | 'email'
+  | 'phone'
+  | 'name'
+  | 'slack_id'
+  | 'signal_uuid'
+  | 'discord_snowflake'
+  | 'whatsapp_jid';

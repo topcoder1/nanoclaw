@@ -17,7 +17,14 @@ import { newId } from './ulid.js';
 export interface MergeEvidence {
   trigger: 'manual' | 'deterministic' | 'splink';
   requested_by?: string;
-  matched_field?: 'email' | 'phone' | 'name' | 'slack_id' | 'signal_uuid';
+  matched_field?:
+    | 'email'
+    | 'phone'
+    | 'name'
+    | 'slack_id'
+    | 'signal_uuid'
+    | 'discord_snowflake'
+    | 'whatsapp_jid';
   matched_value?: string;
   [k: string]: unknown;
 }
