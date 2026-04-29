@@ -130,3 +130,139 @@ export function findHighConfidenceCandidates(
   }
   return out;
 }
+
+export interface MediumConfidencePair {
+  entity_id_a: string;          // lex-smaller
+  entity_id_b: string;
+  reason_code: 'name_exact';
+  confidence: number;           // 0.5–0.8
+  evidence: {
+    fields_matched: string[];
+    canonical_a: Record<string, unknown>;
+    canonical_b: Record<string, unknown>;
+  };
+}
+
+/**
+ * Find every (a, b) pair of entities of the same type whose canonical name
+ * matches case-insensitively after trim, EXCLUDING pairs that share a
+ * hard-identifier field with conflicting values. The conflict short-circuit
+ * is what protects us from merging two real people who happen to share a
+ * common first name.
+ */
+export function findMediumConfidenceCandidates(
+  db: Database.Database,
+): MediumConfidencePair[] {
+  type GroupRow = {
+    entity_id: string;
+    entity_type: string;
+    name_norm: string;
+    canonical: string;
+  };
+  // Group by lower(trim(name)) within each entity_type.
+  const rows = db
+    .prepare(
+      `SELECT entity_id, entity_type,
+              LOWER(TRIM(json_extract(canonical, '$.name'))) AS name_norm,
+              canonical
+         FROM entities
+        WHERE json_extract(canonical, '$.name') IS NOT NULL
+          AND TRIM(json_extract(canonical, '$.name')) != ''`,
+    )
+    .all() as GroupRow[];
+
+  // Bucket by (entity_type, name_norm).
+  const buckets = new Map<string, GroupRow[]>();
+  for (const r of rows) {
+    const key = `${r.entity_type}|${r.name_norm}`;
+    const list = buckets.get(key) ?? [];
+    list.push(r);
+    buckets.set(key, list);
+  }
+
+  // For each bucket of size >= 2, emit pairs (i, j) and apply the
+  // conflicting-identifier short-circuit.
+  const out: MediumConfidencePair[] = [];
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const ri = list[i];
+        const rj = list[j];
+        if (hasConflictingIdentifier(db, ri.entity_id, rj.entity_id)) continue;
+        const [a, b] = lexOrdered(ri.entity_id, rj.entity_id);
+        const canonA = a === ri.entity_id ? safeJson(ri.canonical) : safeJson(rj.canonical);
+        const canonB = a === ri.entity_id ? safeJson(rj.canonical) : safeJson(ri.canonical);
+        out.push({
+          entity_id_a: a,
+          entity_id_b: b,
+          reason_code: 'name_exact',
+          confidence: 0.6,
+          evidence: {
+            fields_matched: ['name'],
+            canonical_a: canonA,
+            canonical_b: canonB,
+          },
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function safeJson(s: string | null): Record<string, unknown> {
+  if (!s) return {};
+  try {
+    return JSON.parse(s) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Returns true if entityA and entityB both have an alias for the same
+ * hard-identifier field but with different normalized values. Two
+ * entities with the same hard-id field-name but only ONE side populated
+ * are NOT a conflict — only the both-populated-and-different case.
+ */
+function hasConflictingIdentifier(
+  db: Database.Database,
+  entityA: string,
+  entityB: string,
+): boolean {
+  type Row = { entity_id: string; field_name: string; field_value: string };
+  const rows = db
+    .prepare(
+      `SELECT entity_id, field_name, field_value
+         FROM entity_aliases
+        WHERE entity_id IN (?, ?)
+          AND field_name IN (${HARD_IDENTIFIER_FIELDS.map(() => '?').join(',')})`,
+    )
+    .all(entityA, entityB, ...HARD_IDENTIFIER_FIELDS.map((f) => f.field)) as Row[];
+
+  // For each field, collect normalized values per entity.
+  const byField = new Map<string, { a: Set<string>; b: Set<string> }>();
+  for (const r of rows) {
+    const cfg = HARD_IDENTIFIER_FIELDS.find((f) => f.field === r.field_name);
+    if (!cfg) continue;
+    const norm = cfg.normalize(r.field_value);
+    if (!norm) continue;
+    const slot = byField.get(r.field_name) ?? { a: new Set(), b: new Set() };
+    if (r.entity_id === entityA) slot.a.add(norm);
+    else slot.b.add(norm);
+    byField.set(r.field_name, slot);
+  }
+  for (const { a, b } of byField.values()) {
+    if (a.size === 0 || b.size === 0) continue;     // not both populated
+    // Conflict iff there is no overlap.
+    let overlap = false;
+    for (const v of a) {
+      if (b.has(v)) {
+        overlap = true;
+        break;
+      }
+    }
+    if (!overlap) return true;
+  }
+  return false;
+}

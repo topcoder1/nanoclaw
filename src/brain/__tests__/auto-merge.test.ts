@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone, findHighConfidenceCandidates } from '../auto-merge.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -142,5 +142,79 @@ describe('findHighConfidenceCandidates', () => {
     const pairs = findHighConfidenceCandidates(db);
     expect(pairs).toHaveLength(1);
     expect(pairs[0].fields_matched.sort()).toEqual(['email', 'phone']);
+  });
+});
+
+describe('findMediumConfidenceCandidates', () => {
+  it('returns a pair for two entities with the same canonical name', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    const pairs = findMediumConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].entity_id_a).toBe('e-aaa');
+    expect(pairs[0].entity_id_b).toBe('e-bbb');
+    expect(pairs[0].reason_code).toBe('name_exact');
+    expect(pairs[0].evidence.fields_matched).toEqual(['name']);
+  });
+
+  it('matches case-insensitively and trims whitespace', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', '  Jonathan ');
+    seedPerson(db, 'e-bbb', 'JONATHAN');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(1);
+  });
+
+  it('does not match when the name is empty or missing', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', '');
+    seedPerson(db, 'e-bbb', '');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('does not match when entity_type differs', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-p1', 'X');
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('e-c1', 'company', '{"name":"X"}', '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z')`,
+    ).run();
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('short-circuits when entities have conflicting hard identifiers', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'jon1@x.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'jon2@x.com');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('still matches when only one entity has a hard identifier (no conflict)', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'jon@x.com');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(1);
+  });
+
+  it('production-fixture regression: Jonathan × 2 surfaces as medium-conf', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('01KQ8X5WSYDVRM28ZA3PZCVTGH','person',
+               '{"name":"Jonathan","signal_phone":"+16263483472"}',
+               '2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('01KQ9HHRDY5RYADT03SBQG07D6','person',
+               '{"name":"Jonathan","signal_profile_name":"Jonathan"}',
+               '2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
+    ).run();
+    const pairs = findMediumConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].reason_code).toBe('name_exact');
   });
 });
