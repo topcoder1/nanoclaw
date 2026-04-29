@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone } from '../auto-merge.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -67,5 +67,80 @@ describe('normalizePhone', () => {
   it('returns null for empty / non-numeric input', () => {
     expect(normalizePhone('')).toBeNull();
     expect(normalizePhone('not a phone')).toBeNull();
+  });
+});
+
+function seedPerson(db: any, id: string, name: string): void {
+  db.prepare(
+    `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+     VALUES (?, 'person', ?, ?, ?)`,
+  ).run(id, JSON.stringify({ name }), '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z');
+}
+function seedAlias(db: any, aliasId: string, entityId: string, field: string, value: string): void {
+  db.prepare(
+    `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+     VALUES (?, ?, 'test', ?, ?, '2026-04-28T00:00:00Z', 1.0)`,
+  ).run(aliasId, entityId, field, value);
+}
+
+describe('findHighConfidenceCandidates', () => {
+  it('returns a pair when two entities share an email (case-insensitive)', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice W');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'Alice@Example.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'alice@example.com');
+
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].entity_id_a).toBe('e-aaa');
+    expect(pairs[0].entity_id_b).toBe('e-bbb');
+    expect(pairs[0].reason_code).toBe('email_exact');
+    expect(pairs[0].fields_matched).toContain('email');
+  });
+
+  it('returns a pair when two entities share a normalized phone', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Bob');
+    seedPerson(db, 'e-bbb', 'Bob');
+    seedAlias(db, 'a1', 'e-aaa', 'phone', '+1 (626) 348-3472');
+    seedAlias(db, 'a2', 'e-bbb', 'phone', '16263483472');
+
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].reason_code).toBe('phone_normalized');
+  });
+
+  it('returns no pair when entity_type differs', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-p1', 'X');
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('e-c1', 'company', '{"name":"X"}', '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z')`,
+    ).run();
+    seedAlias(db, 'a1', 'e-p1', 'email', 'x@x.com');
+    seedAlias(db, 'a2', 'e-c1', 'email', 'x@x.com');
+    expect(findHighConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('returns no pair when only one entity has the alias', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Y');
+    seedPerson(db, 'e-2', 'Z');
+    seedAlias(db, 'a1', 'e-1', 'email', 'y@y.com');
+    expect(findHighConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('deduplicates pairs across multiple matched fields', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    seedAlias(db, 'a3', 'e-aaa', 'phone', '+15550001111');
+    seedAlias(db, 'a4', 'e-bbb', 'phone', '+15550001111');
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].fields_matched.sort()).toEqual(['email', 'phone']);
   });
 });
