@@ -453,3 +453,34 @@ type MergeEvidenceField =
   | 'signal_uuid'
   | 'discord_snowflake'
   | 'whatsapp_jid';
+
+const DEFAULT_AUTO_MERGE_INTERVAL_MS = 24 * 60 * 60 * 1000;   // 24h
+
+export interface AutoMergeScheduleOpts {
+  intervalMs?: number;
+  runOnStart?: boolean;        // default: true (so first deploy doesn't wait 24h)
+  run?: () => Promise<unknown>;  // injected for tests; default: runAutoMergeSweep()
+}
+
+/**
+ * Run the auto-merge sweep on a fixed interval. Returns a stop function.
+ * Errors from the sweep are caught and logged so a transient DB blip
+ * doesn't crash the scheduler.
+ */
+export function startAutoMergeSchedule(
+  opts: AutoMergeScheduleOpts = {},
+): () => void {
+  const intervalMs = opts.intervalMs ?? DEFAULT_AUTO_MERGE_INTERVAL_MS;
+  const run = opts.run ?? (() => runAutoMergeSweep());
+  const tick = (): void => {
+    void run().catch((err) =>
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'auto-merge: sweep failed',
+      ),
+    );
+  };
+  if (opts.runOnStart !== false) tick();
+  const handle = setInterval(tick, intervalMs);
+  return () => clearInterval(handle);
+}

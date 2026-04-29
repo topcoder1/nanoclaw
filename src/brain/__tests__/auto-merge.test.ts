@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep } from '../auto-merge.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep, startAutoMergeSchedule } from '../auto-merge.js';
 import { eventBus } from '../../event-bus.js';
 
 beforeEach(() => {
@@ -406,5 +406,39 @@ describe('runAutoMergeSweep — dry-run', () => {
     expect(
       (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`).get() as { n: number }).n,
     ).toBe(0);
+  });
+});
+
+describe('startAutoMergeSchedule', () => {
+  it('returns a stop function and runs the sweep on the configured interval', async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const stop = startAutoMergeSchedule({
+      intervalMs: 1000,
+      runOnStart: true,
+      run: async () => { calls.push(Date.now()); },
+    });
+    expect(calls).toHaveLength(1);   // runOnStart fired
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(3);
+    stop();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(3);   // stopped
+    vi.useRealTimers();
+  });
+
+  it('skips runOnStart when runOnStart=false', () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const stop = startAutoMergeSchedule({
+      intervalMs: 1000,
+      runOnStart: false,
+      run: async () => { calls.push(Date.now()); },
+    });
+    expect(calls).toHaveLength(0);
+    stop();
+    vi.useRealTimers();
   });
 });
