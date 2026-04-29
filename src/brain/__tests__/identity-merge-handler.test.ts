@@ -176,6 +176,53 @@ describe('handleEntityMergeRequested', () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
   });
 
+  it('claw merge resolves both handles via entity_id prefix', async () => {
+    const db = getBrainDb();
+    seedPerson(db, '01KQ8X5WSYDVRM28ZA3PZCVTGH', 'Alice');
+    seedPerson(db, '01KQ9HHRDY5RYADT03SBQG07D6', 'Alice W');
+    const replies: string[] = [];
+    await handleEntityMergeRequested(
+      {
+        type: 'entity.merge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: '01KQ8X',
+        handle_b: '01KQ9H',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/merged/i);
+    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number };
+    expect(log.n).toBe(1);
+  });
+
+  it('refuses an ambiguous entity_id prefix', async () => {
+    const db = getBrainDb();
+    seedPerson(db, '01KQ8XAA00000000000000', 'A');
+    seedPerson(db, '01KQ8XBB00000000000000', 'B');
+    seedPerson(db, '01KQ9HHHHH000000000000', 'C');
+    const replies: string[] = [];
+    await handleEntityMergeRequested(
+      {
+        type: 'entity.merge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: '01KQ8X',
+        handle_b: '01KQ9H',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/ambiguous/i);
+  });
+
   it('handles mergeEntities throwing — surfaces error to reply', async () => {
     const db = getBrainDb();
     // Both real but already chained to provoke a chain rejection from mergeEntities.

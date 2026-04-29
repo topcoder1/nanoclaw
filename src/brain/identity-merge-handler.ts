@@ -19,7 +19,7 @@ export interface MergeHandlerOpts {
 
 interface ResolvedCandidate {
   entity_id: string;
-  reason: 'alias' | 'canonical_name';
+  reason: 'alias' | 'canonical_name' | 'id_prefix';
 }
 
 /**
@@ -50,6 +50,17 @@ function resolveHandle(
     )
     .all(lowered) as Array<{ entity_id: string }>;
 
+  // 3. Entity-id prefix match (used by chat-suggestion replies, where the
+  //    operator copy-pastes a short ULID prefix). Bounded to <=5 hits to
+  //    prevent runaway results when an operator types a very short prefix.
+  const prefixHits = db
+    .prepare(
+      `SELECT entity_id FROM entities
+        WHERE entity_id LIKE ? || '%'
+        LIMIT 5`,
+    )
+    .all(handle.trim()) as Array<{ entity_id: string }>;
+
   const seen = new Set<string>();
   const out: ResolvedCandidate[] = [];
   for (const r of aliasHits) {
@@ -61,6 +72,12 @@ function resolveHandle(
   for (const r of nameHits) {
     if (!seen.has(r.entity_id)) {
       out.push({ entity_id: r.entity_id, reason: 'canonical_name' });
+      seen.add(r.entity_id);
+    }
+  }
+  for (const r of prefixHits) {
+    if (!seen.has(r.entity_id)) {
+      out.push({ entity_id: r.entity_id, reason: 'id_prefix' });
       seen.add(r.entity_id);
     }
   }
