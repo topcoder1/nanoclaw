@@ -210,6 +210,28 @@ export function findMediumConfidenceCandidates(
   return out;
 }
 
+/**
+ * Returns true if the given pair has an active suppression row. A row is
+ * active when `suppressed_until` is NULL (permanent) or > now.
+ */
+export function isSuppressed(
+  db: Database.Database,
+  entityA: string,
+  entityB: string,
+  nowMs: number = Date.now(),
+): boolean {
+  const [a, b] = lexOrdered(entityA, entityB);
+  const row = db
+    .prepare(
+      `SELECT suppressed_until FROM entity_merge_suppressions
+        WHERE entity_id_a = ? AND entity_id_b = ?`,
+    )
+    .get(a, b) as { suppressed_until: number | null } | undefined;
+  if (!row) return false;
+  if (row.suppressed_until == null) return true;
+  return row.suppressed_until > nowMs;
+}
+
 function safeJson(s: string | null): Record<string, unknown> {
   if (!s) return {};
   try {

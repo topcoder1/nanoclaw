@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates } from '../auto-merge.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -216,5 +216,37 @@ describe('findMediumConfidenceCandidates', () => {
     const pairs = findMediumConfidenceCandidates(db);
     expect(pairs).toHaveLength(1);
     expect(pairs[0].reason_code).toBe('name_exact');
+  });
+});
+
+describe('isSuppressed', () => {
+  it('returns true when a permanent suppression row exists', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
+    ).run(Date.now());
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
+    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true);  // order-insensitive
+  });
+  it('returns false when no row exists', () => {
+    const db = getBrainDb();
+    expect(isSuppressed(db, 'e-x', 'e-y')).toBe(false);
+  });
+  it('returns false when a time-bounded suppression has expired', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', ?, 'operator_rejected', ?)`,
+    ).run(Date.now() - 1000, Date.now() - 5000);
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(false);
+  });
+  it('returns true when a time-bounded suppression is still in the future', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', ?, 'operator_rejected', ?)`,
+    ).run(Date.now() + 60_000, Date.now());
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
   });
 });
