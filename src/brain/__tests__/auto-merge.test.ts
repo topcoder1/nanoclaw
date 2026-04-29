@@ -381,3 +381,27 @@ describe('runAutoMergeSweep — env gate', () => {
     expect(cnt.n).toBe(0);
   });
 });
+
+describe('runAutoMergeSweep — dry-run', () => {
+  it('reports counts but writes no rows when dryRun=true', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    seedPerson(db, 'e-ccc', 'Jonathan');
+    seedPerson(db, 'e-ddd', 'Jonathan');
+
+    const result = await runAutoMergeSweep({ db, enabled: true, dryRun: true });
+    expect(result.dry_run).toBe(true);
+    expect(result.high_conf_merged).toBe(1);
+    expect(result.medium_conf_suggested).toBe(1);
+
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number }).n,
+    ).toBe(0);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`).get() as { n: number }).n,
+    ).toBe(0);
+  });
+});
