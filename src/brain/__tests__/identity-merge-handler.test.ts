@@ -176,6 +176,53 @@ describe('handleEntityMergeRequested', () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
   });
 
+  it('claw merge resolves both handles via entity_id prefix', async () => {
+    const db = getBrainDb();
+    seedPerson(db, '01KQ8X5WSYDVRM28ZA3PZCVTGH', 'Alice');
+    seedPerson(db, '01KQ9HHRDY5RYADT03SBQG07D6', 'Alice W');
+    const replies: string[] = [];
+    await handleEntityMergeRequested(
+      {
+        type: 'entity.merge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: '01KQ8X',
+        handle_b: '01KQ9H',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/merged/i);
+    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number };
+    expect(log.n).toBe(1);
+  });
+
+  it('refuses an ambiguous entity_id prefix', async () => {
+    const db = getBrainDb();
+    seedPerson(db, '01KQ8XAA00000000000000', 'A');
+    seedPerson(db, '01KQ8XBB00000000000000', 'B');
+    seedPerson(db, '01KQ9HHHHH000000000000', 'C');
+    const replies: string[] = [];
+    await handleEntityMergeRequested(
+      {
+        type: 'entity.merge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: '01KQ8X',
+        handle_b: '01KQ9H',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/ambiguous/i);
+  });
+
   it('handles mergeEntities throwing — surfaces error to reply', async () => {
     const db = getBrainDb();
     // Both real but already chained to provoke a chain rejection from mergeEntities.
@@ -207,7 +254,7 @@ describe('handleEntityMergeRequested', () => {
   });
 });
 
-import { startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
+import { handleEntityMergeSuggested, handleEntityMergeRejectRequested, startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
 import { eventBus } from '../../event-bus.js';
 
 describe('identity-merge-handler — lifecycle', () => {
@@ -495,6 +542,83 @@ describe('handleEntityUnmergeRequested', () => {
     expect(sent[0]).toMatch(/no merge_log row matches/i);
   });
 
+  it('writes a permanent suppression when unmerging an auto:high merge', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al1','e-aaa','test','email','a@a.com','2026-04-28T00:00:00Z',1.0),
+              ('al2','e-bbb','test','email','a@a.com','2026-04-28T00:00:00Z',1.0)`,
+    ).run();
+
+    // Simulate the auto-merge sweep merging this pair.
+    const { runAutoMergeSweep } = await import('../auto-merge.js');
+    await runAutoMergeSweep({ db, enabled: true });
+    const log = db
+      .prepare(`SELECT merge_id, merged_by FROM entity_merge_log LIMIT 1`)
+      .get() as { merge_id: string; merged_by: string };
+    expect(log.merged_by).toBe('auto:high');
+
+    // Operator unmerges it.
+    const replies: string[] = [];
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: log.merge_id,
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/rolled back/i);
+
+    // Suppression must exist, permanent.
+    const supp = db
+      .prepare(
+        `SELECT suppressed_until, reason FROM entity_merge_suppressions
+          WHERE entity_id_a='e-aaa' AND entity_id_b='e-bbb'`,
+      )
+      .get() as { suppressed_until: number | null; reason: string } | undefined;
+    expect(supp).toBeDefined();
+    expect(supp!.suppressed_until).toBeNull();
+    expect(supp!.reason).toBe('unmerged_by_operator');
+  });
+
+  it('does NOT write a suppression when unmerging a human-initiated merge', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    const { mergeEntities } = await import('../identity-merge.js');
+    const merge = await mergeEntities('e-aaa', 'e-bbb', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:op',
+      db,
+    });
+    await handleEntityUnmergeRequested(
+      {
+        type: 'entity.unmerge.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        merge_id_or_prefix: merge.merge_id,
+      },
+      { db, sendReply: async () => {} },
+    );
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
+  });
+
   it('hints --force when guardrail blocks', async () => {
     const db = getBrainDb();
     const merge = await setupMergedEntities(db);
@@ -552,5 +676,170 @@ describe('handleEntityUnmergeRequested', () => {
       },
     );
     expect(sent2[0]).toMatch(/rolled back/i);
+  });
+});
+
+describe('handleEntityMergeSuggested', () => {
+  it('formats a chat message with both abbreviated ids and the resolved name', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'Jonathan');
+    seedPerson(db, 'e-bbbbbb', 'Jonathan');
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al1','e-aaaaaa','signal','signal_phone','+16263483472','2026-04-28T00:00:00Z',1.0),
+              ('al2','e-bbbbbb','signal','signal_profile_name','Jonathan','2026-04-28T00:00:00Z',1.0)`,
+    ).run();
+
+    const replies: string[] = [];
+    await handleEntityMergeSuggested(
+      {
+        type: 'entity.merge.suggested',
+        source: 'auto-merge',
+        timestamp: Date.now(),
+        payload: {},
+        suggestion_id: 's1',
+        entity_id_a: 'e-aaaaaa',
+        entity_id_b: 'e-bbbbbb',
+        confidence: 0.6,
+        reason_code: 'name_exact',
+        evidence: {
+          fields_matched: ['name'],
+          canonical_a: { name: 'Jonathan', signal_phone: '+16263483472' },
+          canonical_b: { name: 'Jonathan', signal_profile_name: 'Jonathan' },
+        },
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/Possible duplicate/i);
+    expect(replies[0]).toContain('e-aaaa');     // abbreviated id A
+    expect(replies[0]).toContain('e-bbbb');     // abbreviated id B
+    expect(replies[0]).toContain('Jonathan');
+    expect(replies[0]).toContain('claw merge ');
+    expect(replies[0]).toContain('claw merge-reject ');
+  });
+});
+
+describe('handleEntityMergeRejectRequested', () => {
+  it('writes a permanent suppression and updates pending suggestion to rejected', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'Jonathan');
+    seedPerson(db, 'e-bbbbbb', 'Jonathan');
+    db.prepare(
+      `INSERT INTO entity_merge_suggestions
+         (suggestion_id, entity_id_a, entity_id_b, confidence, reason_code,
+          evidence_json, suggested_at, status)
+       VALUES ('s1','e-aaaaaa','e-bbbbbb',0.6,'name_exact','{}',?,'pending')`,
+    ).run(Date.now());
+
+    const replies: string[] = [];
+    await handleEntityMergeRejectRequested(
+      {
+        type: 'entity.merge.reject.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: 'e-aaaaaa',
+        handle_b: 'e-bbbbbb',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+
+    expect(replies[0]).toMatch(/suppressed/i);
+    const supp = db
+      .prepare(
+        `SELECT suppressed_until, reason FROM entity_merge_suppressions
+          WHERE entity_id_a='e-aaaaaa' AND entity_id_b='e-bbbbbb'`,
+      )
+      .get() as { suppressed_until: number | null; reason: string };
+    expect(supp.suppressed_until).toBeNull();
+    expect(supp.reason).toBe('operator_rejected');
+
+    const sugg = db
+      .prepare(`SELECT status FROM entity_merge_suggestions WHERE suggestion_id='s1'`)
+      .get() as { status: string };
+    expect(sugg.status).toBe('rejected');
+  });
+
+  it('still writes a suppression even when no pending suggestion exists', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'X');
+    seedPerson(db, 'e-bbbbbb', 'X');
+    await handleEntityMergeRejectRequested(
+      {
+        type: 'entity.merge.reject.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: 'e-aaaaaa',
+        handle_b: 'e-bbbbbb',
+      },
+      { db, sendReply: async () => {} },
+    );
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(1);
+  });
+
+  it('refuses if a handle does not resolve', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'X');
+    const replies: string[] = [];
+    await handleEntityMergeRejectRequested(
+      {
+        type: 'entity.merge.reject.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: 'e-aaaaaa',
+        handle_b: 'nonexistent',
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/not found/i);
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
+  });
+
+  it('refuses when both handles resolve to the same entity', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'Solo');
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al1','e-aaaaaa','test','email','solo@x.com','2026-04-28T00:00:00Z',1.0)`,
+    ).run();
+    const replies: string[] = [];
+    await handleEntityMergeRejectRequested(
+      {
+        type: 'entity.merge.reject.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: 'Solo',          // resolves via canonical name
+        handle_b: 'solo@x.com',    // resolves via alias to the same entity
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/same entity/i);
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
   });
 });

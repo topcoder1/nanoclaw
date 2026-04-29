@@ -1,0 +1,444 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+}));
+
+let tmp: string;
+vi.mock('../../config.js', () => ({
+  get STORE_DIR() { return tmp; },
+  QDRANT_URL: '',
+}));
+
+import { _closeBrainDb, getBrainDb } from '../db.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep, startAutoMergeSchedule } from '../auto-merge.js';
+import { eventBus } from '../../event-bus.js';
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
+});
+afterEach(() => {
+  _closeBrainDb();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('schema', () => {
+  it('creates entity_merge_suggestions and entity_merge_suppressions', () => {
+    const db = getBrainDb();
+    const tables = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table'
+         AND name IN ('entity_merge_suggestions','entity_merge_suppressions')`,
+      )
+      .all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name).sort()).toEqual([
+      'entity_merge_suggestions',
+      'entity_merge_suppressions',
+    ]);
+    const idx = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='index'
+         AND name='idx_entity_merge_suggestions_status'`,
+      )
+      .get() as { name: string } | undefined;
+    expect(idx?.name).toBe('idx_entity_merge_suggestions_status');
+  });
+});
+
+describe('lexOrdered', () => {
+  it('returns smaller-first regardless of input order', () => {
+    expect(lexOrdered('b', 'a')).toEqual(['a', 'b']);
+    expect(lexOrdered('a', 'b')).toEqual(['a', 'b']);
+  });
+  it('rejects equal inputs', () => {
+    expect(() => lexOrdered('x', 'x')).toThrow(/equal/i);
+  });
+});
+
+describe('normalizePhone', () => {
+  it('strips formatting and returns digits-only with leading +', () => {
+    expect(normalizePhone('+1 (626) 348-3472')).toBe('+16263483472');
+    expect(normalizePhone('16263483472')).toBe('+16263483472');
+    expect(normalizePhone('+16263483472')).toBe('+16263483472');
+    expect(normalizePhone('  626-348-3472  ')).toBe('+6263483472');
+  });
+  it('returns null for empty / non-numeric input', () => {
+    expect(normalizePhone('')).toBeNull();
+    expect(normalizePhone('not a phone')).toBeNull();
+  });
+});
+
+function seedPerson(db: any, id: string, name: string): void {
+  db.prepare(
+    `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+     VALUES (?, 'person', ?, ?, ?)`,
+  ).run(id, JSON.stringify({ name }), '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z');
+}
+function seedAlias(db: any, aliasId: string, entityId: string, field: string, value: string): void {
+  db.prepare(
+    `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+     VALUES (?, ?, 'test', ?, ?, '2026-04-28T00:00:00Z', 1.0)`,
+  ).run(aliasId, entityId, field, value);
+}
+
+describe('findHighConfidenceCandidates', () => {
+  it('returns a pair when two entities share an email (case-insensitive)', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice W');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'Alice@Example.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'alice@example.com');
+
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].entity_id_a).toBe('e-aaa');
+    expect(pairs[0].entity_id_b).toBe('e-bbb');
+    expect(pairs[0].reason_code).toBe('email_exact');
+    expect(pairs[0].fields_matched).toContain('email');
+  });
+
+  it('returns a pair when two entities share a normalized phone', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Bob');
+    seedPerson(db, 'e-bbb', 'Bob');
+    seedAlias(db, 'a1', 'e-aaa', 'phone', '+1 (626) 348-3472');
+    seedAlias(db, 'a2', 'e-bbb', 'phone', '16263483472');
+
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].reason_code).toBe('phone_normalized');
+  });
+
+  it('returns no pair when entity_type differs', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-p1', 'X');
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('e-c1', 'company', '{"name":"X"}', '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z')`,
+    ).run();
+    seedAlias(db, 'a1', 'e-p1', 'email', 'x@x.com');
+    seedAlias(db, 'a2', 'e-c1', 'email', 'x@x.com');
+    expect(findHighConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('returns no pair when only one entity has the alias', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-1', 'Y');
+    seedPerson(db, 'e-2', 'Z');
+    seedAlias(db, 'a1', 'e-1', 'email', 'y@y.com');
+    expect(findHighConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('deduplicates pairs across multiple matched fields', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    seedAlias(db, 'a3', 'e-aaa', 'phone', '+15550001111');
+    seedAlias(db, 'a4', 'e-bbb', 'phone', '+15550001111');
+    const pairs = findHighConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].fields_matched.sort()).toEqual(['email', 'phone']);
+  });
+});
+
+describe('findMediumConfidenceCandidates', () => {
+  it('returns a pair for two entities with the same canonical name', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    const pairs = findMediumConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].entity_id_a).toBe('e-aaa');
+    expect(pairs[0].entity_id_b).toBe('e-bbb');
+    expect(pairs[0].reason_code).toBe('name_exact');
+    expect(pairs[0].evidence.fields_matched).toEqual(['name']);
+  });
+
+  it('matches case-insensitively and trims whitespace', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', '  Jonathan ');
+    seedPerson(db, 'e-bbb', 'JONATHAN');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(1);
+  });
+
+  it('does not match when the name is empty or missing', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', '');
+    seedPerson(db, 'e-bbb', '');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('does not match when entity_type differs', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-p1', 'X');
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('e-c1', 'company', '{"name":"X"}', '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z')`,
+    ).run();
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('short-circuits when entities have conflicting hard identifiers', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'jon1@x.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'jon2@x.com');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(0);
+  });
+
+  it('still matches when only one entity has a hard identifier (no conflict)', () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'jon@x.com');
+    expect(findMediumConfidenceCandidates(db)).toHaveLength(1);
+  });
+
+  it('production-fixture regression: Jonathan × 2 surfaces as medium-conf', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('01KQ8X5WSYDVRM28ZA3PZCVTGH','person',
+               '{"name":"Jonathan","signal_phone":"+16263483472"}',
+               '2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('01KQ9HHRDY5RYADT03SBQG07D6','person',
+               '{"name":"Jonathan","signal_profile_name":"Jonathan"}',
+               '2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
+    ).run();
+    const pairs = findMediumConfidenceCandidates(db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].reason_code).toBe('name_exact');
+  });
+});
+
+describe('isSuppressed', () => {
+  it('returns true when a permanent suppression row exists', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
+    ).run(Date.now());
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
+    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true);  // order-insensitive
+  });
+  it('returns false when no row exists', () => {
+    const db = getBrainDb();
+    expect(isSuppressed(db, 'e-x', 'e-y')).toBe(false);
+  });
+  it('returns false when a time-bounded suppression has expired', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', ?, 'operator_rejected', ?)`,
+    ).run(Date.now() - 1000, Date.now() - 5000);
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(false);
+  });
+  it('returns true when a time-bounded suppression is still in the future', () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', ?, 'operator_rejected', ?)`,
+    ).run(Date.now() + 60_000, Date.now());
+    expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
+  });
+});
+
+describe('runAutoMergeSweep — medium-confidence path', () => {
+  it('persists a suggestion row and emits entity.merge.suggested', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const events: Array<{ type: string; payload: unknown }> = [];
+    const unsub = eventBus.on('entity.merge.suggested', (evt) => {
+      events.push({ type: evt.type, payload: evt });
+    });
+
+    try {
+      const result = await runAutoMergeSweep({ db, enabled: true });
+      expect(result.medium_conf_suggested).toBe(1);
+      const row = db
+        .prepare(`SELECT * FROM entity_merge_suggestions LIMIT 1`)
+        .get() as any;
+      expect(row.entity_id_a).toBe('e-aaa');
+      expect(row.entity_id_b).toBe('e-bbb');
+      expect(row.reason_code).toBe('name_exact');
+      expect(row.status).toBe('pending');
+      expect(events).toHaveLength(1);
+      expect((events[0].payload as any).suggestion_id).toBe(row.suggestion_id);
+    } finally {
+      unsub();
+    }
+  });
+
+  it('does not emit a chat event when notifyChat=false', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const events: unknown[] = [];
+    const unsub = eventBus.on('entity.merge.suggested', (e) => events.push(e));
+    try {
+      await runAutoMergeSweep({ db, enabled: true, notifyChat: false });
+      expect(events).toHaveLength(0);
+      const row = db
+        .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+        .get() as { n: number };
+      expect(row.n).toBe(1);     // suggestion still persisted
+    } finally {
+      unsub();
+    }
+  });
+});
+
+describe('runAutoMergeSweep — high-confidence path', () => {
+  it('merges high-confidence pairs and writes auto:high to merge_log', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice W');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+
+    const result = await runAutoMergeSweep({ db, enabled: true });
+    expect(result.high_conf_merged).toBe(1);
+
+    const log = db
+      .prepare(`SELECT merged_by, confidence FROM entity_merge_log LIMIT 1`)
+      .get() as { merged_by: string; confidence: number };
+    expect(log.merged_by).toBe('auto:high');
+    expect(log.confidence).toBe(1.0);
+  });
+
+  it('skips suppressed pairs', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
+    ).run(Date.now());
+
+    const result = await runAutoMergeSweep({ db, enabled: true });
+    expect(result.high_conf_merged).toBe(0);
+    // The pair is suppressed in both the high-conf path (email match) and the
+    // medium-conf path (name match), so suppressed_skipped is 2.
+    expect(result.suppressed_skipped).toBe(2);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe('runAutoMergeSweep — idempotency', () => {
+  it('does not re-suggest the same pair on a second run', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const r1 = await runAutoMergeSweep({ db, enabled: true });
+    expect(r1.medium_conf_suggested).toBe(1);
+
+    const events: unknown[] = [];
+    const unsub = eventBus.on('entity.merge.suggested', (e) => events.push(e));
+    try {
+      const r2 = await runAutoMergeSweep({ db, enabled: true });
+      expect(r2.medium_conf_suggested).toBe(0);
+      expect(events).toHaveLength(0);
+    } finally {
+      unsub();
+    }
+
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(1);
+  });
+});
+
+describe('runAutoMergeSweep — env gate', () => {
+  it('is a no-op when enabled=false', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+
+    const result = await runAutoMergeSweep({ db, enabled: false });
+    expect(result.high_conf_merged).toBe(0);
+    expect(result.medium_conf_suggested).toBe(0);
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
+  });
+});
+
+describe('runAutoMergeSweep — dry-run', () => {
+  it('reports counts but writes no rows when dryRun=true', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    seedPerson(db, 'e-ccc', 'Jonathan');
+    seedPerson(db, 'e-ddd', 'Jonathan');
+
+    const result = await runAutoMergeSweep({ db, enabled: true, dryRun: true });
+    expect(result.dry_run).toBe(true);
+    expect(result.high_conf_merged).toBe(1);
+    // In dry-run the high-conf merge is skipped, so the medium-conf classifier
+    // still sees the Alice/Alice pair (no conflicting identifier — same email
+    // overlaps) AND Jonathan/Jonathan. Both surface as medium-conf candidates.
+    expect(result.medium_conf_suggested).toBe(2);
+
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number }).n,
+    ).toBe(0);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`).get() as { n: number }).n,
+    ).toBe(0);
+  });
+});
+
+describe('startAutoMergeSchedule', () => {
+  it('returns a stop function and runs the sweep on the configured interval', async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const stop = startAutoMergeSchedule({
+      intervalMs: 1000,
+      runOnStart: true,
+      run: async () => { calls.push(Date.now()); },
+    });
+    expect(calls).toHaveLength(1);   // runOnStart fired
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(3);
+    stop();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(3);   // stopped
+    vi.useRealTimers();
+  });
+
+  it('skips runOnStart when runOnStart=false', () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const stop = startAutoMergeSchedule({
+      intervalMs: 1000,
+      runOnStart: false,
+      run: async () => { calls.push(Date.now()); },
+    });
+    expect(calls).toHaveLength(0);
+    stop();
+    vi.useRealTimers();
+  });
+});

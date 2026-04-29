@@ -824,6 +824,41 @@ describe('cache writes, 🧠 reaction, and claw save', () => {
     await channel.disconnect();
   });
 
+  it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
+    const opts = createInboundTestOpts();
+    const env = make1to1Envelope({
+      dataMessage: {
+        timestamp: 1700000000000,
+        message: 'claw merge-reject e-aaaaaa e-bbbbbb',
+        expiresInSeconds: 0,
+        viewOnce: false,
+      },
+    });
+    mockPollResponse(env);
+    const channel = new SignalChannel(API_URL, PHONE, opts);
+    await connectAndPoll(channel);
+
+    const rejectEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'entity.merge.reject.requested',
+    );
+    expect(rejectEmits).toHaveLength(1);
+    expect(rejectEmits[0][1]).toMatchObject({
+      type: 'entity.merge.reject.requested',
+      platform: 'signal',
+      handle_a: 'e-aaaaaa',
+      handle_b: 'e-bbbbbb',
+    });
+
+    // Critical: must NOT also emit entity.merge.requested. The existing
+    // `claw merge` regex would otherwise capture this body via \b matching.
+    const mergeEmits = mockEventBusEmit.mock.calls.filter(
+      (c) => c[0] === 'entity.merge.requested',
+    );
+    expect(mergeEmits).toHaveLength(0);
+
+    await channel.disconnect();
+  });
+
   it('claw merge with wrong arg count is logged and ignored (no event)', async () => {
     const opts = createInboundTestOpts();
     const env = make1to1Envelope({

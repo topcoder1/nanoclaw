@@ -17,6 +17,7 @@ import type {
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
   EntityMergeRequestedEvent,
+  EntityMergeRejectRequestedEvent,
   EntityUnmergeRequestedEvent,
 } from '../events.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -61,8 +62,38 @@ export class DiscordChannel implements Channel {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
 
-      // `claw merge <a> <b>` text trigger — operator-issued identity merge.
+      // `claw merge-reject <a> <b>` text trigger. MUST come before the
+      // `claw merge` matcher because `\b` would otherwise let
+      // `claw merge-reject ...` fall into the merge handler.
       const rawContent = message.content ?? '';
+      const rejectMatch = rawContent.match(/^claw\s+merge-reject\b\s*(.+)$/i);
+      if (rejectMatch) {
+        const args = parseMergeArgs(rejectMatch[1].trim());
+        if (args.length === 2) {
+          eventBus.emit('entity.merge.reject.requested', {
+            type: 'entity.merge.reject.requested',
+            source: 'discord',
+            timestamp: Date.now(),
+            payload: {},
+            platform: 'discord',
+            chat_id: message.channelId,
+            requested_by_handle:
+              message.member?.displayName ??
+              message.author?.username ??
+              'unknown',
+            handle_a: args[0],
+            handle_b: args[1],
+          } satisfies EntityMergeRejectRequestedEvent);
+        } else {
+          logger.warn(
+            { content: rawContent, parsed: args },
+            'discord: claw merge-reject needs exactly two handles — ignoring',
+          );
+        }
+        return;
+      }
+
+      // `claw merge <a> <b>` text trigger — operator-issued identity merge.
       const mergeMatch = rawContent.match(/^claw\s+merge\b\s*(.+)$/i);
       if (mergeMatch) {
         const args = parseMergeArgs(mergeMatch[1].trim());

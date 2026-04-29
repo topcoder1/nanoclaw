@@ -1213,6 +1213,34 @@ describe('DiscordChannel', () => {
       );
       expect(mergeEmits).toHaveLength(0);
     });
+
+    it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        messageId: 'msg_reject',
+        content: 'claw merge-reject e-aaaaaa e-bbbbbb',
+      });
+      await triggerMessage(msg);
+
+      const rejectEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'entity.merge.reject.requested',
+      );
+      expect(rejectEmits).toHaveLength(1);
+      expect(rejectEmits[0][1]).toMatchObject({
+        type: 'entity.merge.reject.requested',
+        platform: 'discord',
+        handle_a: 'e-aaaaaa',
+        handle_b: 'e-bbbbbb',
+      });
+
+      const mergeEmits = mockEventBusEmit.mock.calls.filter(
+        (c) => c[0] === 'entity.merge.requested',
+      );
+      expect(mergeEmits).toHaveLength(0);
+    });
   });
 
   describe('MessageCreate claw unmerge text trigger', () => {

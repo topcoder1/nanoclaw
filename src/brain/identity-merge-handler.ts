@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
 import { eventBus } from '../event-bus.js';
 import type {
+  EntityMergeRejectRequestedEvent,
   EntityMergeRequestedEvent,
+  EntityMergeSuggestedEvent,
   EntityUnmergeRequestedEvent,
 } from '../events.js';
 import { logger } from '../logger.js';
@@ -19,7 +21,7 @@ export interface MergeHandlerOpts {
 
 interface ResolvedCandidate {
   entity_id: string;
-  reason: 'alias' | 'canonical_name';
+  reason: 'alias' | 'canonical_name' | 'id_prefix';
 }
 
 /**
@@ -50,6 +52,17 @@ function resolveHandle(
     )
     .all(lowered) as Array<{ entity_id: string }>;
 
+  // 3. Entity-id prefix match (used by chat-suggestion replies, where the
+  //    operator copy-pastes a short ULID prefix). Bounded to <=5 hits to
+  //    prevent runaway results when an operator types a very short prefix.
+  const prefixHits = db
+    .prepare(
+      `SELECT entity_id FROM entities
+        WHERE entity_id LIKE ? || '%'
+        LIMIT 5`,
+    )
+    .all(handle.trim()) as Array<{ entity_id: string }>;
+
   const seen = new Set<string>();
   const out: ResolvedCandidate[] = [];
   for (const r of aliasHits) {
@@ -61,6 +74,12 @@ function resolveHandle(
   for (const r of nameHits) {
     if (!seen.has(r.entity_id)) {
       out.push({ entity_id: r.entity_id, reason: 'canonical_name' });
+      seen.add(r.entity_id);
+    }
+  }
+  for (const r of prefixHits) {
+    if (!seen.has(r.entity_id)) {
+      out.push({ entity_id: r.entity_id, reason: 'id_prefix' });
       seen.add(r.entity_id);
     }
   }
@@ -213,10 +232,28 @@ export async function handleEntityUnmergeRequested(
   }
 
   try {
+    // Read merged_by BEFORE unmerging — unmergeEntities deletes the row.
+    const preLog = db
+      .prepare(`SELECT merged_by FROM entity_merge_log WHERE merge_id = ?`)
+      .get(row.merge_id) as { merged_by: string } | undefined;
+    const wasAutoHigh = preLog?.merged_by?.startsWith('auto:') === true;
+
     const result = await unmergeEntities(row.merge_id, {
       db,
       force: evt.force ?? false,
     });
+
+    if (wasAutoHigh) {
+      const [a, b] = result.kept_entity_id < result.merged_entity_id
+        ? [result.kept_entity_id, result.merged_entity_id]
+        : [result.merged_entity_id, result.kept_entity_id];
+      db.prepare(
+        `INSERT OR IGNORE INTO entity_merge_suppressions
+           (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+         VALUES (?, ?, NULL, 'unmerged_by_operator', ?)`,
+      ).run(a, b, Date.now());
+    }
+
     await reply(
       `claw unmerge: ✓ rolled back merge ${result.merge_id.slice(0, 6)}… — kept ${result.kept_entity_id.slice(0, 6)}…, restored ${result.merged_entity_id.slice(0, 6)}…`,
     );
@@ -236,8 +273,106 @@ export async function handleEntityUnmergeRequested(
   }
 }
 
+/**
+ * Format a medium-confidence duplicate suggestion as a chat message and
+ * send it via setIdentityMergeReply. The operator can accept by typing
+ * `claw merge <a> <b>` or suppress with `claw merge-reject <a> <b>`.
+ */
+export async function handleEntityMergeSuggested(
+  evt: EntityMergeSuggestedEvent,
+  opts: MergeHandlerOpts = {},
+): Promise<void> {
+  const reply = opts.sendReply ?? (async () => {});
+  const a6 = evt.entity_id_a.slice(0, 6);
+  const b6 = evt.entity_id_b.slice(0, 6);
+  const nameA = (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
+  const nameB = (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
+  // Build a one-line "evidence tail" per side: pick the first non-name
+  // canonical field for context. Falls back to empty.
+  const tail = (canon: Record<string, unknown>): string => {
+    for (const [k, v] of Object.entries(canon)) {
+      if (k === 'name') continue;
+      return ` — ${k}:${String(v)}`;
+    }
+    return '';
+  };
+  const text =
+    `🔗 Possible duplicate (medium confidence)\n\n` +
+    `A: ${nameA} (${a6}…)${tail(evt.evidence.canonical_a ?? {})}\n` +
+    `B: ${nameB} (${b6}…)${tail(evt.evidence.canonical_b ?? {})}\n\n` +
+    `Reply:\n` +
+    `  claw merge ${a6} ${b6}        — confirm merge\n` +
+    `  claw merge-reject ${a6} ${b6} — never suggest again`;
+  await reply(text);
+}
+
+/**
+ * Handle `claw merge-reject <a> <b>`. Writes a permanent suppression row
+ * for the pair and flips any pending suggestion to `rejected`. Whether or
+ * not a suggestion existed, the suppression is written so the operator
+ * can pre-empt a future match.
+ */
+export async function handleEntityMergeRejectRequested(
+  evt: EntityMergeRejectRequestedEvent,
+  opts: MergeHandlerOpts = {},
+): Promise<void> {
+  const db = opts.db ?? getBrainDb();
+  const reply = opts.sendReply ?? (async () => {});
+
+  const candA = resolveHandle(db, evt.handle_a);
+  const candB = resolveHandle(db, evt.handle_b);
+  if (candA.length === 0) {
+    await reply(`claw merge-reject: handle '${evt.handle_a}' not found`);
+    return;
+  }
+  if (candB.length === 0) {
+    await reply(`claw merge-reject: handle '${evt.handle_b}' not found`);
+    return;
+  }
+  if (candA.length > 1) {
+    await reply(
+      `claw merge-reject: handle '${evt.handle_a}' is ambiguous (${candA.length} matches)`,
+    );
+    return;
+  }
+  if (candB.length > 1) {
+    await reply(
+      `claw merge-reject: handle '${evt.handle_b}' is ambiguous (${candB.length} matches)`,
+    );
+    return;
+  }
+
+  const aId = candA[0].entity_id;
+  const bId = candB[0].entity_id;
+  if (aId === bId) {
+    await reply(`claw merge-reject: '${evt.handle_a}' and '${evt.handle_b}' resolve to the same entity`);
+    return;
+  }
+  const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
+
+  db.transaction(() => {
+    db.prepare(
+      `INSERT OR IGNORE INTO entity_merge_suppressions
+         (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES (?, ?, NULL, 'operator_rejected', ?)`,
+    ).run(a, b, Date.now());
+
+    db.prepare(
+      `UPDATE entity_merge_suggestions
+          SET status = 'rejected', status_at = ?
+        WHERE entity_id_a = ? AND entity_id_b = ? AND status = 'pending'`,
+    ).run(Date.now(), a, b);
+  })();
+
+  await reply(
+    `claw merge-reject: suppressed ${a.slice(0, 6)}… ↔ ${b.slice(0, 6)}… — will not suggest again`,
+  );
+}
+
 let unsubMerge: (() => void) | null = null;
 let unsubUnmerge: (() => void) | null = null;
+let unsubSuggested: (() => void) | null = null;
+let unsubReject: (() => void) | null = null;
 
 /**
  * Channel-aware reply sender wired by index.ts after channels connect.
@@ -270,7 +405,7 @@ export interface IdentityMergeStartOpts {
 export function startIdentityMergeHandler(
   opts: IdentityMergeStartOpts = {},
 ): void {
-  if (unsubMerge || unsubUnmerge) return;
+  if (unsubMerge || unsubUnmerge || unsubSuggested || unsubReject) return;
   unsubMerge = eventBus.on('entity.merge.requested', async (evt) => {
     try {
       // Per-event reply: prefer the explicit opts.sendReply (tests), else
@@ -303,6 +438,41 @@ export function startIdentityMergeHandler(
       );
     }
   });
+  unsubSuggested = eventBus.on('entity.merge.suggested', async (evt) => {
+    try {
+      const reply: ((text: string) => Promise<void>) | undefined =
+        opts.sendReply ??
+        (channelReply
+          // Suggestions go to the main group's channel — they're not tied
+          // to any specific chat_id. The channelReply signature requires
+          // chat_id + platform; we use the literals 'main' / 'signal' as
+          // a sentinel that the channel layer interprets as "default to
+          // the main group". Index.ts wires this when registering.
+          ? (text: string) => channelReply!('main', 'signal', text)
+          : undefined);
+      await handleEntityMergeSuggested(evt, { sendReply: reply });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), evt },
+        'identity-merge-handler: suggestion handler error',
+      );
+    }
+  });
+  unsubReject = eventBus.on('entity.merge.reject.requested', async (evt) => {
+    try {
+      const reply: ((text: string) => Promise<void>) | undefined =
+        opts.sendReply ??
+        (channelReply
+          ? (text: string) => channelReply!(evt.chat_id, evt.platform, text)
+          : undefined);
+      await handleEntityMergeRejectRequested(evt, { sendReply: reply });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), evt },
+        'identity-merge-handler: reject handler error',
+      );
+    }
+  });
   logger.info('Identity merge handler started');
 }
 
@@ -314,5 +484,13 @@ export function stopIdentityMergeHandler(): void {
   if (unsubUnmerge) {
     unsubUnmerge();
     unsubUnmerge = null;
+  }
+  if (unsubSuggested) {
+    unsubSuggested();
+    unsubSuggested = null;
+  }
+  if (unsubReject) {
+    unsubReject();
+    unsubReject = null;
   }
 }

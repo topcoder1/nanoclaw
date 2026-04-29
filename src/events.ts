@@ -837,6 +837,43 @@ export interface EntityUnmergeRequestedEvent extends NanoClawEvent {
   force?: boolean;
 }
 
+/**
+ * Emitted by the auto-merge sweep when it finds a medium-confidence duplicate
+ * pair (same canonical name, same entity_type, no conflicting hard identifier).
+ * The brain-side handler formats a chat suggestion via setIdentityMergeReply
+ * so the operator can confirm with `claw merge` or suppress with
+ * `claw merge-reject`.
+ */
+export interface EntityMergeSuggestedEvent extends NanoClawEvent {
+  type: 'entity.merge.suggested';
+  suggestion_id: string;
+  entity_id_a: string;          // lex-smaller
+  entity_id_b: string;          // lex-larger
+  confidence: number;
+  reason_code: 'name_exact' | string;
+  evidence: {
+    fields_matched: string[];
+    canonical_a: Record<string, unknown>;
+    canonical_b: Record<string, unknown>;
+  };
+}
+
+/**
+ * Emitted when an operator types `claw merge-reject <a> <b>` in an opted-in
+ * chat. The brain-side handler resolves both handles, writes a permanent row
+ * to entity_merge_suppressions, and updates any pending suggestion to status
+ * `rejected`.
+ */
+export interface EntityMergeRejectRequestedEvent extends NanoClawEvent {
+  type: 'entity.merge.reject.requested';
+  source: 'discord' | 'signal';
+  platform: 'discord' | 'signal';
+  chat_id: string;
+  requested_by_handle: string;
+  handle_a: string;
+  handle_b: string;
+}
+
 // --- Event type map (for type-safe subscriptions) ---
 
 export interface EventMap {
@@ -910,6 +947,8 @@ export interface EventMap {
   'chat.message.deleted': ChatMessageDeletedEvent;
   'entity.merge.requested': EntityMergeRequestedEvent;
   'entity.unmerge.requested': EntityUnmergeRequestedEvent;
+  'entity.merge.suggested': EntityMergeSuggestedEvent;
+  'entity.merge.reject.requested': EntityMergeRejectRequestedEvent;
 }
 
 export type EventType = keyof EventMap;
