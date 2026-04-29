@@ -14,6 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
+import { lexOrdered } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -43,5 +44,15 @@ describe('schema', () => {
       )
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe('idx_entity_merge_suggestions_status');
+  });
+});
+
+describe('lexOrdered', () => {
+  it('returns smaller-first regardless of input order', () => {
+    expect(lexOrdered('b', 'a')).toEqual(['a', 'b']);
+    expect(lexOrdered('a', 'b')).toEqual(['a', 'b']);
+  });
+  it('rejects equal inputs', () => {
+    expect(() => lexOrdered('x', 'x')).toThrow(/equal/i);
   });
 });
