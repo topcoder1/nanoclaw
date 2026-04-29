@@ -1,2 +1,9 @@
 #!/bin/bash
+# Source .env so launchd-managed runs see the same env vars as `npm run dev`.
+# Without this, only vars in com.nanoclaw.plist's EnvironmentVariables make it
+# through, and per-feature env gates like BRAIN_MERGE_AUTO_ENABLED silently
+# stay off in production.
+set -a
+[ -f /Users/topcoder1/dev/nanoclaw/.env ] && source /Users/topcoder1/dev/nanoclaw/.env
+set +a
 exec /opt/homebrew/bin/node /Users/topcoder1/dev/nanoclaw/dist/index.js
