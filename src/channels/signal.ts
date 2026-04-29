@@ -15,6 +15,7 @@ import type {
   ChatMessageEditedEvent,
   ChatMessageDeletedEvent,
   EntityMergeRequestedEvent,
+  EntityMergeRejectRequestedEvent,
   EntityUnmergeRequestedEvent,
 } from '../events.js';
 
@@ -324,6 +325,34 @@ export class SignalChannel implements Channel {
         text: tail,
         trigger: 'text',
       } satisfies ChatMessageSavedEvent);
+      return;
+    }
+
+    // 4a-bis. `claw merge-reject <a> <b>` text trigger — operator-issued
+    // suppression of a suggested merge. MUST come before the `claw merge`
+    // matcher because `\b` would otherwise let `claw merge-reject ...`
+    // fall into the merge handler.
+    const rejectMatch = body.match(/^claw\s+merge-reject\b\s*(.+)$/i);
+    if (rejectMatch) {
+      const args = parseMergeArgs(rejectMatch[1].trim());
+      if (args.length === 2) {
+        eventBus.emit('entity.merge.reject.requested', {
+          type: 'entity.merge.reject.requested',
+          source: 'signal',
+          timestamp: Date.now(),
+          payload: {},
+          platform: 'signal',
+          chat_id: chatId,
+          requested_by_handle: envelope.sourceName ?? sourceJid,
+          handle_a: args[0],
+          handle_b: args[1],
+        } satisfies EntityMergeRejectRequestedEvent);
+      } else {
+        logger.warn(
+          { body, parsed: args },
+          'signal: claw merge-reject needs exactly two handles — ignoring',
+        );
+      }
       return;
     }
 
