@@ -83,7 +83,6 @@ export function findHighConfidenceCandidates(
 
   const buckets = new Map<string, Set<string>>();
   const pairFields = new Map<string, Set<string>>();
-  const pairReasons = new Map<string, HighConfidencePair['reason_code']>();
 
   for (const r of rows) {
     const cfg = HARD_IDENTIFIER_FIELDS.find((f) => f.field === r.field_name);
@@ -99,7 +98,6 @@ export function findHighConfidenceCandidates(
   for (const [key, ids] of buckets) {
     if (ids.size < 2) continue;
     const fieldName = key.split('|')[1];
-    const cfg = HARD_IDENTIFIER_FIELDS.find((f) => f.field === fieldName)!;
     const sorted = [...ids].sort();
     for (let i = 0; i < sorted.length; i++) {
       for (let j = i + 1; j < sorted.length; j++) {
@@ -108,20 +106,24 @@ export function findHighConfidenceCandidates(
         const fields = pairFields.get(pairKey) ?? new Set();
         fields.add(fieldName);
         pairFields.set(pairKey, fields);
-        if (!pairReasons.has(pairKey)) {
-          pairReasons.set(pairKey, cfg.reasonCode);
-        }
       }
     }
   }
 
   const out: HighConfidencePair[] = [];
   for (const [pairKey, fields] of pairFields) {
+    // pairKey safely splits on '|' because entity ids are ULIDs (Crockford
+    // base32), which never contain '|'.
     const [a, b] = pairKey.split('|');
+    // Derive reason_code deterministically from the matched fields by picking
+    // the first hard-identifier in declaration order that appears in `fields`.
+    // This avoids depending on SQLite row order or Map insertion order.
+    const reasonCode = HARD_IDENTIFIER_FIELDS.find((f) => fields.has(f.field))!
+      .reasonCode;
     out.push({
       entity_id_a: a,
       entity_id_b: b,
-      reason_code: pairReasons.get(pairKey)!,
+      reason_code: reasonCode,
       fields_matched: [...fields].sort(),
       confidence: 1.0,
     });
