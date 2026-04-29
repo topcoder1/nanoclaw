@@ -813,4 +813,33 @@ describe('handleEntityMergeRejectRequested', () => {
       .get() as { n: number };
     expect(cnt.n).toBe(0);
   });
+
+  it('refuses when both handles resolve to the same entity', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'Solo');
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al1','e-aaaaaa','test','email','solo@x.com','2026-04-28T00:00:00Z',1.0)`,
+    ).run();
+    const replies: string[] = [];
+    await handleEntityMergeRejectRequested(
+      {
+        type: 'entity.merge.reject.requested',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'c1',
+        requested_by_handle: 'op',
+        handle_a: 'Solo',          // resolves via canonical name
+        handle_b: 'solo@x.com',    // resolves via alias to the same entity
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+    expect(replies[0]).toMatch(/same entity/i);
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(0);
+  });
 });
