@@ -7,6 +7,11 @@
  */
 
 import type Database from 'better-sqlite3';
+import { mergeEntities } from './identity-merge.js';
+import { eventBus } from '../event-bus.js';
+import { logger } from '../logger.js';
+import { newId } from './ulid.js';
+import { getBrainDb } from './db.js';
 
 /**
  * Return the two entity ids in lex-smaller-first order. Throws if equal —
@@ -288,3 +293,93 @@ function hasConflictingIdentifier(
   }
   return false;
 }
+
+export interface AutoMergeSweepOpts {
+  db?: Database.Database;
+  enabled?: boolean;             // overrides BRAIN_MERGE_AUTO_ENABLED for tests
+  dryRun?: boolean;              // overrides BRAIN_MERGE_AUTO_DRY_RUN for tests
+  notifyChat?: boolean;          // overrides BRAIN_MERGE_AUTO_NOTIFY_CHAT for tests
+  nowMs?: number;
+}
+
+export interface AutoMergeSweepResult {
+  high_conf_merged: number;
+  medium_conf_suggested: number;
+  suppressed_skipped: number;
+  duration_ms: number;
+  dry_run: boolean;
+}
+
+/**
+ * One sweep over the entities table. Merges every high-confidence pair
+ * silently, persists every medium-confidence pair as a chat suggestion,
+ * and emits `entity.merge.suggested` for each new suggestion.
+ */
+export async function runAutoMergeSweep(
+  opts: AutoMergeSweepOpts = {},
+): Promise<AutoMergeSweepResult> {
+  const db = opts.db ?? getBrainDb();
+  const enabled = opts.enabled ?? process.env.BRAIN_MERGE_AUTO_ENABLED === 'true';
+  const dryRun = opts.dryRun ?? process.env.BRAIN_MERGE_AUTO_DRY_RUN === 'true';
+  const notifyChat = opts.notifyChat ??
+    (process.env.BRAIN_MERGE_AUTO_NOTIFY_CHAT ?? 'true') !== 'false';
+  const nowMs = opts.nowMs ?? Date.now();
+  const startedAt = nowMs;
+
+  const result: AutoMergeSweepResult = {
+    high_conf_merged: 0,
+    medium_conf_suggested: 0,
+    suppressed_skipped: 0,
+    duration_ms: 0,
+    dry_run: dryRun,
+  };
+
+  if (!enabled) {
+    logger.debug('auto-merge: skipped (BRAIN_MERGE_AUTO_ENABLED=false)');
+    return result;
+  }
+
+  // High-confidence: silent merge per pair.
+  const highPairs = findHighConfidenceCandidates(db);
+  for (const pair of highPairs) {
+    if (isSuppressed(db, pair.entity_id_a, pair.entity_id_b, nowMs)) {
+      result.suppressed_skipped += 1;
+      continue;
+    }
+    if (dryRun) {
+      logger.info({ pair }, 'auto-merge: would merge (dry-run, high-conf)');
+      result.high_conf_merged += 1;
+      continue;
+    }
+    try {
+      await mergeEntities(pair.entity_id_a, pair.entity_id_b, {
+        evidence: {
+          trigger: 'deterministic',
+          matched_field: pair.fields_matched[0] as MergeEvidenceField,
+        },
+        confidence: pair.confidence,
+        mergedBy: 'auto:high',
+        db,
+      });
+      result.high_conf_merged += 1;
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          pair,
+        },
+        'auto-merge: high-conf merge failed',
+      );
+    }
+  }
+
+  // Medium-confidence path is added in Task 10.
+  void notifyChat;
+  void newId;
+  void eventBus;
+
+  result.duration_ms = Date.now() - startedAt;
+  return result;
+}
+
+type MergeEvidenceField = 'email' | 'phone' | 'name' | 'slack_id' | 'signal_uuid';

@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed } from '../auto-merge.js';
+import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -248,5 +248,41 @@ describe('isSuppressed', () => {
        VALUES ('e-aaa','e-bbb', ?, 'operator_rejected', ?)`,
     ).run(Date.now() + 60_000, Date.now());
     expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
+  });
+});
+
+describe('runAutoMergeSweep — high-confidence path', () => {
+  it('merges high-confidence pairs and writes auto:high to merge_log', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice W');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+
+    const result = await runAutoMergeSweep({ db, enabled: true });
+    expect(result.high_conf_merged).toBe(1);
+
+    const log = db
+      .prepare(`SELECT merged_by, confidence FROM entity_merge_log LIMIT 1`)
+      .get() as { merged_by: string; confidence: number };
+    expect(log.merged_by).toBe('auto:high');
+    expect(log.confidence).toBe(1.0);
+  });
+
+  it('skips suppressed pairs', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Alice');
+    seedPerson(db, 'e-bbb', 'Alice');
+    seedAlias(db, 'a1', 'e-aaa', 'email', 'a@a.com');
+    seedAlias(db, 'a2', 'e-bbb', 'email', 'a@a.com');
+    db.prepare(
+      `INSERT INTO entity_merge_suppressions (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+       VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
+    ).run(Date.now());
+
+    const result = await runAutoMergeSweep({ db, enabled: true });
+    expect(result.high_conf_merged).toBe(0);
+    expect(result.suppressed_skipped).toBe(1);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
   });
 });
