@@ -302,6 +302,37 @@ describe('unmergeEntities — happy path', () => {
   });
 });
 
+describe('mergeEntities — lifecycle hooks', () => {
+  it('marks any matching pending suggestion as accepted', async () => {
+    const db = getBrainDb();
+    db.prepare(
+      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+       VALUES ('e-aaa','person','{"name":"X"}','2026-04-28T00:00:00Z','2026-04-28T00:00:00Z'),
+              ('e-bbb','person','{"name":"X"}','2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
+    ).run();
+    // Pre-seed a pending suggestion (lex-ordered).
+    db.prepare(
+      `INSERT INTO entity_merge_suggestions
+         (suggestion_id, entity_id_a, entity_id_b, confidence, reason_code,
+          evidence_json, suggested_at, status)
+       VALUES ('s1','e-aaa','e-bbb',0.6,'name_exact','{}',?,'pending')`,
+    ).run(Date.now());
+
+    await mergeEntities('e-aaa', 'e-bbb', {
+      evidence: { trigger: 'manual' },
+      confidence: 1.0,
+      mergedBy: 'human:test',
+      db,
+    });
+
+    const row = db
+      .prepare(`SELECT status, status_at FROM entity_merge_suggestions WHERE suggestion_id = 's1'`)
+      .get() as { status: string; status_at: number | null };
+    expect(row.status).toBe('accepted');
+    expect(row.status_at).toBeGreaterThan(0);
+  });
+});
+
 describe('unmergeEntities — rejection cases', () => {
   it('rejects when merge_id does not exist', async () => {
     const db = getBrainDb();

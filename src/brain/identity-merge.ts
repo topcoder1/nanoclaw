@@ -154,6 +154,18 @@ export async function mergeEntities(
       mergedAt,
       opts.mergedBy,
     );
+
+    // 6. Lifecycle: mark any pending suggestion that matches this pair as
+    //    accepted. The suggestions table is lex-ordered by (a, b), so we
+    //    must lex-sort the inputs before the UPDATE.
+    const [sa, sb] = keptEntityId < mergedEntityId
+      ? [keptEntityId, mergedEntityId]
+      : [mergedEntityId, keptEntityId];
+    db.prepare(
+      `UPDATE entity_merge_suggestions
+          SET status = 'accepted', status_at = ?
+        WHERE entity_id_a = ? AND entity_id_b = ? AND status = 'pending'`,
+    ).run(Date.now(), sa, sb);
   })();
 
   logger.info(
