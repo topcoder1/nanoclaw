@@ -14,7 +14,7 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered } from '../auto-merge.js';
+import { lexOrdered, normalizePhone } from '../auto-merge.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -54,5 +54,18 @@ describe('lexOrdered', () => {
   });
   it('rejects equal inputs', () => {
     expect(() => lexOrdered('x', 'x')).toThrow(/equal/i);
+  });
+});
+
+describe('normalizePhone', () => {
+  it('strips formatting and returns digits-only with leading +', () => {
+    expect(normalizePhone('+1 (626) 348-3472')).toBe('+16263483472');
+    expect(normalizePhone('16263483472')).toBe('+16263483472');
+    expect(normalizePhone('+16263483472')).toBe('+16263483472');
+    expect(normalizePhone('  626-348-3472  ')).toBe('+6263483472');
+  });
+  it('returns null for empty / non-numeric input', () => {
+    expect(normalizePhone('')).toBeNull();
+    expect(normalizePhone('not a phone')).toBeNull();
   });
 });
