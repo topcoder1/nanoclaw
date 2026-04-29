@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { eventBus } from '../event-bus.js';
 import type {
   EntityMergeRequestedEvent,
+  EntityMergeSuggestedEvent,
   EntityUnmergeRequestedEvent,
 } from '../events.js';
 import { logger } from '../logger.js';
@@ -271,8 +272,42 @@ export async function handleEntityUnmergeRequested(
   }
 }
 
+/**
+ * Format a medium-confidence duplicate suggestion as a chat message and
+ * send it via setIdentityMergeReply. The operator can accept by typing
+ * `claw merge <a> <b>` or suppress with `claw merge-reject <a> <b>`.
+ */
+export async function handleEntityMergeSuggested(
+  evt: EntityMergeSuggestedEvent,
+  opts: MergeHandlerOpts = {},
+): Promise<void> {
+  const reply = opts.sendReply ?? (async () => {});
+  const a6 = evt.entity_id_a.slice(0, 6);
+  const b6 = evt.entity_id_b.slice(0, 6);
+  const nameA = (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
+  const nameB = (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
+  // Build a one-line "evidence tail" per side: pick the first non-name
+  // canonical field for context. Falls back to empty.
+  const tail = (canon: Record<string, unknown>): string => {
+    for (const [k, v] of Object.entries(canon)) {
+      if (k === 'name') continue;
+      return ` — ${k}:${String(v)}`;
+    }
+    return '';
+  };
+  const text =
+    `🔗 Possible duplicate (medium confidence)\n\n` +
+    `A: ${nameA} (${a6}…)${tail(evt.evidence.canonical_a ?? {})}\n` +
+    `B: ${nameB} (${b6}…)${tail(evt.evidence.canonical_b ?? {})}\n\n` +
+    `Reply:\n` +
+    `  claw merge ${a6} ${b6}        — confirm merge\n` +
+    `  claw merge-reject ${a6} ${b6} — never suggest again`;
+  await reply(text);
+}
+
 let unsubMerge: (() => void) | null = null;
 let unsubUnmerge: (() => void) | null = null;
+let unsubSuggested: (() => void) | null = null;
 
 /**
  * Channel-aware reply sender wired by index.ts after channels connect.
@@ -305,7 +340,7 @@ export interface IdentityMergeStartOpts {
 export function startIdentityMergeHandler(
   opts: IdentityMergeStartOpts = {},
 ): void {
-  if (unsubMerge || unsubUnmerge) return;
+  if (unsubMerge || unsubUnmerge || unsubSuggested) return;
   unsubMerge = eventBus.on('entity.merge.requested', async (evt) => {
     try {
       // Per-event reply: prefer the explicit opts.sendReply (tests), else
@@ -338,6 +373,26 @@ export function startIdentityMergeHandler(
       );
     }
   });
+  unsubSuggested = eventBus.on('entity.merge.suggested', async (evt) => {
+    try {
+      const reply: ((text: string) => Promise<void>) | undefined =
+        opts.sendReply ??
+        (channelReply
+          // Suggestions go to the main group's channel — they're not tied
+          // to any specific chat_id. The channelReply signature requires
+          // chat_id + platform; we use the literals 'main' / 'signal' as
+          // a sentinel that the channel layer interprets as "default to
+          // the main group". Index.ts wires this when registering.
+          ? (text: string) => channelReply!('main', 'signal', text)
+          : undefined);
+      await handleEntityMergeSuggested(evt, { sendReply: reply });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), evt },
+        'identity-merge-handler: suggestion handler error',
+      );
+    }
+  });
   logger.info('Identity merge handler started');
 }
 
@@ -349,5 +404,9 @@ export function stopIdentityMergeHandler(): void {
   if (unsubUnmerge) {
     unsubUnmerge();
     unsubUnmerge = null;
+  }
+  if (unsubSuggested) {
+    unsubSuggested();
+    unsubSuggested = null;
   }
 }

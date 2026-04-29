@@ -254,7 +254,7 @@ describe('handleEntityMergeRequested', () => {
   });
 });
 
-import { startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
+import { handleEntityMergeSuggested, startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
 import { eventBus } from '../../event-bus.js';
 
 describe('identity-merge-handler — lifecycle', () => {
@@ -676,5 +676,47 @@ describe('handleEntityUnmergeRequested', () => {
       },
     );
     expect(sent2[0]).toMatch(/rolled back/i);
+  });
+});
+
+describe('handleEntityMergeSuggested', () => {
+  it('formats a chat message with both abbreviated ids and the resolved name', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaaaaa', 'Jonathan');
+    seedPerson(db, 'e-bbbbbb', 'Jonathan');
+    db.prepare(
+      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+       VALUES ('al1','e-aaaaaa','signal','signal_phone','+16263483472','2026-04-28T00:00:00Z',1.0),
+              ('al2','e-bbbbbb','signal','signal_profile_name','Jonathan','2026-04-28T00:00:00Z',1.0)`,
+    ).run();
+
+    const replies: string[] = [];
+    await handleEntityMergeSuggested(
+      {
+        type: 'entity.merge.suggested',
+        source: 'auto-merge',
+        timestamp: Date.now(),
+        payload: {},
+        suggestion_id: 's1',
+        entity_id_a: 'e-aaaaaa',
+        entity_id_b: 'e-bbbbbb',
+        confidence: 0.6,
+        reason_code: 'name_exact',
+        evidence: {
+          fields_matched: ['name'],
+          canonical_a: { name: 'Jonathan', signal_phone: '+16263483472' },
+          canonical_b: { name: 'Jonathan', signal_profile_name: 'Jonathan' },
+        },
+      },
+      { db, sendReply: async (t) => { replies.push(t); } },
+    );
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/Possible duplicate/i);
+    expect(replies[0]).toContain('e-aaaa');     // abbreviated id A
+    expect(replies[0]).toContain('e-bbbb');     // abbreviated id B
+    expect(replies[0]).toContain('Jonathan');
+    expect(replies[0]).toContain('claw merge ');
+    expect(replies[0]).toContain('claw merge-reject ');
   });
 });
