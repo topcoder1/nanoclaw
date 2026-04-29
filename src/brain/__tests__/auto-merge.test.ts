@@ -337,3 +337,29 @@ describe('runAutoMergeSweep — high-confidence path', () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
   });
 });
+
+describe('runAutoMergeSweep — idempotency', () => {
+  it('does not re-suggest the same pair on a second run', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const r1 = await runAutoMergeSweep({ db, enabled: true });
+    expect(r1.medium_conf_suggested).toBe(1);
+
+    const events: unknown[] = [];
+    const unsub = eventBus.on('entity.merge.suggested', (e) => events.push(e));
+    try {
+      const r2 = await runAutoMergeSweep({ db, enabled: true });
+      expect(r2.medium_conf_suggested).toBe(0);
+      expect(events).toHaveLength(0);
+    } finally {
+      unsub();
+    }
+
+    const cnt = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+      .get() as { n: number };
+    expect(cnt.n).toBe(1);
+  });
+});
