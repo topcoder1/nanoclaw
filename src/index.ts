@@ -1761,6 +1761,35 @@ async function main(): Promise<void> {
       './brain/identity-merge-handler.js'
     );
     setIdentityMergeReply(async (chat_id, platform, text) => {
+      // 'main' is a sentinel from entity.merge.suggested (sweep-emitted, not
+      // chat-tied): route to the registered main group regardless of platform.
+      // Same pattern as deliverBrainMessage — pick the main group whose JID is
+      // owned by some connected channel.
+      if (chat_id === 'main') {
+        const mainEntry = Object.entries(registeredGroups).find(
+          ([jid, g]) => g.isMain && channels.some((c) => c.ownsJid(jid)),
+        );
+        if (!mainEntry) {
+          logger.warn({ text }, 'merge-suggested: no main group registered');
+          return;
+        }
+        const [mainJid] = mainEntry;
+        const mainChannel = channels.find((c) => c.ownsJid(mainJid));
+        if (!mainChannel) return;
+        try {
+          await mainChannel.sendMessage(mainJid, text);
+        } catch (err) {
+          logger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              mainJid,
+            },
+            'merge-suggested: main-group send failed',
+          );
+        }
+        return;
+      }
+
       const channel = channels.find((c) => c.name === platform);
       if (!channel) {
         logger.warn(
