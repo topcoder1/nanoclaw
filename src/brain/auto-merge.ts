@@ -373,10 +373,73 @@ export async function runAutoMergeSweep(
     }
   }
 
-  // Medium-confidence path is added in Task 10.
-  void notifyChat;
-  void newId;
-  void eventBus;
+  // Medium-confidence: persist suggestion + optionally emit event.
+  const mediumPairs = findMediumConfidenceCandidates(db);
+  for (const pair of mediumPairs) {
+    if (isSuppressed(db, pair.entity_id_a, pair.entity_id_b, nowMs)) {
+      result.suppressed_skipped += 1;
+      continue;
+    }
+    if (dryRun) {
+      logger.info({ pair }, 'auto-merge: would suggest (dry-run, medium-conf)');
+      result.medium_conf_suggested += 1;
+      continue;
+    }
+
+    const suggestionId = newId();
+    let inserted = false;
+    try {
+      const info = db
+        .prepare(
+          `INSERT OR IGNORE INTO entity_merge_suggestions
+             (suggestion_id, entity_id_a, entity_id_b, confidence, reason_code,
+              evidence_json, suggested_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        )
+        .run(
+          suggestionId,
+          pair.entity_id_a,
+          pair.entity_id_b,
+          pair.confidence,
+          pair.reason_code,
+          JSON.stringify(pair.evidence),
+          nowMs,
+        );
+      inserted = info.changes === 1;
+    } catch (err) {
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          pair,
+        },
+        'auto-merge: suggestion insert failed',
+      );
+      continue;
+    }
+
+    if (!inserted) {
+      // UNIQUE conflict — a pending suggestion for this pair already exists.
+      // Don't re-emit the event; the operator has already been told.
+      continue;
+    }
+
+    result.medium_conf_suggested += 1;
+
+    if (notifyChat) {
+      eventBus.emit('entity.merge.suggested', {
+        type: 'entity.merge.suggested',
+        source: 'auto-merge',
+        timestamp: nowMs,
+        payload: {},
+        suggestion_id: suggestionId,
+        entity_id_a: pair.entity_id_a,
+        entity_id_b: pair.entity_id_b,
+        confidence: pair.confidence,
+        reason_code: pair.reason_code,
+        evidence: pair.evidence,
+      });
+    }
+  }
 
   result.duration_ms = Date.now() - startedAt;
   return result;

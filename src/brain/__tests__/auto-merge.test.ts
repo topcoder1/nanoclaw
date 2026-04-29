@@ -15,6 +15,7 @@ vi.mock('../../config.js', () => ({
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
 import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep } from '../auto-merge.js';
+import { eventBus } from '../../event-bus.js';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-auto-merge-'));
@@ -251,6 +252,54 @@ describe('isSuppressed', () => {
   });
 });
 
+describe('runAutoMergeSweep — medium-confidence path', () => {
+  it('persists a suggestion row and emits entity.merge.suggested', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const events: Array<{ type: string; payload: unknown }> = [];
+    const unsub = eventBus.on('entity.merge.suggested', (evt) => {
+      events.push({ type: evt.type, payload: evt });
+    });
+
+    try {
+      const result = await runAutoMergeSweep({ db, enabled: true });
+      expect(result.medium_conf_suggested).toBe(1);
+      const row = db
+        .prepare(`SELECT * FROM entity_merge_suggestions LIMIT 1`)
+        .get() as any;
+      expect(row.entity_id_a).toBe('e-aaa');
+      expect(row.entity_id_b).toBe('e-bbb');
+      expect(row.reason_code).toBe('name_exact');
+      expect(row.status).toBe('pending');
+      expect(events).toHaveLength(1);
+      expect((events[0].payload as any).suggestion_id).toBe(row.suggestion_id);
+    } finally {
+      unsub();
+    }
+  });
+
+  it('does not emit a chat event when notifyChat=false', async () => {
+    const db = getBrainDb();
+    seedPerson(db, 'e-aaa', 'Jonathan');
+    seedPerson(db, 'e-bbb', 'Jonathan');
+
+    const events: unknown[] = [];
+    const unsub = eventBus.on('entity.merge.suggested', (e) => events.push(e));
+    try {
+      await runAutoMergeSweep({ db, enabled: true, notifyChat: false });
+      expect(events).toHaveLength(0);
+      const row = db
+        .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+        .get() as { n: number };
+      expect(row.n).toBe(1);     // suggestion still persisted
+    } finally {
+      unsub();
+    }
+  });
+});
+
 describe('runAutoMergeSweep — high-confidence path', () => {
   it('merges high-confidence pairs and writes auto:high to merge_log', async () => {
     const db = getBrainDb();
@@ -282,7 +331,9 @@ describe('runAutoMergeSweep — high-confidence path', () => {
 
     const result = await runAutoMergeSweep({ db, enabled: true });
     expect(result.high_conf_merged).toBe(0);
-    expect(result.suppressed_skipped).toBe(1);
+    // The pair is suppressed in both the high-conf path (email match) and the
+    // medium-conf path (name match), so suppressed_skipped is 2.
+    expect(result.suppressed_skipped).toBe(2);
     expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
   });
 });
