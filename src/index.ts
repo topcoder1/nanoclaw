@@ -131,6 +131,7 @@ import {
   startDigestSchedule,
 } from './brain/weekly-digest.js';
 import { startReflectionSchedule } from './brain/procedural-reflect.js';
+import { startAutoMergeSchedule } from './brain/auto-merge.js';
 import { initOutcomeStore, logOutcome } from './memory/outcome-store.js';
 import {
   parseAssistantCommand,
@@ -1423,6 +1424,12 @@ async function main(): Promise<void> {
   // rules from learned_rules at format time regardless of whether this ran.
   const stopReflectionSched = startReflectionSchedule();
 
+  // Brain auto-merge — nightly sweep over the entities table to detect
+  // duplicate persons. Gated by BRAIN_MERGE_AUTO_ENABLED (default off).
+  // Initial run on startup so a freshly-deployed env-var change is picked
+  // up without waiting 24h.
+  const stopAutoMergeSched = startAutoMergeSchedule();
+
   // Brain wiki synthesis — daily pass that refreshes cached LLM
   // blockquotes for entities whose KU set has drifted. Independent of
   // the on-insert trigger A above (which never calls the LLM).
@@ -1455,6 +1462,7 @@ async function main(): Promise<void> {
     stopDigestSched();
     stopAlertsSched();
     stopReflectionSched();
+    stopAutoMergeSched();
     stopWikiSynthesisSched();
     // Drain any pending wiki rebuilds so a SIGTERM doesn't drop edits.
     try {
