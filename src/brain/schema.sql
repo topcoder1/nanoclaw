@@ -57,6 +57,31 @@ CREATE TABLE IF NOT EXISTS entity_merge_log (
   merged_by          TEXT NOT NULL        -- 'deterministic'|'splink'|'human:<id>'
 );
 
+-- 5.1.x Auto-merge suggestion + suppression (2026-04-28)
+CREATE TABLE IF NOT EXISTS entity_merge_suggestions (
+  suggestion_id TEXT PRIMARY KEY,           -- ULID
+  entity_id_a   TEXT NOT NULL,              -- lex-smaller of the two ids
+  entity_id_b   TEXT NOT NULL,              -- lex-larger
+  confidence    REAL NOT NULL,
+  reason_code   TEXT NOT NULL,              -- 'name_exact', 'phone_normalized', etc.
+  evidence_json TEXT NOT NULL,              -- JSON: {fieldsMatched, canonicalA, canonicalB}
+  suggested_at  INTEGER NOT NULL,           -- unix ms
+  status        TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected
+  status_at     INTEGER,
+  UNIQUE (entity_id_a, entity_id_b)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_merge_suggestions_status
+  ON entity_merge_suggestions(status, suggested_at);
+
+CREATE TABLE IF NOT EXISTS entity_merge_suppressions (
+  entity_id_a      TEXT NOT NULL,           -- lex-smaller
+  entity_id_b      TEXT NOT NULL,           -- lex-larger
+  suppressed_until INTEGER,                 -- unix ms; NULL = permanent
+  reason           TEXT,                    -- 'operator_rejected' | 'unmerged_by_operator'
+  created_at       INTEGER NOT NULL,
+  PRIMARY KEY (entity_id_a, entity_id_b)
+);
+
 -- -------------------------------------------------------------------------
 -- 5.2 Knowledge Units
 -- -------------------------------------------------------------------------
