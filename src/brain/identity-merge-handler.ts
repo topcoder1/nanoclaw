@@ -213,10 +213,28 @@ export async function handleEntityUnmergeRequested(
   }
 
   try {
+    // Read merged_by BEFORE unmerging — unmergeEntities deletes the row.
+    const preLog = db
+      .prepare(`SELECT merged_by FROM entity_merge_log WHERE merge_id = ?`)
+      .get(row.merge_id) as { merged_by: string } | undefined;
+    const wasAutoHigh = preLog?.merged_by?.startsWith('auto:') === true;
+
     const result = await unmergeEntities(row.merge_id, {
       db,
       force: evt.force ?? false,
     });
+
+    if (wasAutoHigh) {
+      const [a, b] = result.kept_entity_id < result.merged_entity_id
+        ? [result.kept_entity_id, result.merged_entity_id]
+        : [result.merged_entity_id, result.kept_entity_id];
+      db.prepare(
+        `INSERT OR IGNORE INTO entity_merge_suppressions
+           (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
+         VALUES (?, ?, NULL, 'unmerged_by_operator', ?)`,
+      ).run(a, b, Date.now());
+    }
+
     await reply(
       `claw unmerge: ✓ rolled back merge ${result.merge_id.slice(0, 6)}… — kept ${result.kept_entity_id.slice(0, 6)}…, restored ${result.merged_entity_id.slice(0, 6)}…`,
     );
