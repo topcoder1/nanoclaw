@@ -395,7 +395,10 @@ describe('runAutoMergeSweep — dry-run', () => {
     const result = await runAutoMergeSweep({ db, enabled: true, dryRun: true });
     expect(result.dry_run).toBe(true);
     expect(result.high_conf_merged).toBe(1);
-    expect(result.medium_conf_suggested).toBe(1);
+    // In dry-run the high-conf merge is skipped, so the medium-conf classifier
+    // still sees the Alice/Alice pair (no conflicting identifier — same email
+    // overlaps) AND Jonathan/Jonathan. Both surface as medium-conf candidates.
+    expect(result.medium_conf_suggested).toBe(2);
 
     expect(
       (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number }).n,
