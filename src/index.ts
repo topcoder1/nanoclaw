@@ -2871,11 +2871,16 @@ async function main(): Promise<void> {
 
   // Triage attention re-surface reminder sweep: runs every hour, but the sweep
   // itself only sends for items older than windowHours with reminded_at IS NULL.
+  // Pass gmailOpsRouter so the sweep can pre-check Gmail INBOX status for
+  // gmail-sourced rows before reminding — suppresses reminders for emails
+  // the user already archived (or replied to) out-of-band, closing the
+  // race against the gmail-reconciler's eventual-consistency loop.
   setInterval(
     () => {
       if (!TRIAGE_DEFAULTS.enabled) return;
       void runAttentionReminderSweep({
         windowHours: TRIAGE_DEFAULTS.attentionRemindHours,
+        gmailOps: gmailOpsRouterRef.current,
       }).catch((err) => {
         logger.warn({ err: String(err) }, 'attention reminder sweep failed');
       });

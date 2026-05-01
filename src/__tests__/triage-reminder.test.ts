@@ -12,7 +12,7 @@ vi.mock('../logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { _initTestDatabase, _closeDatabase } from '../db.js';
+import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
 import { runAttentionReminderSweep } from '../triage/reminder.js';
 import { insertTrackedItem } from '../tracked-items.js';
 
@@ -61,6 +61,106 @@ describe('runAttentionReminderSweep', () => {
     mockSend.mockReset();
     await runAttentionReminderSweep({ windowHours: 4 });
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('suppresses reminder + resolves row when Gmail says thread is no longer in INBOX', async () => {
+    const oldMs = Date.now() - 5 * 60 * 60 * 1000;
+    insertTrackedItem({
+      id: 'r3',
+      source: 'gmail',
+      source_id: 'gmail:t3',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'You have new ACH debits',
+      summary: null,
+      thread_id: 't3',
+      detected_at: oldMs,
+      pushed_at: oldMs,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: { account: 'personal' },
+      confidence: 0.9,
+      model_tier: 1,
+      action_intent: 'none',
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: ['x'],
+    });
+
+    const getThreadInboxStatus = vi.fn().mockResolvedValue('out' as const);
+
+    await runAttentionReminderSweep({
+      windowHours: 4,
+      gmailOps: { getThreadInboxStatus },
+    });
+
+    expect(getThreadInboxStatus).toHaveBeenCalledWith('personal', 't3', oldMs);
+    expect(mockSend).not.toHaveBeenCalled();
+    const row = getDb()
+      .prepare(
+        `SELECT state, resolution_method, reminded_at FROM tracked_items WHERE id = 'r3'`,
+      )
+      .get() as {
+      state: string;
+      resolution_method: string | null;
+      reminded_at: number | null;
+    };
+    expect(row.state).toBe('resolved');
+    expect(row.resolution_method).toBe('gmail:external');
+    expect(row.reminded_at).toBeNull();
+  });
+
+  it('falls through to send when Gmail precheck times out', async () => {
+    const oldMs = Date.now() - 5 * 60 * 60 * 1000;
+    insertTrackedItem({
+      id: 'r4',
+      source: 'gmail',
+      source_id: 'gmail:t4',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'overdue',
+      summary: null,
+      thread_id: 't4',
+      detected_at: oldMs,
+      pushed_at: oldMs,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: { account: 'personal' },
+      confidence: 0.9,
+      model_tier: 1,
+      action_intent: 'none',
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: ['x'],
+    });
+
+    // Hangs forever — sweep must time out and send anyway.
+    const getThreadInboxStatus = vi.fn(() => new Promise<never>(() => {}));
+
+    await runAttentionReminderSweep({
+      windowHours: 4,
+      gmailOps: { getThreadInboxStatus },
+      gmailCallTimeoutMs: 25,
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const row = getDb()
+      .prepare(`SELECT state, reminded_at FROM tracked_items WHERE id = 'r4'`)
+      .get() as { state: string; reminded_at: number | null };
+    expect(row.state).toBe('pushed');
+    expect(row.reminded_at).not.toBeNull();
   });
 
   it('does NOT send for fresh items', async () => {

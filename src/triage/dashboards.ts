@@ -151,6 +151,20 @@ export async function renderAttentionDashboard(
 export async function renderArchiveDashboard(
   input: ArchiveDashboardInput,
 ): Promise<void> {
+  // Suppress the fresh post+pin path when there's nothing to show. The
+  // first-time create branch in upsertDashboard sends the message and
+  // pins it, both of which fire Telegram notifications — emitting a
+  // "0 pending" pinned message after a state reset (or on a clean
+  // install) is pure noise. If a dashboard already exists, we still
+  // edit it in place so the user sees the live count drop to 0; edits
+  // are silent.
+  if (input.total === 0) {
+    const row = getDb()
+      .prepare(`SELECT pinned_msg_id FROM triage_dashboards WHERE topic = ?`)
+      .get('archive') as { pinned_msg_id: number | null } | undefined;
+    if (!row || row.pinned_msg_id === null) return;
+  }
+
   // Inline "Archive all" button on the archive dashboard — one click to
   // mass-resolve everything in the queue. Only attach when there's
   // something to archive; otherwise the keyboard is a no-op.

@@ -21,5 +21,14 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # Two test files (signer-integration, docusign-executor) launch real
+      # Chromium via playwright-core. The package ships without browsers, so
+      # without this step those tests fail with "Executable doesn't exist".
+      # We use playwright-core's bin (the repo doesn't depend on the full
+      # `playwright` meta-package). `--with-deps` pulls system libs needed
+      # by Chromium on the ubuntu-latest runner.
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
+
       - name: Tests
         run: npx vitest run

@@ -21,7 +21,10 @@ vi.mock('../logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { renderAttentionDashboard } from '../triage/dashboards.js';
+import {
+  renderArchiveDashboard,
+  renderAttentionDashboard,
+} from '../triage/dashboards.js';
 
 describe('renderAttentionDashboard', () => {
   beforeEach(() => {
@@ -138,5 +141,70 @@ describe('renderAttentionDashboard', () => {
     });
     expect(mockEdit).not.toHaveBeenCalled();
     expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderArchiveDashboard', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    mockSend.mockReset();
+    mockEdit.mockReset();
+    mockPin.mockReset();
+  });
+  afterEach(() => _closeDatabase());
+
+  it('does NOT post a fresh "0 pending" message when no dashboard exists yet', async () => {
+    // Regression: posting + pinning a brand-new "0 pending" message
+    // emits a Telegram notification — pure noise after a state reset
+    // or on a clean install. Suppress the create path entirely when
+    // there's nothing to show.
+    await renderArchiveDashboard({
+      chatId: '-100123',
+      counts: {},
+      total: 0,
+      nextDigestHuman: 'tomorrow 8am',
+    });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockPin).not.toHaveBeenCalled();
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+
+  it('edits an existing pinned dashboard down to 0 pending (silent)', async () => {
+    getDb()
+      .prepare(
+        `INSERT INTO triage_dashboards (topic, telegram_chat_id, pinned_msg_id, last_rendered_at)
+         VALUES ('archive', '-100123', 77, ?)`,
+      )
+      .run(Date.now());
+
+    mockEdit.mockResolvedValueOnce({ message_id: 77 });
+
+    await renderArchiveDashboard({
+      chatId: '-100123',
+      counts: {},
+      total: 0,
+      nextDigestHuman: 'tomorrow 8am',
+    });
+    expect(mockEdit).toHaveBeenCalledWith(
+      '-100123',
+      77,
+      expect.stringContaining('0 pending'),
+    );
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockPin).not.toHaveBeenCalled();
+  });
+
+  it('posts + pins a new dashboard when there is something to show', async () => {
+    mockSend.mockResolvedValueOnce({ message_id: 55 });
+    mockPin.mockResolvedValueOnce({ ok: true });
+
+    await renderArchiveDashboard({
+      chatId: '-100123',
+      counts: { receipt: 3 },
+      total: 3,
+      nextDigestHuman: 'tomorrow 8am',
+    });
+    expect(mockSend).toHaveBeenCalled();
+    expect(mockPin).toHaveBeenCalledWith('-100123', 55);
   });
 });
