@@ -185,6 +185,7 @@ import {
 } from './types.js';
 import { logger } from './logger.js';
 import { runAttentionReminderSweep } from './triage/reminder.js';
+import { shouldNotify } from './notify-throttle.js';
 import { runNightlyAgreementCheck } from './triage/agreement.js';
 import { TRIAGE_DEFAULTS } from './triage/config.js';
 import { eventBus } from './event-bus.js';
@@ -2776,13 +2777,15 @@ async function main(): Promise<void> {
           // These almost always recover on the next debounced batch — every
           // observed alert in the wild has been followed within ~1 minute by
           // a successful retry, so the alert is pure noise. Real failures
-          // (timeouts, code-1 exits, parse errors, budget) still alert.
+          // (timeouts, code-1 exits, parse errors, budget) still alert,
+          // throttled to one ping per 10 min so a sustained real outage
+          // doesn't produce a flood either.
           if (isTransientAgentError(result.error)) {
             logger.warn(
               { chatJid, taskId, error: result.error },
               'Email trigger failed with transient upstream error — alert suppressed, awaiting retry',
             );
-          } else {
+          } else if (shouldNotify('email-intel-trigger-failed', 10 * 60 * 1000)) {
             const telegramJid = Object.keys(registeredGroups).find((jid) =>
               jid.startsWith('tg:'),
             );
