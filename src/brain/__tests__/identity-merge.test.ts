@@ -5,12 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
   logger: {
-    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
   },
 }));
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
@@ -29,7 +35,12 @@ function seedPerson(db: any, id: string, name: string): void {
   db.prepare(
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES (?, 'person', ?, ?, ?)`,
-  ).run(id, JSON.stringify({ name }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z');
+  ).run(
+    id,
+    JSON.stringify({ name }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+  );
 }
 
 describe('mergeEntities — happy path', () => {
@@ -44,7 +55,9 @@ describe('mergeEntities — happy path', () => {
        VALUES ('k1', 'x', 'signal_message', 'personal', 0.9,
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`,
+    ).run();
 
     db.prepare(
       `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
@@ -62,13 +75,19 @@ describe('mergeEntities — happy path', () => {
     expect(result.kept_entity_id).toBe('e-keep');
     expect(result.merged_entity_id).toBe('e-merge');
 
-    const links = db.prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`).all() as any[];
+    const links = db
+      .prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`)
+      .all() as any[];
     expect(links.map((l) => l.entity_id)).toEqual(['e-keep']);
 
-    const alias = db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='a1'`).get() as any;
+    const alias = db
+      .prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='a1'`)
+      .get() as any;
     expect(alias.entity_id).toBe('e-keep');
 
-    const log = db.prepare(`SELECT * FROM entity_merge_log WHERE merge_id=?`).get(result.merge_id) as any;
+    const log = db
+      .prepare(`SELECT * FROM entity_merge_log WHERE merge_id=?`)
+      .get(result.merge_id) as any;
     expect(log.kept_entity_id).toBe('e-keep');
     expect(log.merged_entity_id).toBe('e-merge');
     expect(log.merged_by).toBe('human:op');
@@ -90,8 +109,12 @@ describe('mergeEntities — happy path', () => {
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
     // Both linked to k1.
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-keep', 'mentioned')`).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-keep', 'mentioned')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`,
+    ).run();
 
     await mergeEntities('e-keep', 'e-merge', {
       evidence: { trigger: 'manual' },
@@ -100,7 +123,9 @@ describe('mergeEntities — happy path', () => {
       db,
     });
 
-    const links = db.prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`).all() as any[];
+    const links = db
+      .prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`)
+      .all() as any[];
     expect(links).toHaveLength(1);
     expect(links[0].entity_id).toBe('e-keep');
   });
@@ -126,9 +151,17 @@ describe('mergeEntities — happy path', () => {
       db,
     });
 
-    const r1 = db.prepare(`SELECT from_entity_id FROM entity_relationships WHERE rel_id='r1'`).get() as any;
+    const r1 = db
+      .prepare(
+        `SELECT from_entity_id FROM entity_relationships WHERE rel_id='r1'`,
+      )
+      .get() as any;
     expect(r1.from_entity_id).toBe('e-keep');
-    const r2 = db.prepare(`SELECT to_entity_id FROM entity_relationships WHERE rel_id='r2'`).get() as any;
+    const r2 = db
+      .prepare(
+        `SELECT to_entity_id FROM entity_relationships WHERE rel_id='r2'`,
+      )
+      .get() as any;
     expect(r2.to_entity_id).toBe('e-keep');
   });
 });
@@ -231,8 +264,12 @@ describe('unmergeEntities — happy path', () => {
               ('k-b', 'about B', 'signal_message', 'personal', 0.9,
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-a', 'a', 'mentioned')`).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-b', 'b', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-a', 'a', 'mentioned')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-b', 'b', 'mentioned')`,
+    ).run();
     db.prepare(
       `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
        VALUES ('al-b', 'b', 'signal', 'phone', '+15550000000', '2026-04-27T00:00:00Z', 1.0)`,
@@ -247,30 +284,56 @@ describe('unmergeEntities — happy path', () => {
 
     // After merge: a has both k-a + k-b; b has none; al-b points at a.
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='a'`).get() as any).n,
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='a'`)
+          .get() as any
+      ).n,
     ).toBe(2);
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='b'`).get() as any).n,
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM ku_entities WHERE entity_id='b'`)
+          .get() as any
+      ).n,
     ).toBe(0);
     expect(
-      (db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`).get() as any).entity_id,
+      (
+        db
+          .prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`)
+          .get() as any
+      ).entity_id,
     ).toBe('a');
 
     const result = await unmergeEntities(merge.merge_id, { db });
     expect(result.merge_id).toBe(merge.merge_id);
 
     // After unmerge: each back to pre-merge state.
-    const aLinks = db.prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='a'`).all() as Array<{ ku_id: string }>;
-    const bLinks = db.prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='b'`).all() as Array<{ ku_id: string }>;
+    const aLinks = db
+      .prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='a'`)
+      .all() as Array<{ ku_id: string }>;
+    const bLinks = db
+      .prepare(`SELECT ku_id FROM ku_entities WHERE entity_id='b'`)
+      .all() as Array<{ ku_id: string }>;
     expect(aLinks.map((r) => r.ku_id)).toEqual(['k-a']);
     expect(bLinks.map((r) => r.ku_id)).toEqual(['k-b']);
     expect(
-      (db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`).get() as any).entity_id,
+      (
+        db
+          .prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='al-b'`)
+          .get() as any
+      ).entity_id,
     ).toBe('b');
 
     // merge_log row removed.
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log WHERE merge_id=?`).get(merge.merge_id) as any).n,
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM entity_merge_log WHERE merge_id=?`,
+          )
+          .get(merge.merge_id) as any
+      ).n,
     ).toBe(0);
   });
 
@@ -285,8 +348,12 @@ describe('unmergeEntities — happy path', () => {
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
     // Both linked to k1 — merge will INSERT OR IGNORE then delete y's row.
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'x', 'mentioned')`).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'y', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'x', 'mentioned')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'y', 'mentioned')`,
+    ).run();
 
     const merge = await mergeEntities('x', 'y', {
       evidence: { trigger: 'manual' },
@@ -297,7 +364,9 @@ describe('unmergeEntities — happy path', () => {
     await unmergeEntities(merge.merge_id, { db });
 
     // Both entities relink to k1 (back to pre-merge state).
-    const xLinks = db.prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`).all() as Array<{ entity_id: string }>;
+    const xLinks = db
+      .prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`)
+      .all() as Array<{ entity_id: string }>;
     expect(xLinks.map((r) => r.entity_id).sort()).toEqual(['x', 'y']);
   });
 });
@@ -326,7 +395,9 @@ describe('mergeEntities — lifecycle hooks', () => {
     });
 
     const row = db
-      .prepare(`SELECT status, status_at FROM entity_merge_suggestions WHERE suggestion_id = 's1'`)
+      .prepare(
+        `SELECT status, status_at FROM entity_merge_suggestions WHERE suggestion_id = 's1'`,
+      )
       .get() as { status: string; status_at: number | null };
     expect(row.status).toBe('accepted');
     expect(row.status_at).toBeGreaterThan(0);
@@ -369,7 +440,9 @@ describe('unmergeEntities — rejection cases', () => {
               ('k-post', 'post', 'signal_message', 'personal', 0.9,
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-pre', 'a', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-pre', 'a', 'mentioned')`,
+    ).run();
 
     const merge = await mergeEntities('a', 'b', {
       evidence: { trigger: 'manual' },
@@ -378,7 +451,9 @@ describe('unmergeEntities — rejection cases', () => {
       db,
     });
     // Simulate a post-merge addition: link k-post to the kept entity 'a'.
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-post', 'a', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k-post', 'a', 'mentioned')`,
+    ).run();
 
     await expect(unmergeEntities(merge.merge_id, { db })).rejects.toThrow(
       /added after the merge/,

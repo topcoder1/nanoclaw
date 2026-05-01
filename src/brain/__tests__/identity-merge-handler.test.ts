@@ -4,12 +4,20 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
@@ -50,7 +58,9 @@ describe('handleEntityMergeRequested', () => {
        VALUES ('k1', 'x', 'signal_message', 'personal', 0.9,
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-jz2', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-jz2', 'mentioned')`,
+    ).run();
 
     const sentReplies: string[] = [];
     await handleEntityMergeRequested(
@@ -65,10 +75,17 @@ describe('handleEntityMergeRequested', () => {
         handle_a: 'Jonathan',
         handle_b: 'J Zhang',
       },
-      { db, sendReply: async (text: string) => { sentReplies.push(text); } },
+      {
+        db,
+        sendReply: async (text: string) => {
+          sentReplies.push(text);
+        },
+      },
     );
 
-    const log = db.prepare(`SELECT * FROM entity_merge_log LIMIT 1`).get() as any;
+    const log = db
+      .prepare(`SELECT * FROM entity_merge_log LIMIT 1`)
+      .get() as any;
     expect(log).toBeDefined();
     expect([log.kept_entity_id, log.merged_entity_id].sort()).toEqual([
       'e-jz',
@@ -99,9 +116,16 @@ describe('handleEntityMergeRequested', () => {
         handle_a: '+15551234567',
         handle_b: 'A. Wonderland',
       },
-      { db, sendReply: async (t: string) => { sentReplies.push(t); } },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sentReplies.push(t);
+        },
+      },
     );
-    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any;
+    const log = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as any;
     expect(log.n).toBe(1);
     expect(sentReplies[0]).toMatch(/merged/i);
   });
@@ -124,9 +148,16 @@ describe('handleEntityMergeRequested', () => {
         handle_a: 'Jonathan',
         handle_b: 'Jane',
       },
-      { db, sendReply: async (t: string) => { sent.push(t); } },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
     );
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get(),
+    ).toEqual({ n: 0 });
     expect(sent[0]).toMatch(/ambiguous|multiple/i);
   });
 
@@ -145,7 +176,12 @@ describe('handleEntityMergeRequested', () => {
         handle_a: 'nobody',
         handle_b: 'somebody',
       },
-      { db, sendReply: async (t: string) => { sent.push(t); } },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
     );
     expect(sent[0]).toMatch(/not found|no match/i);
   });
@@ -170,10 +206,17 @@ describe('handleEntityMergeRequested', () => {
         handle_a: 'Jonathan',
         handle_b: '+15550000000',
       },
-      { db, sendReply: async (t: string) => { sent.push(t); } },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
     );
     expect(sent[0]).toMatch(/same entity|already.*same/i);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get(),
+    ).toEqual({ n: 0 });
   });
 
   it('claw merge resolves both handles via entity_id prefix', async () => {
@@ -193,10 +236,17 @@ describe('handleEntityMergeRequested', () => {
         handle_a: '01KQ8X',
         handle_b: '01KQ9H',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/merged/i);
-    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number };
+    const log = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as { n: number };
     expect(log.n).toBe(1);
   });
 
@@ -218,7 +268,12 @@ describe('handleEntityMergeRequested', () => {
         handle_a: '01KQ8X',
         handle_b: '01KQ9H',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/ambiguous/i);
   });
@@ -248,13 +303,23 @@ describe('handleEntityMergeRequested', () => {
         handle_a: 'C',
         handle_b: 'B',
       },
-      { db, sendReply: async (t: string) => { sent.push(t); } },
+      {
+        db,
+        sendReply: async (t: string) => {
+          sent.push(t);
+        },
+      },
     );
     expect(sent[0]).toMatch(/failed/i);
   });
 });
 
-import { handleEntityMergeSuggested, handleEntityMergeRejectRequested, startIdentityMergeHandler, stopIdentityMergeHandler } from '../identity-merge-handler.js';
+import {
+  handleEntityMergeSuggested,
+  handleEntityMergeRejectRequested,
+  startIdentityMergeHandler,
+  stopIdentityMergeHandler,
+} from '../identity-merge-handler.js';
 import { eventBus } from '../../event-bus.js';
 
 describe('identity-merge-handler — lifecycle', () => {
@@ -269,7 +334,11 @@ describe('identity-merge-handler — lifecycle', () => {
     seedPerson(db, 'e-2', 'Alicia');
     const sent: string[] = [];
 
-    startIdentityMergeHandler({ sendReply: async (text: string) => { sent.push(text); } });
+    startIdentityMergeHandler({
+      sendReply: async (text: string) => {
+        sent.push(text);
+      },
+    });
 
     eventBus.emit('entity.merge.requested', {
       type: 'entity.merge.requested',
@@ -285,7 +354,9 @@ describe('identity-merge-handler — lifecycle', () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any;
+    const log = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as any;
     expect(log.n).toBe(1);
     expect(sent[0]).toMatch(/merged/i);
   });
@@ -318,7 +389,9 @@ describe('identity-merge-handler — lifecycle', () => {
     });
     await new Promise((r) => setTimeout(r, 50));
 
-    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as any;
+    const log = db
+      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+      .get() as any;
     expect(log.n).toBe(0);
   });
 });
@@ -336,9 +409,8 @@ describe('identity-merge-handler — setIdentityMergeReply (channel-aware)', () 
 
     const calls: Array<{ chat_id: string; platform: string; text: string }> =
       [];
-    const { setIdentityMergeReply } = await import(
-      '../identity-merge-handler.js'
-    );
+    const { setIdentityMergeReply } =
+      await import('../identity-merge-handler.js');
     setIdentityMergeReply(async (chat_id, platform, text) => {
       calls.push({ chat_id, platform, text });
     });
@@ -373,9 +445,8 @@ describe('identity-merge-handler — setIdentityMergeReply (channel-aware)', () 
 
     const channelCalls: string[] = [];
     const optsCalls: string[] = [];
-    const { setIdentityMergeReply } = await import(
-      '../identity-merge-handler.js'
-    );
+    const { setIdentityMergeReply } =
+      await import('../identity-merge-handler.js');
     setIdentityMergeReply(async (_c, _p, text) => {
       channelCalls.push(text);
     });
@@ -573,7 +644,12 @@ describe('handleEntityUnmergeRequested', () => {
         requested_by_handle: 'op',
         merge_id_or_prefix: log.merge_id,
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/rolled back/i);
 
@@ -708,13 +784,18 @@ describe('handleEntityMergeSuggested', () => {
           canonical_b: { name: 'Jonathan', signal_profile_name: 'Jonathan' },
         },
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
 
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatch(/Possible duplicate/i);
-    expect(replies[0]).toContain('e-aaaa');     // abbreviated id A
-    expect(replies[0]).toContain('e-bbbb');     // abbreviated id B
+    expect(replies[0]).toContain('e-aaaa'); // abbreviated id A
+    expect(replies[0]).toContain('e-bbbb'); // abbreviated id B
     expect(replies[0]).toContain('Jonathan');
     expect(replies[0]).toContain('claw merge ');
     expect(replies[0]).toContain('claw merge-reject ');
@@ -746,7 +827,12 @@ describe('handleEntityMergeRejectRequested', () => {
         handle_a: 'e-aaaaaa',
         handle_b: 'e-bbbbbb',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
 
     expect(replies[0]).toMatch(/suppressed/i);
@@ -760,7 +846,9 @@ describe('handleEntityMergeRejectRequested', () => {
     expect(supp.reason).toBe('operator_rejected');
 
     const sugg = db
-      .prepare(`SELECT status FROM entity_merge_suggestions WHERE suggestion_id='s1'`)
+      .prepare(
+        `SELECT status FROM entity_merge_suggestions WHERE suggestion_id='s1'`,
+      )
       .get() as { status: string };
     expect(sugg.status).toBe('rejected');
   });
@@ -805,7 +893,12 @@ describe('handleEntityMergeRejectRequested', () => {
         handle_a: 'e-aaaaaa',
         handle_b: 'nonexistent',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/not found/i);
     const cnt = db
@@ -831,10 +924,15 @@ describe('handleEntityMergeRejectRequested', () => {
         platform: 'signal',
         chat_id: 'c1',
         requested_by_handle: 'op',
-        handle_a: 'Solo',          // resolves via canonical name
-        handle_b: 'solo@x.com',    // resolves via alias to the same entity
+        handle_a: 'Solo', // resolves via canonical name
+        handle_b: 'solo@x.com', // resolves via alias to the same entity
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/same entity/i);
     const cnt = db

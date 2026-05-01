@@ -125,9 +125,7 @@ describe('maybeRunWikilintCron', () => {
     });
 
     expect(delivered).toEqual([]);
-    expect(getSystemState('last_wikilint')?.value).toBe(
-      '2026-04-25T00:00:00Z',
-    );
+    expect(getSystemState('last_wikilint')?.value).toBe('2026-04-25T00:00:00Z');
   });
 
   it('runs again once 7 days have elapsed', async () => {

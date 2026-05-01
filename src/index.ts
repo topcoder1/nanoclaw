@@ -1765,9 +1765,8 @@ async function main(): Promise<void> {
   // entity.merge.requested. Wire a channel-aware reply sender so the user
   // sees an ack/error in the same chat where they typed `claw merge`.
   {
-    const { setIdentityMergeReply } = await import(
-      './brain/identity-merge-handler.js'
-    );
+    const { setIdentityMergeReply } =
+      await import('./brain/identity-merge-handler.js');
     setIdentityMergeReply(async (chat_id, platform, text) => {
       // 'main' is a sentinel from entity.merge.suggested (sweep-emitted, not
       // chat-tied): route to the registered main group regardless of platform.

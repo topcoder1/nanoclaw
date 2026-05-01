@@ -4,17 +4,33 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { lexOrdered, normalizePhone, findHighConfidenceCandidates, findMediumConfidenceCandidates, isSuppressed, runAutoMergeSweep, startAutoMergeSchedule } from '../auto-merge.js';
+import {
+  lexOrdered,
+  normalizePhone,
+  findHighConfidenceCandidates,
+  findMediumConfidenceCandidates,
+  isSuppressed,
+  runAutoMergeSweep,
+  startAutoMergeSchedule,
+} from '../auto-merge.js';
 import { eventBus } from '../../event-bus.js';
 
 beforeEach(() => {
@@ -75,9 +91,20 @@ function seedPerson(db: any, id: string, name: string): void {
   db.prepare(
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES (?, 'person', ?, ?, ?)`,
-  ).run(id, JSON.stringify({ name }), '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z');
+  ).run(
+    id,
+    JSON.stringify({ name }),
+    '2026-04-28T00:00:00Z',
+    '2026-04-28T00:00:00Z',
+  );
 }
-function seedAlias(db: any, aliasId: string, entityId: string, field: string, value: string): void {
+function seedAlias(
+  db: any,
+  aliasId: string,
+  entityId: string,
+  field: string,
+  value: string,
+): void {
   db.prepare(
     `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
      VALUES (?, ?, 'test', ?, ?, '2026-04-28T00:00:00Z', 1.0)`,
@@ -228,7 +255,7 @@ describe('isSuppressed', () => {
        VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
     ).run(Date.now());
     expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
-    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true);  // order-insensitive
+    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true); // order-insensitive
   });
   it('returns false when no row exists', () => {
     const db = getBrainDb();
@@ -293,7 +320,7 @@ describe('runAutoMergeSweep — medium-confidence path', () => {
       const row = db
         .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
         .get() as { n: number };
-      expect(row.n).toBe(1);     // suggestion still persisted
+      expect(row.n).toBe(1); // suggestion still persisted
     } finally {
       unsub();
     }
@@ -334,7 +361,9 @@ describe('runAutoMergeSweep — high-confidence path', () => {
     // The pair is suppressed in both the high-conf path (email match) and the
     // medium-conf path (name match), so suppressed_skipped is 2.
     expect(result.suppressed_skipped).toBe(2);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get(),
+    ).toEqual({ n: 0 });
   });
 });
 
@@ -401,10 +430,18 @@ describe('runAutoMergeSweep — dry-run', () => {
     expect(result.medium_conf_suggested).toBe(2);
 
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number }).n,
+      (
+        db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as {
+          n: number;
+        }
+      ).n,
     ).toBe(0);
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`).get() as { n: number }).n,
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+          .get() as { n: number }
+      ).n,
     ).toBe(0);
   });
 });
@@ -416,16 +453,18 @@ describe('startAutoMergeSchedule', () => {
     const stop = startAutoMergeSchedule({
       intervalMs: 1000,
       runOnStart: true,
-      run: async () => { calls.push(Date.now()); },
+      run: async () => {
+        calls.push(Date.now());
+      },
     });
-    expect(calls).toHaveLength(1);   // runOnStart fired
+    expect(calls).toHaveLength(1); // runOnStart fired
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toHaveLength(3);
     stop();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toHaveLength(3);   // stopped
+    expect(calls).toHaveLength(3); // stopped
     vi.useRealTimers();
   });
 
@@ -435,7 +474,9 @@ describe('startAutoMergeSchedule', () => {
     const stop = startAutoMergeSchedule({
       intervalMs: 1000,
       runOnStart: false,
-      run: async () => { calls.push(Date.now()); },
+      run: async () => {
+        calls.push(Date.now());
+      },
     });
     expect(calls).toHaveLength(0);
     stop();

@@ -1,14 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
   logger: {
@@ -24,13 +17,17 @@ vi.mock('../../logger.js', () => ({
 // behavior passes through to the real impl (set in beforeEach so resets
 // between tests don't strand it). Node's native ESM bindings are read-only
 // so vi.spyOn can't rebind them; this is the supported workaround.
-const renameMock = vi.hoisted(() =>
-  vi.fn() as unknown as typeof import('fs/promises').rename,
+const renameMock = vi.hoisted(
+  () => vi.fn() as unknown as typeof import('fs/promises').rename,
 );
 vi.mock('fs/promises', async () => {
   const actual =
     await vi.importActual<typeof import('fs/promises')>('fs/promises');
-  return { ...actual, rename: renameMock, default: { ...actual, rename: renameMock } };
+  return {
+    ...actual,
+    rename: renameMock,
+    default: { ...actual, rename: renameMock },
+  };
 });
 
 let tmpDir: string;
@@ -145,7 +142,9 @@ describe('brain/wiki-writer', () => {
     const result = await materializeEntity('01HALICE', tmpDir, { nowIso: NOW });
 
     expect(result.status).toBe('created');
-    expect(result.path).toBe(path.join(tmpDir, 'wiki', 'Person', '01HALICE.md'));
+    expect(result.path).toBe(
+      path.join(tmpDir, 'wiki', 'Person', '01HALICE.md'),
+    );
     expect(fs.existsSync(result.path)).toBe(true);
     const content = fs.readFileSync(result.path, 'utf-8');
     expect(content).toContain('# Alice Smith');
@@ -371,10 +370,7 @@ describe('brain/wiki-writer', () => {
     });
 
     await rebuildIndex(tmpDir);
-    const idx = fs.readFileSync(
-      path.join(tmpDir, 'wiki', 'index.md'),
-      'utf-8',
-    );
+    const idx = fs.readFileSync(path.join(tmpDir, 'wiki', 'index.md'), 'utf-8');
 
     // Display name pulled from email / domain when name is missing —
     // matches the page renderer's deriveTitle fallback chain.
@@ -426,7 +422,13 @@ describe('brain/wiki-writer — startWikiSynthesisSchedule', () => {
     return {
       fn: (async () => {
         calls++;
-        return { created: 1, updated: 0, unchanged: 0, failed: 0, failures: [] };
+        return {
+          created: 1,
+          updated: 0,
+          unchanged: 0,
+          failed: 0,
+          failures: [],
+        };
       }) as typeof materializeAll,
       callCount: () => calls,
     };
@@ -450,7 +452,9 @@ describe('brain/wiki-writer — startWikiSynthesisSchedule', () => {
 
     const db = getBrainDb();
     const stamp = db
-      .prepare(`SELECT value FROM system_state WHERE key = 'last_wiki_synthesis'`)
+      .prepare(
+        `SELECT value FROM system_state WHERE key = 'last_wiki_synthesis'`,
+      )
       .get() as { value: string } | undefined;
     expect(stamp?.value).toBe(fixedNow.toISOString());
 
@@ -471,7 +475,9 @@ describe('brain/wiki-writer — startWikiSynthesisSchedule', () => {
     const db = getBrainDb();
     // Stamp a synthesis run from 2 hours ago — well inside the 22h debounce.
     const fixedNow = new Date('2026-04-27T10:30:00');
-    const recent = new Date(fixedNow.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const recent = new Date(
+      fixedNow.getTime() - 2 * 60 * 60 * 1000,
+    ).toISOString();
     db.prepare(
       `INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)`,
     ).run('last_wiki_synthesis', recent, recent);

@@ -460,5 +460,4 @@ describe('brain/ingest — P1 pipeline integration', () => {
     for (const id of allIds) expect(dbIds.has(id)).toBe(true);
     expect(allIds.size).toBeGreaterThanOrEqual(2);
   });
-
 });

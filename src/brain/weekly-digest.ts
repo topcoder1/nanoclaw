@@ -320,7 +320,9 @@ export function formatWeeklyDigestMarkdown(
       `\n📚 *Wiki:* ${s.wikiPassCounts.created} created, ` +
         `${s.wikiPassCounts.updated} updated, ` +
         `${s.wikiPassCounts.unchanged} unchanged` +
-        (s.wikiPassCounts.failed > 0 ? `, ${s.wikiPassCounts.failed} failed` : ''),
+        (s.wikiPassCounts.failed > 0
+          ? `, ${s.wikiPassCounts.failed} failed`
+          : ''),
     );
   } else {
     lines.push(`\n📚 *Wiki:* no synthesis pass yet`);

@@ -138,7 +138,11 @@ export async function handleChatMessageEdited(
       try {
         const payload = JSON.parse(raw.payload.toString('utf8'));
         participants = payload.participants;
-        text = rebuildWindowTranscript(payload, evt.message_id, strippedNewText);
+        text = rebuildWindowTranscript(
+          payload,
+          evt.message_id,
+          strippedNewText,
+        );
       } catch (err) {
         logger.warn(
           {

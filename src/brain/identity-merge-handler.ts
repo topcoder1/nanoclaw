@@ -244,9 +244,10 @@ export async function handleEntityUnmergeRequested(
     });
 
     if (wasAutoHigh) {
-      const [a, b] = result.kept_entity_id < result.merged_entity_id
-        ? [result.kept_entity_id, result.merged_entity_id]
-        : [result.merged_entity_id, result.kept_entity_id];
+      const [a, b] =
+        result.kept_entity_id < result.merged_entity_id
+          ? [result.kept_entity_id, result.merged_entity_id]
+          : [result.merged_entity_id, result.kept_entity_id];
       db.prepare(
         `INSERT OR IGNORE INTO entity_merge_suppressions
            (entity_id_a, entity_id_b, suppressed_until, reason, created_at)
@@ -285,8 +286,10 @@ export async function handleEntityMergeSuggested(
   const reply = opts.sendReply ?? (async () => {});
   const a6 = evt.entity_id_a.slice(0, 6);
   const b6 = evt.entity_id_b.slice(0, 6);
-  const nameA = (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
-  const nameB = (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
+  const nameA =
+    (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
+  const nameB =
+    (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
   // Build a one-line "evidence tail" per side: pick the first non-name
   // canonical field for context. Falls back to empty.
   const tail = (canon: Record<string, unknown>): string => {
@@ -345,7 +348,9 @@ export async function handleEntityMergeRejectRequested(
   const aId = candA[0].entity_id;
   const bId = candB[0].entity_id;
   if (aId === bId) {
-    await reply(`claw merge-reject: '${evt.handle_a}' and '${evt.handle_b}' resolve to the same entity`);
+    await reply(
+      `claw merge-reject: '${evt.handle_a}' and '${evt.handle_b}' resolve to the same entity`,
+    );
     return;
   }
   const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
@@ -443,12 +448,12 @@ export function startIdentityMergeHandler(
       const reply: ((text: string) => Promise<void>) | undefined =
         opts.sendReply ??
         (channelReply
-          // Suggestions go to the main group's channel — they're not tied
-          // to any specific chat_id. The channelReply signature requires
-          // chat_id + platform; we use the literals 'main' / 'signal' as
-          // a sentinel that the channel layer interprets as "default to
-          // the main group". Index.ts wires this when registering.
-          ? (text: string) => channelReply!('main', 'signal', text)
+          ? // Suggestions go to the main group's channel — they're not tied
+            // to any specific chat_id. The channelReply signature requires
+            // chat_id + platform; we use the literals 'main' / 'signal' as
+            // a sentinel that the channel layer interprets as "default to
+            // the main group". Index.ts wires this when registering.
+            (text: string) => channelReply!('main', 'signal', text)
           : undefined);
       await handleEntityMergeSuggested(evt, { sendReply: reply });
     } catch (err) {

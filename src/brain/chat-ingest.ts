@@ -19,10 +19,7 @@ import type {
 } from '../events.js';
 import { logger } from '../logger.js';
 
-import {
-  startChatEditSync,
-  stopChatEditSync,
-} from './chat-edit-sync.js';
+import { startChatEditSync, stopChatEditSync } from './chat-edit-sync.js';
 import { getBrainDb } from './db.js';
 import {
   startIdentityMergeHandler,

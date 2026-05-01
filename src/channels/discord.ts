@@ -297,11 +297,7 @@ export class DiscordChannel implements Channel {
       }
       if (message.author?.bot) return;
       // Capture pre-edit cache row BEFORE we overwrite it.
-      const previous = getChatMessage(
-        'discord',
-        message.channelId,
-        message.id,
-      );
+      const previous = getChatMessage('discord', message.channelId, message.id);
       const editedAtIso =
         message.editedAt?.toISOString() ?? new Date().toISOString();
       putChatMessage({
@@ -332,11 +328,7 @@ export class DiscordChannel implements Channel {
     // MessageDelete: tombstone cache + emit chat.message.deleted (PR 4).
     this.client.on(Events.MessageDelete, async (message) => {
       const deletedAtIso = new Date().toISOString();
-      const cached = getChatMessage(
-        'discord',
-        message.channelId,
-        message.id,
-      );
+      const cached = getChatMessage('discord', message.channelId, message.id);
       if (cached) {
         // Preserve prior fields; just set deleted_at.
         putChatMessage({

@@ -64,8 +64,10 @@ export async function mergeEntities(
   const merged = db
     .prepare(`SELECT * FROM entities WHERE entity_id = ?`)
     .get(mergedEntityId) as any;
-  if (!kept) throw new Error(`mergeEntities: kept entity ${keptEntityId} not found`);
-  if (!merged) throw new Error(`mergeEntities: merged entity ${mergedEntityId} not found`);
+  if (!kept)
+    throw new Error(`mergeEntities: kept entity ${keptEntityId} not found`);
+  if (!merged)
+    throw new Error(`mergeEntities: merged entity ${mergedEntityId} not found`);
   if (kept.entity_type !== merged.entity_type) {
     throw new Error(
       `mergeEntities: type mismatch ${kept.entity_type} vs ${merged.entity_type}`,
@@ -90,10 +92,14 @@ export async function mergeEntities(
   // Done outside the transaction since these are reads — the transaction body
   // then mutates rows we just snapshotted.
   const keptKuEntities = db
-    .prepare(`SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`)
+    .prepare(
+      `SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`,
+    )
     .all(keptEntityId);
   const mergedKuEntities = db
-    .prepare(`SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`)
+    .prepare(
+      `SELECT ku_id, entity_id, role FROM ku_entities WHERE entity_id = ?`,
+    )
     .all(mergedEntityId);
   const mergedAliases = db
     .prepare(`SELECT * FROM entity_aliases WHERE entity_id = ?`)
@@ -123,13 +129,14 @@ export async function mergeEntities(
       `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role)
        SELECT ku_id, ?, role FROM ku_entities WHERE entity_id = ?`,
     ).run(keptEntityId, mergedEntityId);
-    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ?`).run(mergedEntityId);
-
-    // 2. Rebind entity_aliases (no UNIQUE on entity_id — UPDATE is safe).
-    db.prepare(`UPDATE entity_aliases SET entity_id = ? WHERE entity_id = ?`).run(
-      keptEntityId,
+    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ?`).run(
       mergedEntityId,
     );
+
+    // 2. Rebind entity_aliases (no UNIQUE on entity_id — UPDATE is safe).
+    db.prepare(
+      `UPDATE entity_aliases SET entity_id = ? WHERE entity_id = ?`,
+    ).run(keptEntityId, mergedEntityId);
 
     // 3. Rebind entity_relationships in both directions.
     db.prepare(
@@ -165,9 +172,10 @@ export async function mergeEntities(
     // 6. Lifecycle: mark any pending suggestion that matches this pair as
     //    accepted. The suggestions table is lex-ordered by (a, b), so we
     //    must lex-sort the inputs before the UPDATE.
-    const [sa, sb] = keptEntityId < mergedEntityId
-      ? [keptEntityId, mergedEntityId]
-      : [mergedEntityId, keptEntityId];
+    const [sa, sb] =
+      keptEntityId < mergedEntityId
+        ? [keptEntityId, mergedEntityId]
+        : [mergedEntityId, keptEntityId];
     db.prepare(
       `UPDATE entity_merge_suggestions
           SET status = 'accepted', status_at = ?
@@ -246,7 +254,11 @@ export async function unmergeEntities(
 
   let snap: {
     schema_version?: number;
-    kept_ku_entities?: Array<{ ku_id: string; entity_id: string; role: string }>;
+    kept_ku_entities?: Array<{
+      ku_id: string;
+      entity_id: string;
+      role: string;
+    }>;
     merged_ku_entities?: Array<{
       ku_id: string;
       entity_id: string;
@@ -299,10 +311,9 @@ export async function unmergeEntities(
 
   db.transaction(() => {
     // 1. Reset ku_entities for both entities to their pre-merge state.
-    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ? OR entity_id = ?`).run(
-      kept,
-      merged,
-    );
+    db.prepare(
+      `DELETE FROM ku_entities WHERE entity_id = ? OR entity_id = ?`,
+    ).run(kept, merged);
     const insertKu = db.prepare(
       `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role) VALUES (?, ?, ?)`,
     );

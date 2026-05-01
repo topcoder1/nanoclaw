@@ -298,7 +298,9 @@ export async function rebuildIndex(
     const name = deriveTitle(row.entity_type, canonical, row.entity_id);
     const link = `${TYPE_TO_DIR[row.entity_type]}/${row.entity_id}.md`;
     const summary = row.wiki_summary?.trim().split('\n')[0] ?? '';
-    lines.push(summary ? `- [${name}](${link}) — ${summary}` : `- [${name}](${link})`);
+    lines.push(
+      summary ? `- [${name}](${link}) — ${summary}` : `- [${name}](${link})`,
+    );
   }
   lines.push('');
 
@@ -461,7 +463,12 @@ export function startWikiSynthesisSchedule(
   };
 
   const setCounts = (
-    counts: { created: number; updated: number; unchanged: number; failed: number },
+    counts: {
+      created: number;
+      updated: number;
+      unchanged: number;
+      failed: number;
+    },
     iso: string,
   ): void => {
     try {
