@@ -237,6 +237,7 @@ import { startSigner, fetchDocTextViaExecutor } from './signer/index.js';
 import { isSignerAutoSignEnabled } from './signer/feature-flag.js';
 import { PlaywrightClient } from './browser/playwright-client.js';
 import { resolveUtilityModel } from './llm/utility.js';
+import { isTransientAgentError } from './transient-agent-error.js';
 import { generateText } from 'ai';
 
 // Re-export for backwards compatibility during refactor
@@ -471,7 +472,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const procedureHandled = await handleMessageWithProcedureCheck(
     prompt,
     chatJid,
-    (p) => runAgent(group, p, chatJid),
+    (p) => runAgent(group, p, chatJid).then((r) => r.status),
     async (jid, text) => {
       const ch = findChannel(channels, jid);
       if (ch) await ch.sendMessage(jid, text);
@@ -668,7 +669,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -695,15 +696,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+type AgentRunResult = { status: 'success' | 'error'; error?: string };
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+): Promise<AgentRunResult> {
   if (isBudgetExceeded()) {
     logger.warn({ group: group.name }, 'Agent blocked by budget ceiling');
-    return 'error';
+    return { status: 'error', error: 'Agent blocked by budget ceiling' };
   }
 
   const startedAt = new Date().toISOString();
@@ -882,7 +885,7 @@ async function runAgent(
           ? realCostUsd
           : (durationMs / 10_000) * 0.01,
       });
-      return 'error';
+      return { status: 'error', error: output.error };
     }
 
     const durationMs = Date.now() - startMs;
@@ -951,7 +954,7 @@ async function runAgent(
       }
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     const durationMs = Date.now() - startMs;
@@ -964,7 +967,10 @@ async function runAgent(
         ? realCostUsd
         : (durationMs / 10_000) * 0.01,
     });
-    return 'error';
+    return {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -1765,9 +1771,8 @@ async function main(): Promise<void> {
   // entity.merge.requested. Wire a channel-aware reply sender so the user
   // sees an ack/error in the same chat where they typed `claw merge`.
   {
-    const { setIdentityMergeReply } = await import(
-      './brain/identity-merge-handler.js'
-    );
+    const { setIdentityMergeReply } =
+      await import('./brain/identity-merge-handler.js');
     setIdentityMergeReply(async (chat_id, platform, text) => {
       // 'main' is a sentinel from entity.merge.suggested (sweep-emitted, not
       // chat-tied): route to the registered main group regardless of platform.
@@ -2765,17 +2770,30 @@ async function main(): Promise<void> {
           progressHandle = null;
         }
 
-        if (result === 'error') {
-          const telegramJid = Object.keys(registeredGroups).find((jid) =>
-            jid.startsWith('tg:'),
-          );
-          const notifyJid = telegramJid || chatJid;
-          const channel = findChannel(channels, notifyJid);
-          if (channel) {
-            await channel.sendMessage(
-              notifyJid,
-              '⚠️ Email intelligence trigger failed. Check logs.',
+        if (result.status === 'error') {
+          // Suppress chat-facing alert for transient upstream/network errors
+          // (Anthropic API socket drops, 502/503/529, ECONNRESET, ENETUNREACH).
+          // These almost always recover on the next debounced batch — every
+          // observed alert in the wild has been followed within ~1 minute by
+          // a successful retry, so the alert is pure noise. Real failures
+          // (timeouts, code-1 exits, parse errors, budget) still alert.
+          if (isTransientAgentError(result.error)) {
+            logger.warn(
+              { chatJid, taskId, error: result.error },
+              'Email trigger failed with transient upstream error — alert suppressed, awaiting retry',
             );
+          } else {
+            const telegramJid = Object.keys(registeredGroups).find((jid) =>
+              jid.startsWith('tg:'),
+            );
+            const notifyJid = telegramJid || chatJid;
+            const channel = findChannel(channels, notifyJid);
+            if (channel) {
+              await channel.sendMessage(
+                notifyJid,
+                '⚠️ Email intelligence trigger failed. Check logs.',
+              );
+            }
           }
         }
       });

@@ -150,9 +150,7 @@ export function findStaleWikiPages(db: Database.Database): Finding[] {
  * reported once. NULL `topic_key` rows are filtered out by SQL's NULL
  * inequality semantics (NULL = NULL evaluates to NULL, not TRUE).
  */
-export function findTemporalContradictions(
-  db: Database.Database,
-): Finding[] {
+export function findTemporalContradictions(db: Database.Database): Finding[] {
   const rows = db
     .prepare(
       `SELECT a.id AS ku_a,
@@ -301,7 +299,11 @@ export async function findDuplicateKus(
     if (kuIds.length < 2) continue;
     if (kuIds.length > maxKusPerGroup) {
       logger.warn(
-        { entityId: key.split(' ')[0], topicKey: key.split(' ')[1], count: kuIds.length },
+        {
+          entityId: key.split(' ')[0],
+          topicKey: key.split(' ')[1],
+          count: kuIds.length,
+        },
         'wikilint: skipping oversize duplicate-candidate group',
       );
       continue;

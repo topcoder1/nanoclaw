@@ -476,7 +476,9 @@ describe('brain/weekly-digest', () => {
       failed: 1,
     });
     const md = formatWeeklyDigestMarkdown(summary);
-    expect(md).toMatch(/📚 \*Wiki:\* 3 created, 7 updated, 4 unchanged, 1 failed/);
+    expect(md).toMatch(
+      /📚 \*Wiki:\* 3 created, 7 updated, 4 unchanged, 1 failed/,
+    );
   });
 
   it('renders the "no synthesis pass yet" wiki line when system_state is empty', () => {

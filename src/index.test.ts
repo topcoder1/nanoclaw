@@ -740,7 +740,7 @@ describe('index.ts — characterization tests', () => {
 
       const result = await _runAgent(group, 'test prompt', 'group1@g.us');
 
-      expect(result).toBe('error');
+      expect(result.status).toBe('error');
       expect(mockRunContainerAgent).not.toHaveBeenCalled();
     });
 
@@ -761,7 +761,7 @@ describe('index.ts — characterization tests', () => {
 
       const result = await _runAgent(group, 'test prompt', 'group1@g.us');
 
-      expect(result).toBe('success');
+      expect(result.status).toBe('success');
       expect(mockRunContainerAgent).toHaveBeenCalled();
       expect(mockLogSessionCost).toHaveBeenCalled();
     });
@@ -783,7 +783,8 @@ describe('index.ts — characterization tests', () => {
 
       const result = await _runAgent(group, 'test prompt', 'group1@g.us');
 
-      expect(result).toBe('error');
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('OOM killed');
       expect(mockLogSessionCost).toHaveBeenCalledWith(
         expect.objectContaining({
           session_type: 'message',
@@ -805,8 +806,30 @@ describe('index.ts — characterization tests', () => {
 
       const result = await _runAgent(group, 'test prompt', 'group1@g.us');
 
-      expect(result).toBe('error');
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('spawn failed');
       expect(mockLogSessionCost).toHaveBeenCalled();
+    });
+
+    it('propagates a transient API error string to the caller', async () => {
+      mockIsBudgetExceeded.mockReturnValue(false);
+      mockRunContainerAgent.mockResolvedValue({
+        status: 'error',
+        result: null,
+        error: 'API Error: Unable to connect to API (UND_ERR_SOCKET)',
+      });
+
+      const group: RegisteredGroup = {
+        name: 'Test',
+        folder: 'test-group',
+        trigger: '@TestBot',
+        added_at: '2024-01-01',
+      };
+
+      const result = await _runAgent(group, 'test prompt', 'group1@g.us');
+
+      expect(result.status).toBe('error');
+      expect(result.error).toMatch(/UND_ERR_SOCKET/);
     });
   });
 });

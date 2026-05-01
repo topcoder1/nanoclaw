@@ -167,14 +167,7 @@ function resolveCandidates(
   // entity types `deriveTitle` was extended to handle in PR #37.
   // Field names are constants (not user input) so direct interpolation
   // into SQL is safe; the user query is still parameterized.
-  const SEARCH_FIELDS = [
-    'name',
-    'email',
-    'domain',
-    'repo_slug',
-    'slug',
-    'tag',
-  ];
+  const SEARCH_FIELDS = ['name', 'email', 'domain', 'repo_slug', 'slug', 'tag'];
   const orClause = SEARCH_FIELDS.map(
     (f) =>
       `LOWER(json_extract(canonical, '$.${f}')) LIKE LOWER('%' || ? || '%') ESCAPE '\\'`,

@@ -47,11 +47,15 @@ export function normalizePhone(raw: string): string | null {
 }
 
 export interface HighConfidencePair {
-  entity_id_a: string;          // lex-smaller
+  entity_id_a: string; // lex-smaller
   entity_id_b: string;
-  reason_code: 'email_exact' | 'phone_normalized' | 'signal_uuid_exact'
-    | 'discord_snowflake_exact' | 'whatsapp_jid_exact';
-  fields_matched: string[];     // e.g. ['email','phone']
+  reason_code:
+    | 'email_exact'
+    | 'phone_normalized'
+    | 'signal_uuid_exact'
+    | 'discord_snowflake_exact'
+    | 'whatsapp_jid_exact';
+  fields_matched: string[]; // e.g. ['email','phone']
   confidence: 1.0;
 }
 
@@ -60,11 +64,27 @@ const HARD_IDENTIFIER_FIELDS: ReadonlyArray<{
   reasonCode: HighConfidencePair['reason_code'];
   normalize: (raw: string) => string | null;
 }> = [
-  { field: 'email', reasonCode: 'email_exact', normalize: (r) => r.trim().toLowerCase() || null },
+  {
+    field: 'email',
+    reasonCode: 'email_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
   { field: 'phone', reasonCode: 'phone_normalized', normalize: normalizePhone },
-  { field: 'signal_uuid', reasonCode: 'signal_uuid_exact', normalize: (r) => r.trim().toLowerCase() || null },
-  { field: 'discord_snowflake', reasonCode: 'discord_snowflake_exact', normalize: (r) => r.trim() || null },
-  { field: 'whatsapp_jid', reasonCode: 'whatsapp_jid_exact', normalize: (r) => r.trim().toLowerCase() || null },
+  {
+    field: 'signal_uuid',
+    reasonCode: 'signal_uuid_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
+  {
+    field: 'discord_snowflake',
+    reasonCode: 'discord_snowflake_exact',
+    normalize: (r) => r.trim() || null,
+  },
+  {
+    field: 'whatsapp_jid',
+    reasonCode: 'whatsapp_jid_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
 ];
 
 /**
@@ -76,7 +96,12 @@ const HARD_IDENTIFIER_FIELDS: ReadonlyArray<{
 export function findHighConfidenceCandidates(
   db: Database.Database,
 ): HighConfidencePair[] {
-  type Row = { entity_id: string; entity_type: string; field_name: string; field_value: string };
+  type Row = {
+    entity_id: string;
+    entity_type: string;
+    field_name: string;
+    field_value: string;
+  };
   const rows = db
     .prepare(
       `SELECT a.entity_id, e.entity_type, a.field_name, a.field_value
@@ -123,8 +148,9 @@ export function findHighConfidenceCandidates(
     // Derive reason_code deterministically from the matched fields by picking
     // the first hard-identifier in declaration order that appears in `fields`.
     // This avoids depending on SQLite row order or Map insertion order.
-    const reasonCode = HARD_IDENTIFIER_FIELDS.find((f) => fields.has(f.field))!
-      .reasonCode;
+    const reasonCode = HARD_IDENTIFIER_FIELDS.find((f) =>
+      fields.has(f.field),
+    )!.reasonCode;
     out.push({
       entity_id_a: a,
       entity_id_b: b,
@@ -137,10 +163,10 @@ export function findHighConfidenceCandidates(
 }
 
 export interface MediumConfidencePair {
-  entity_id_a: string;          // lex-smaller
+  entity_id_a: string; // lex-smaller
   entity_id_b: string;
   reason_code: 'name_exact';
-  confidence: number;           // 0.5–0.8
+  confidence: number; // 0.5–0.8
   evidence: {
     fields_matched: string[];
     canonical_a: Record<string, unknown>;
@@ -196,8 +222,10 @@ export function findMediumConfidenceCandidates(
         const rj = list[j];
         if (hasConflictingIdentifier(db, ri.entity_id, rj.entity_id)) continue;
         const [a, b] = lexOrdered(ri.entity_id, rj.entity_id);
-        const canonA = a === ri.entity_id ? safeJson(ri.canonical) : safeJson(rj.canonical);
-        const canonB = a === ri.entity_id ? safeJson(rj.canonical) : safeJson(ri.canonical);
+        const canonA =
+          a === ri.entity_id ? safeJson(ri.canonical) : safeJson(rj.canonical);
+        const canonB =
+          a === ri.entity_id ? safeJson(rj.canonical) : safeJson(ri.canonical);
         out.push({
           entity_id_a: a,
           entity_id_b: b,
@@ -265,7 +293,11 @@ function hasConflictingIdentifier(
         WHERE entity_id IN (?, ?)
           AND field_name IN (${HARD_IDENTIFIER_FIELDS.map(() => '?').join(',')})`,
     )
-    .all(entityA, entityB, ...HARD_IDENTIFIER_FIELDS.map((f) => f.field)) as Row[];
+    .all(
+      entityA,
+      entityB,
+      ...HARD_IDENTIFIER_FIELDS.map((f) => f.field),
+    ) as Row[];
 
   // For each field, collect normalized values per entity.
   const byField = new Map<string, { a: Set<string>; b: Set<string> }>();
@@ -280,7 +312,7 @@ function hasConflictingIdentifier(
     byField.set(r.field_name, slot);
   }
   for (const { a, b } of byField.values()) {
-    if (a.size === 0 || b.size === 0) continue;     // not both populated
+    if (a.size === 0 || b.size === 0) continue; // not both populated
     // Conflict iff there is no overlap.
     let overlap = false;
     for (const v of a) {
@@ -296,9 +328,9 @@ function hasConflictingIdentifier(
 
 export interface AutoMergeSweepOpts {
   db?: Database.Database;
-  enabled?: boolean;             // overrides BRAIN_MERGE_AUTO_ENABLED for tests
-  dryRun?: boolean;              // overrides BRAIN_MERGE_AUTO_DRY_RUN for tests
-  notifyChat?: boolean;          // overrides BRAIN_MERGE_AUTO_NOTIFY_CHAT for tests
+  enabled?: boolean; // overrides BRAIN_MERGE_AUTO_ENABLED for tests
+  dryRun?: boolean; // overrides BRAIN_MERGE_AUTO_DRY_RUN for tests
+  notifyChat?: boolean; // overrides BRAIN_MERGE_AUTO_NOTIFY_CHAT for tests
   nowMs?: number;
 }
 
@@ -319,9 +351,11 @@ export async function runAutoMergeSweep(
   opts: AutoMergeSweepOpts = {},
 ): Promise<AutoMergeSweepResult> {
   const db = opts.db ?? getBrainDb();
-  const enabled = opts.enabled ?? process.env.BRAIN_MERGE_AUTO_ENABLED === 'true';
+  const enabled =
+    opts.enabled ?? process.env.BRAIN_MERGE_AUTO_ENABLED === 'true';
   const dryRun = opts.dryRun ?? process.env.BRAIN_MERGE_AUTO_DRY_RUN === 'true';
-  const notifyChat = opts.notifyChat ??
+  const notifyChat =
+    opts.notifyChat ??
     (process.env.BRAIN_MERGE_AUTO_NOTIFY_CHAT ?? 'true') !== 'false';
   const nowMs = opts.nowMs ?? Date.now();
   const startedAt = nowMs;
@@ -454,12 +488,12 @@ type MergeEvidenceField =
   | 'discord_snowflake'
   | 'whatsapp_jid';
 
-const DEFAULT_AUTO_MERGE_INTERVAL_MS = 24 * 60 * 60 * 1000;   // 24h
+const DEFAULT_AUTO_MERGE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface AutoMergeScheduleOpts {
   intervalMs?: number;
-  runOnStart?: boolean;        // default: true (so first deploy doesn't wait 24h)
-  run?: () => Promise<unknown>;  // injected for tests; default: runAutoMergeSweep()
+  runOnStart?: boolean; // default: true (so first deploy doesn't wait 24h)
+  run?: () => Promise<unknown>; // injected for tests; default: runAutoMergeSweep()
 }
 
 /**

@@ -22,7 +22,10 @@ vi.mock('../../config.js', () => ({
 }));
 
 import { _closeBrainDb, getBrainDb } from '../db.js';
-import { findRawEventsForMessage, handleChatMessageEdited } from '../chat-edit-sync.js';
+import {
+  findRawEventsForMessage,
+  handleChatMessageEdited,
+} from '../chat-edit-sync.js';
 
 vi.mock('../qdrant.js', () => ({
   upsertKu: vi.fn(async () => undefined),
@@ -101,7 +104,12 @@ describe('chat-edit-sync — findRawEventsForMessage', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
        VALUES (?, 'signal_window', ?, ?, ?)`,
-    ).run('w2', 'group-Y:2026-04-27T00:00:00.000Z', Buffer.from(trickyPayload), '2026-04-27T00:00:00Z');
+    ).run(
+      'w2',
+      'group-Y:2026-04-27T00:00:00.000Z',
+      Buffer.from(trickyPayload),
+      '2026-04-27T00:00:00Z',
+    );
     const hits = findRawEventsForMessage(db, 'signal', 'group-Y', 'msg-2');
     expect(hits).toEqual([]);
   });
@@ -116,7 +124,12 @@ describe('chat-edit-sync — findRawEventsForMessage', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
        VALUES (?, 'discord_window', ?, ?, ?)`,
-    ).run('w3', 'chan-A:2026-04-27T00:00:00.000Z', Buffer.from(winPayload), '2026-04-27T00:00:00Z');
+    ).run(
+      'w3',
+      'chan-A:2026-04-27T00:00:00.000Z',
+      Buffer.from(winPayload),
+      '2026-04-27T00:00:00Z',
+    );
     const hits = findRawEventsForMessage(db, 'discord', 'chan-A', 'msg-X');
     expect(hits.map((r) => r.id).sort()).toEqual(['s1', 'w3']);
   });
@@ -194,7 +207,9 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
 
     // Old KU is now superseded.
     const oldKu = db
-      .prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`)
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`,
+      )
       .get() as any;
     expect(oldKu.superseded_at).not.toBeNull();
     expect(oldKu.superseded_by).not.toBeNull();
@@ -258,7 +273,11 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
        VALUES ('w1', 'signal_window', 'chat-2:2026-04-27T00:00:00.000Z', ?, ?, ?)`,
-    ).run(Buffer.from(winPayload), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+    ).run(
+      Buffer.from(winPayload),
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:01Z',
+    );
     db.prepare(
       `INSERT INTO knowledge_units
          (id, text, source_type, source_ref, account, scope, confidence,
@@ -274,7 +293,12 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
       expect(prompt).not.toContain('original');
       return {
         claims: [
-          { text: 'updated claim', topic_seed: 't', entities_mentioned: [], confidence: 0.9 },
+          {
+            text: 'updated claim',
+            topic_seed: 't',
+            entities_mentioned: [],
+            confidence: 0.9,
+          },
         ],
         inputTokens: 10,
         outputTokens: 5,
@@ -298,7 +322,9 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
       { llmCaller: llm, db },
     );
 
-    const oldKu = db.prepare(`SELECT superseded_at FROM knowledge_units WHERE id='w-k1'`).get() as any;
+    const oldKu = db
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id='w-k1'`)
+      .get() as any;
     expect(oldKu.superseded_at).not.toBeNull();
   });
 
@@ -307,11 +333,7 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
        VALUES ('r1', 'signal_message', 'chat-1:msg-1', ?, ?, ?)`,
-    ).run(
-      Buffer.from('{}'),
-      '2026-04-27T00:00:00Z',
-      '2026-04-27T00:00:01Z',
-    );
+    ).run(Buffer.from('{}'), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
     db.prepare(
       `INSERT INTO knowledge_units
          (id, text, source_type, source_ref, account, scope, confidence,
@@ -339,7 +361,7 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
         chat_id: 'chat-1',
         message_id: 'msg-1',
         old_text: 'meeting at 3pm Thursday',
-        new_text: 'oops never mind',  // contains no patterns the cheap-rules tier matches
+        new_text: 'oops never mind', // contains no patterns the cheap-rules tier matches
         edited_at: '2026-04-28T00:00:00.000Z',
         sender: 'alice',
       },
@@ -348,7 +370,9 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
 
     // Old KU is NOT superseded.
     const ku = db
-      .prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k-keep'`)
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k-keep'`,
+      )
       .get() as any;
     expect(ku.superseded_at).toBeNull();
     expect(ku.superseded_by).toBeNull();
@@ -449,11 +473,7 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
        VALUES ('r-merge', 'signal_message', 'chat-d:msg-d', ?, ?, ?)`,
-    ).run(
-      Buffer.from('{}'),
-      '2026-04-28T00:00:00Z',
-      '2026-04-28T00:00:01Z',
-    );
+    ).run(Buffer.from('{}'), '2026-04-28T00:00:00Z', '2026-04-28T00:00:01Z');
     db.prepare(
       `INSERT INTO knowledge_units
          (id, text, source_type, source_ref, account, scope, confidence,
@@ -468,7 +488,14 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     const spyLlm = vi.fn(async (prompt: string) => {
       observedPrompt = prompt;
       return {
-        claims: [{ text: 'x', topic_seed: 't', entities_mentioned: [], confidence: 0.9 }],
+        claims: [
+          {
+            text: 'x',
+            topic_seed: 't',
+            entities_mentioned: [],
+            confidence: 0.9,
+          },
+        ],
         inputTokens: 1,
         outputTokens: 1,
       };
@@ -528,7 +555,9 @@ describe('chat-edit-sync — handleChatMessageDeleted', () => {
     );
 
     const ku = db
-      .prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`)
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`,
+      )
       .get() as any;
     expect(ku.superseded_at).toBe('2026-04-28T00:00:00.000Z');
     expect(ku.superseded_by).toBeNull();
@@ -575,7 +604,11 @@ describe('chat-edit-sync — handleChatMessageDeleted', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
        VALUES ('w1', 'signal_window', 'chat-2:2026-04-27T00:00:00.000Z', ?, ?, ?)`,
-    ).run(Buffer.from(winPayload), '2026-04-27T00:00:00Z', '2026-04-27T00:00:01Z');
+    ).run(
+      Buffer.from(winPayload),
+      '2026-04-27T00:00:00Z',
+      '2026-04-27T00:00:01Z',
+    );
     db.prepare(
       `INSERT INTO knowledge_units (id, text, source_type, source_ref, account, scope,
                                      confidence, valid_from, recorded_at, topic_key,

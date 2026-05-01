@@ -158,8 +158,10 @@ describe('container-runner timeout behavior', () => {
 
   function timeoutKillFired(): boolean {
     // killOnTimeout is the only place that logs error 'Container timeout, stopping gracefully'.
-    return loggerMock.error.mock.calls.some(([, msg]) =>
-      typeof msg === 'string' && msg.includes('Container timeout, stopping gracefully'),
+    return loggerMock.error.mock.calls.some(
+      ([, msg]) =>
+        typeof msg === 'string' &&
+        msg.includes('Container timeout, stopping gracefully'),
     );
   }
 

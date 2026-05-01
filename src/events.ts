@@ -847,8 +847,8 @@ export interface EntityUnmergeRequestedEvent extends NanoClawEvent {
 export interface EntityMergeSuggestedEvent extends NanoClawEvent {
   type: 'entity.merge.suggested';
   suggestion_id: string;
-  entity_id_a: string;          // lex-smaller
-  entity_id_b: string;          // lex-larger
+  entity_id_a: string; // lex-smaller
+  entity_id_b: string; // lex-larger
   confidence: number;
   reason_code: 'name_exact' | string;
   evidence: {

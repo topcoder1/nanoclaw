@@ -96,7 +96,9 @@ describe('brain/entities', () => {
     const row = db
       .prepare(`SELECT canonical FROM entities WHERE entity_id = ?`)
       .get(e.entity_id) as { canonical: string };
-    expect(JSON.parse(row.canonical)).toEqual({ email: 'nameless@example.com' });
+    expect(JSON.parse(row.canonical)).toEqual({
+      email: 'nameless@example.com',
+    });
   });
 
   it('resolveByEmail returns the created entity exactly', async () => {
