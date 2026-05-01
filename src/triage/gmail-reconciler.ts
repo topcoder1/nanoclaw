@@ -246,6 +246,23 @@ export async function reconcileOnce(
     log.info({ ...result }, 'Gmail reconciler tick');
   }
 
+  // When the reconciler resolves items (user archived in Gmail directly),
+  // the pinned archive-queue dashboard goes stale. Refresh it asynchronously
+  // — a stale pin is preferable to blocking the tick on Telegram I/O.
+  if (result.resolved > 0) {
+    void (async () => {
+      try {
+        const { postArchiveDashboard } = await import('../daily-digest.js');
+        await postArchiveDashboard();
+      } catch (err) {
+        logger.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Reconciler dashboard refresh failed (non-fatal)',
+        );
+      }
+    })();
+  }
+
   status.lastTickAt = tickStartedAt;
   status.lastTickDurationMs = Date.now() - tickStartedAt;
   status.lastResult = result;

@@ -12,12 +12,17 @@ import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Action,
   CallbackQuery,
+  CallbackResult,
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   ProgressHandle,
   RegisteredGroup,
 } from '../types.js';
+
+type CallbackHandler = (
+  query: CallbackQuery,
+) => void | CallbackResult | Promise<void | CallbackResult>;
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -48,7 +53,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
-  private callbackHandler: ((query: CallbackQuery) => void) | null = null;
+  private callbackHandler: CallbackHandler | null = null;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -351,15 +356,36 @@ export class TelegramChannel implements Channel {
         ctx.callbackQuery.from.username ||
         ctx.callbackQuery.from.id.toString();
 
-      this.callbackHandler({
-        id: ctx.callbackQuery.id,
-        chatJid,
-        messageId,
-        data,
-        senderName,
-      });
+      // Await the handler so it can return a toast string for visual
+      // feedback. Telegram's answerCallbackQuery deadline is ~30s — for
+      // slow operations the handler should kick off background work and
+      // return a "in progress" toast quickly rather than blocking here.
+      let result: void | CallbackResult = undefined;
+      try {
+        result = await this.callbackHandler({
+          id: ctx.callbackQuery.id,
+          chatJid,
+          messageId,
+          data,
+          senderName,
+        });
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), data },
+          'Telegram callback handler threw',
+        );
+      }
 
-      await ctx.answerCallbackQuery();
+      try {
+        await ctx.answerCallbackQuery(
+          result?.toast ? { text: result.toast } : undefined,
+        );
+      } catch (err) {
+        logger.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'answerCallbackQuery failed (likely past 30s deadline)',
+        );
+      }
     });
 
     // Handle errors gracefully
@@ -483,7 +509,7 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  onCallbackQuery(handler: (query: CallbackQuery) => void): void {
+  onCallbackQuery(handler: CallbackHandler): void {
     // Store the handler — the deferred listener in connect() delegates to it.
     // Safe to call before or after connect().
     this.callbackHandler = handler;

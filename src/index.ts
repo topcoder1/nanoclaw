@@ -2092,7 +2092,9 @@ async function main(): Promise<void> {
   // Register callback handler on Telegram channel
   const telegramChannel = channels.find((c) => c.name === 'telegram');
   if (telegramChannel?.onCallbackQuery) {
-    telegramChannel.onCallbackQuery((query) => {
+    telegramChannel.onCallbackQuery((query) =>
+      // Returning the promise lets the channel layer await the toast result
+      // and forward it via answerCallbackQuery for visible feedback.
       handleCallback(query, {
         archiveTracker,
         autoApproval,
@@ -2111,8 +2113,8 @@ async function main(): Promise<void> {
           }
           return delivered;
         },
-      });
-    });
+      }),
+    );
   }
 
   // --- Draft-with-AI bridge ---

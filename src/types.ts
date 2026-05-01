@@ -118,6 +118,15 @@ export interface CallbackQuery {
 }
 
 /**
+ * Optional return value from a callback handler. When `toast` is set, the
+ * channel surfaces it as a transient overlay (Telegram: `answerCallbackQuery`
+ * with text). Channels without toasts ignore it.
+ */
+export interface CallbackResult {
+  toast?: string;
+}
+
+/**
  * Opaque handle to an in-flight progress message. Returned by
  * `Channel.sendProgress`. Callers use it to update or remove the message
  * as work advances. Non-supporting channels may return a no-op handle.
@@ -152,7 +161,11 @@ export interface Channel {
     text: string,
     actions: Action[],
   ): Promise<number>;
-  onCallbackQuery?(handler: (query: CallbackQuery) => void): void;
+  onCallbackQuery?(
+    handler: (
+      query: CallbackQuery,
+    ) => void | CallbackResult | Promise<void | CallbackResult>,
+  ): void;
 }
 
 // Callback type that channels use to deliver inbound messages
