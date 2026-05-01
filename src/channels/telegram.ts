@@ -732,6 +732,30 @@ export async function sendTelegramMessage(
 }
 
 /**
+ * Return the message id of the chat's currently-pinned message, or null when
+ * nothing is pinned. Used by the dashboard upsert to detect drift between
+ * the locally-cached pinned id and Telegram's actual state — when an old
+ * dashboard message is still tracked but a different message is now pinned,
+ * editing the cached id silently updates an invisible message.
+ */
+export async function getChatPinnedMessageId(
+  chatId: string | number,
+): Promise<number | null> {
+  try {
+    const res = await callBotApi<{
+      pinned_message?: { message_id: number };
+    }>('getChat', { chat_id: normalizeChatId(chatId) });
+    return res.pinned_message?.message_id ?? null;
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err), chatId },
+      'getChatPinnedMessageId failed (non-fatal)',
+    );
+    return null;
+  }
+}
+
+/**
  * Edit an existing Telegram message's text in place. Returns the message id.
  */
 export async function editTelegramMessage(
