@@ -411,12 +411,15 @@ describe('brain/weekly-digest', () => {
     stop2();
     expect(deliveries.length).toBe(1);
 
-    // Next day 10:00 — new cycle; clear debounce to >22h ago.
+    // Next day 10:00 — new cycle; clear debounce to >22h before tueMorning.
+    // Anchor to tueMorning, NOT real Date.now(): the scheduler compares
+    // last_daily_digest to nowFn(), so using real time here turns into a
+    // time bomb that fires once wall-clock drifts past the fixed test date.
+    const tueMorning = new Date(2026, 3, 28, 10, 0, 0);
     setSystemState(
       'last_daily_digest',
-      new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+      new Date(tueMorning.getTime() - 23 * 60 * 60 * 1000).toISOString(),
     );
-    const tueMorning = new Date(2026, 3, 28, 10, 0, 0);
     const stop3 = startDigestSchedule(
       'daily',
       (md) => {
