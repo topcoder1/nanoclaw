@@ -93,9 +93,7 @@ describe('runAttentionReminderSweep', () => {
       reasons: ['x'],
     });
 
-    const getThreadInboxStatus = vi
-      .fn()
-      .mockResolvedValue('out' as const);
+    const getThreadInboxStatus = vi.fn().mockResolvedValue('out' as const);
 
     await runAttentionReminderSweep({
       windowHours: 4,
