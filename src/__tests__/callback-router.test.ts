@@ -602,10 +602,7 @@ describe('handleCallback', () => {
     } as any;
     const deps = { ...makeDeps(), db: fakeDb };
 
-    const result = await handleCallback(
-      makeQuery('triage:archive_all'),
-      deps,
-    );
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
 
     expect(dailyDigest.postArchiveDashboard).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
@@ -643,10 +640,7 @@ describe('handleCallback', () => {
     } as any;
     const deps = { ...makeDeps(), db: fakeDb };
 
-    const result = await handleCallback(
-      makeQuery('triage:archive_all'),
-      deps,
-    );
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
 
     expect(deps.gmailOps!.archiveThread).toHaveBeenCalledTimes(2);
     expect(updateRun).toHaveBeenCalled();
@@ -685,10 +679,7 @@ describe('handleCallback', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('Gmail 503'));
 
-    const result = await handleCallback(
-      makeQuery('triage:archive_all'),
-      deps,
-    );
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
 
     expect(result).toEqual({ toast: '🗂 Archived 1 · ⚠️ 1 failed' });
   });

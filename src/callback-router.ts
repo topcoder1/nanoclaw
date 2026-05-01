@@ -1,4 +1,9 @@
-import type { CallbackQuery, CallbackResult, Channel, Action } from './types.js';
+import type {
+  CallbackQuery,
+  CallbackResult,
+  Channel,
+  Action,
+} from './types.js';
 import type { ArchiveTracker } from './archive-tracker.js';
 import type { AutoApprovalTimer } from './auto-approval.js';
 import type { StatusBarManager } from './status-bar.js';
