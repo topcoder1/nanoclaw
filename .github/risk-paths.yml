@@ -31,18 +31,49 @@ blocked:
   - 'k8s/**'
 
 sensitive:
-  # CUSTOMIZE: paths where bugs cause customer-visible regressions, data
-  # loss, security exposure, or production outage. Examples below — adjust
-  # for the repo's actual layout.
-  #
-  # - 'src/**/api/**'           # public API surface
-  # - 'src/**/db/**'            # schema, models, migrations
-  # - 'migrations/**'
-  # - 'alembic/**'
-  # - 'src/**/auth/**'          # authn / authz
-  # - 'src/**/billing/**'       # payment / pricing
-  # - 'src/**/scanning/**'      # production runners
-  # - 'scripts/rotate_*.py'     # credential rotation
+  # Security & trust boundaries — bypass = privilege escalation
+  - 'src/trust-*.ts'
+  - 'src/auto-approval.ts'
+  - 'src/qa-approval.ts'
+  - 'src/sender-allowlist.ts'
+  - 'src/mount-security.ts'
+  - 'src/ipc-auth.ts'
+  - 'src/ipc.ts'
+
+  # Container runtime — escapes here = full host access
+  - 'src/container-runner.ts'
+  - 'src/container-runtime.ts'
+  - 'container/**'
+
+  # Code signing / release pipeline
+  - 'src/signer/**'
+
+  # External service auth (token handling, OAuth flows)
+  - 'src/gmail-token-refresh.ts'
+  - 'src/gmail-ops.ts'
+  - 'src/calendar-ops.ts'
+  - 'src/whatsapp-auth.ts'
+  - 'src/drive-fetcher.ts'
+
+  # Database schema / migrations — data loss risk
+  - 'src/db.ts'
+  - 'src/db-migration.ts'
+
+  # LLM call surface — prompt injection / cost overrun risk
+  - 'src/llm/**'
+  - 'src/brain/**'
+
+  # Classification & routing — silent misclassification = customer-impacting bug
+  - 'src/classification.ts'
+  - 'src/classification-adjustments.ts'
+  - 'src/message-classifier.ts'
+  - 'src/triage/**'
+  - 'src/router.ts'
+  - 'src/event-router.ts'
+
+  # Remote control surface — anything that drives the agent from outside
+  - 'src/remote-control.ts'
+  - 'src/webhook-consumer.ts'
 
 # safe_test: failing tests can't ship; passing tests can't break runtime.
 safe_test:
