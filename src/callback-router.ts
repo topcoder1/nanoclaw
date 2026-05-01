@@ -737,6 +737,10 @@ export async function handleCallback(
         // After initial split: action='triage', entityId=<sub>, extra, extra2.
         const sub = entityId;
         let triageToast: string | undefined;
+        // When set, collapse the card message text to this one-liner status
+        // (matches the existing `confirm_archive` "✅ Archived" pattern).
+        // Skip for failures so the user can retry without scrolling away.
+        let collapseText: string | undefined;
         if (sub === 'archive_all') {
           // Mass-archive the whole archive queue.
           //
@@ -862,25 +866,32 @@ export async function handleCallback(
           // Treat that as a successful archive for toast purposes.
           if (!result || result.archived) {
             triageToast = '🗃 Archived';
+            collapseText = '🗃 Archived';
           } else if (result.reason === 'gmail_failed') {
+            // Don't collapse — the item is still queued and the user may
+            // want to retry from this card.
             triageToast = '⚠️ Gmail archive failed — item kept';
           } else if (result.reason === 'missing') {
             triageToast = '⚠️ Item not found (already resolved?)';
+            collapseText = '⚠️ Item not found (already resolved?)';
           } else {
             triageToast = '⚠️ Could not archive';
           }
         } else if (sub === 'dismiss') {
           handleTriageDismiss(extra);
           triageToast = '✓ Dismissed';
+          collapseText = '✓ Dismissed';
         } else if (sub === 'snooze') {
           const duration = extra;
           const itemId = extra2;
           if (duration === '1h') {
             handleTriageSnooze(itemId, duration);
             triageToast = '⏰ Snoozed 1h';
+            collapseText = '⏰ Snoozed 1h';
           } else if (duration === 'tomorrow') {
             handleTriageSnooze(itemId, duration);
             triageToast = '⏰ Snoozed until tomorrow 8am';
+            collapseText = '⏰ Snoozed until tomorrow 8am';
           } else {
             logger.warn(
               { duration, data: query.data },
@@ -893,12 +904,14 @@ export async function handleCallback(
           if (target === 'attention') {
             handleTriageOverride(itemId, 'attention');
             triageToast = '✓ Moved to attention';
+            collapseText = '📥 Moved to attention';
           } else if (target === 'archive') {
             handleTriageOverride(itemId, 'archive_candidate');
             // Override into archive_candidate may have moved an attention
             // card into the archive queue — the pinned count needs to bump.
             void refreshArchiveDashboard();
             triageToast = '✓ Moved to archive queue';
+            collapseText = '🗃 Moved to archive queue';
           } else {
             logger.warn(
               { target, data: query.data },
@@ -908,7 +921,17 @@ export async function handleCallback(
         } else {
           logger.warn({ sub, data: query.data }, 'Unknown triage sub-action');
         }
-        if (channel?.editMessageButtons) {
+        // Collapse the card on success: replace text + clear buttons in one
+        // edit. On failure (no collapseText), just clear the buttons so the
+        // original card remains readable for retry context.
+        if (collapseText && channel?.editMessageTextAndButtons) {
+          await channel.editMessageTextAndButtons(
+            query.chatJid,
+            query.messageId,
+            collapseText,
+            [],
+          );
+        } else if (channel?.editMessageButtons) {
           await channel.editMessageButtons(query.chatJid, query.messageId, []);
         }
         return triageToast ? { toast: triageToast } : undefined;

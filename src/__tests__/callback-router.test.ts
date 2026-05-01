@@ -507,10 +507,35 @@ describe('handleCallback', () => {
     );
   });
 
-  it('triage callback clears buttons after handling', async () => {
+  it('triage callback collapses card text + clears buttons on success', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('triage:archive:item-7'), deps);
     const channel = (deps.findChannel as any).mock.results[0]?.value;
+    // The card is replaced with a one-liner status (matches the existing
+    // confirm_archive "✅ Archived" pattern) and the action buttons are
+    // cleared in the same edit.
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      '🗃 Archived',
+      [],
+    );
+    expect(channel.editMessageButtons).not.toHaveBeenCalled();
+  });
+
+  it('triage:archive on Gmail-failed leaves the card readable for retry (no collapse)', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleArchive as any).mockResolvedValueOnce({
+      archived: false,
+      reason: 'gmail_failed',
+      error: 'Gmail 503',
+    });
+    await handleCallback(makeQuery('triage:archive:item-fail'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    // Failure path: keep card text intact so the user has retry context;
+    // only the buttons are cleared.
+    expect(channel.editMessageTextAndButtons).not.toHaveBeenCalled();
     expect(channel.editMessageButtons).toHaveBeenCalledWith(
       'telegram:123',
       100,
