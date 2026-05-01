@@ -1,5 +1,6 @@
 import {
   editTelegramMessage,
+  getChatPinnedMessageId,
   pinTelegramMessage,
   sendTelegramMessage,
 } from '../channels/telegram.js';
@@ -70,7 +71,7 @@ async function upsertDashboard(
     .prepare(`SELECT pinned_msg_id FROM triage_dashboards WHERE topic = ?`)
     .get(topic) as { pinned_msg_id: number | null } | undefined;
 
-  if (!row || row.pinned_msg_id === null) {
+  const createFresh = async (): Promise<void> => {
     try {
       const sent = await sendTelegramMessage(
         chatId,
@@ -92,6 +93,27 @@ async function upsertDashboard(
         'Failed to create triage dashboard',
       );
     }
+  };
+
+  if (!row || row.pinned_msg_id === null) {
+    await createFresh();
+    return;
+  }
+
+  // Drift guard: a successful editMessageText on an old, no-longer-pinned
+  // message is silently invisible to the user — Telegram allows arbitrary
+  // edits on past messages but the chat header keeps showing whichever
+  // message is currently pinned. Verify our cached id is still the active
+  // pin before editing; if drift is detected (DB migration, manual unpin,
+  // out-of-band re-pin), clear the row and post a fresh dashboard instead.
+  const actualPinned = await getChatPinnedMessageId(chatId);
+  if (actualPinned !== null && actualPinned !== row.pinned_msg_id) {
+    logger.warn(
+      { topic, cached: row.pinned_msg_id, actual: actualPinned },
+      'Dashboard pin drift detected — re-creating',
+    );
+    db.prepare(`DELETE FROM triage_dashboards WHERE topic = ?`).run(topic);
+    await createFresh();
     return;
   }
 

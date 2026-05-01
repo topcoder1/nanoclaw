@@ -217,6 +217,22 @@ export async function reapOnce(deps: ReapDeps): Promise<ReapResult> {
     log.info({ ...result }, 'Junk reaper tick');
   }
 
+  // Reaped messages may have come from the archive_candidate queue —
+  // refresh the pinned dashboard so the count reflects reality.
+  if (result.reaped > 0) {
+    void (async () => {
+      try {
+        const { postArchiveDashboard } = await import('../daily-digest.js');
+        await postArchiveDashboard();
+      } catch (err) {
+        log.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Junk reaper dashboard refresh failed (non-fatal)',
+        );
+      }
+    })();
+  }
+
   status.lastTickAt = tickStartedAt;
   status.lastTickDurationMs = Date.now() - tickStartedAt;
   status.lastResult = result;

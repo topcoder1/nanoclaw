@@ -1,4 +1,9 @@
-import type { CallbackQuery, Channel, Action } from './types.js';
+import type {
+  CallbackQuery,
+  CallbackResult,
+  Channel,
+  Action,
+} from './types.js';
 import type { ArchiveTracker } from './archive-tracker.js';
 import type { AutoApprovalTimer } from './auto-approval.js';
 import type { StatusBarManager } from './status-bar.js';
@@ -60,13 +65,34 @@ export interface CallbackRouterDeps {
 }
 
 /**
+ * Refresh the pinned archive-queue dashboard. Imported lazily to avoid a
+ * static cycle between callback-router and daily-digest. Errors are swallowed
+ * — a stale dashboard is preferable to throwing inside a button handler.
+ */
+async function refreshArchiveDashboard(): Promise<void> {
+  try {
+    const { postArchiveDashboard } = await import('./daily-digest.js');
+    await postArchiveDashboard();
+  } catch (err) {
+    logger.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'refreshArchiveDashboard failed (non-fatal)',
+    );
+  }
+}
+
+/**
  * Route callback queries from inline buttons to the appropriate handler.
  * Callback data format: "action:entityId" or "action:entityId:extra"
+ *
+ * Optionally returns a toast string for the channel to surface as transient
+ * UI feedback (Telegram: answerCallbackQuery text). Returning `undefined`
+ * yields a silent ack.
  */
 export async function handleCallback(
   query: CallbackQuery,
   deps: CallbackRouterDeps,
-): Promise<void> {
+): Promise<CallbackResult | void> {
   const parts = query.data.split(':');
   const action = parts[0];
   const entityId = parts[1] || '';
@@ -182,6 +208,11 @@ export async function handleCallback(
               [],
             );
           }
+          // Per-email archive can shrink the archive queue; keep the
+          // pinned dashboard count honest. Fire-and-forget — a stale
+          // count is preferable to a thrown handler.
+          void refreshArchiveDashboard();
+          return { toast: '🗃 Archived' };
         } catch (archiveErr) {
           logger.warn(
             { err: String(archiveErr), entityId, account: email.account },
@@ -710,6 +741,11 @@ export async function handleCallback(
         //   triage:override:archive:<itemId>
         // After initial split: action='triage', entityId=<sub>, extra, extra2.
         const sub = entityId;
+        let triageToast: string | undefined;
+        // When set, collapse the card message text to this one-liner status
+        // (matches the existing `confirm_archive` "✅ Archived" pattern).
+        // Skip for failures so the user can retry without scrolling away.
+        let collapseText: string | undefined;
         if (sub === 'archive_all') {
           // Mass-archive the whole archive queue.
           //
@@ -732,6 +768,21 @@ export async function handleCallback(
               thread_id: string | null;
               metadata: string | null;
             }>;
+
+            // Empty-queue path: dashboard pin is stale — items were resolved
+            // by the reconciler, junk-reaper, or another path that didn't
+            // trigger a refresh. Re-render the pin so the count drops to 0
+            // and tell the user explicitly that the click was a no-op.
+            if (rows.length === 0) {
+              logger.info(
+                { matched: 0, chatJid: query.chatJid },
+                'Mass archive via dashboard button (empty queue — refreshing stale dashboard)',
+              );
+              await refreshArchiveDashboard();
+              return {
+                toast: '✓ Queue was already empty — dashboard refreshed',
+              };
+            }
 
             const succeededIds: string[] = [];
             let failed = 0;
@@ -801,20 +852,51 @@ export async function handleCallback(
               'Mass archive via dashboard button',
             );
             // Refresh the dashboard immediately so the user sees 0 pending.
-            const { postArchiveDashboard } = await import('./daily-digest.js');
-            await postArchiveDashboard();
+            await refreshArchiveDashboard();
+            triageToast =
+              failed > 0
+                ? `🗂 Archived ${archived} · ⚠️ ${failed} failed`
+                : `🗂 Archived ${archived}`;
           }
-          break;
+          return triageToast ? { toast: triageToast } : undefined;
         }
         if (sub === 'archive') {
-          await handleTriageArchive(extra, { gmailOps: deps.gmailOps });
+          const result = await handleTriageArchive(extra, {
+            gmailOps: deps.gmailOps,
+          });
+          // Per-card archive shrinks the archive queue (or graduates an
+          // attention item out of inbox). Either way, refresh the pin.
+          void refreshArchiveDashboard();
+          // Defensive: tests mock handleTriageArchive without a return value.
+          // Treat that as a successful archive for toast purposes.
+          if (!result || result.archived) {
+            triageToast = '🗃 Archived';
+            collapseText = '🗃 Archived';
+          } else if (result.reason === 'gmail_failed') {
+            // Don't collapse — the item is still queued and the user may
+            // want to retry from this card.
+            triageToast = '⚠️ Gmail archive failed — item kept';
+          } else if (result.reason === 'missing') {
+            triageToast = '⚠️ Item not found (already resolved?)';
+            collapseText = '⚠️ Item not found (already resolved?)';
+          } else {
+            triageToast = '⚠️ Could not archive';
+          }
         } else if (sub === 'dismiss') {
           handleTriageDismiss(extra);
+          triageToast = '✓ Dismissed';
+          collapseText = '✓ Dismissed';
         } else if (sub === 'snooze') {
           const duration = extra;
           const itemId = extra2;
-          if (duration === '1h' || duration === 'tomorrow') {
+          if (duration === '1h') {
             handleTriageSnooze(itemId, duration);
+            triageToast = '⏰ Snoozed 1h';
+            collapseText = '⏰ Snoozed 1h';
+          } else if (duration === 'tomorrow') {
+            handleTriageSnooze(itemId, duration);
+            triageToast = '⏰ Snoozed until tomorrow 8am';
+            collapseText = '⏰ Snoozed until tomorrow 8am';
           } else {
             logger.warn(
               { duration, data: query.data },
@@ -826,8 +908,15 @@ export async function handleCallback(
           const itemId = extra2;
           if (target === 'attention') {
             handleTriageOverride(itemId, 'attention');
+            triageToast = '✓ Moved to attention';
+            collapseText = '📥 Moved to attention';
           } else if (target === 'archive') {
             handleTriageOverride(itemId, 'archive_candidate');
+            // Override into archive_candidate may have moved an attention
+            // card into the archive queue — the pinned count needs to bump.
+            void refreshArchiveDashboard();
+            triageToast = '✓ Moved to archive queue';
+            collapseText = '🗃 Moved to archive queue';
           } else {
             logger.warn(
               { target, data: query.data },
@@ -837,10 +926,20 @@ export async function handleCallback(
         } else {
           logger.warn({ sub, data: query.data }, 'Unknown triage sub-action');
         }
-        if (channel?.editMessageButtons) {
+        // Collapse the card on success: replace text + clear buttons in one
+        // edit. On failure (no collapseText), just clear the buttons so the
+        // original card remains readable for retry context.
+        if (collapseText && channel?.editMessageTextAndButtons) {
+          await channel.editMessageTextAndButtons(
+            query.chatJid,
+            query.messageId,
+            collapseText,
+            [],
+          );
+        } else if (channel?.editMessageButtons) {
           await channel.editMessageButtons(query.chatJid, query.messageId, []);
         }
-        break;
+        return triageToast ? { toast: triageToast } : undefined;
       }
 
       case 'qa': {

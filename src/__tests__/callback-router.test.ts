@@ -14,6 +14,10 @@ vi.mock('../triage/queue-actions.js', () => ({
   handleOverride: vi.fn(),
 }));
 
+vi.mock('../daily-digest.js', () => ({
+  postArchiveDashboard: vi.fn().mockResolvedValue(undefined),
+}));
+
 function makeDeps(): CallbackRouterDeps {
   return {
     archiveTracker: {
@@ -503,15 +507,181 @@ describe('handleCallback', () => {
     );
   });
 
-  it('triage callback clears buttons after handling', async () => {
+  it('triage callback collapses card text + clears buttons on success', async () => {
     const deps = makeDeps();
     await handleCallback(makeQuery('triage:archive:item-7'), deps);
     const channel = (deps.findChannel as any).mock.results[0]?.value;
+    // The card is replaced with a one-liner status (matches the existing
+    // confirm_archive "✅ Archived" pattern) and the action buttons are
+    // cleared in the same edit.
+    expect(channel.editMessageTextAndButtons).toHaveBeenCalledWith(
+      'telegram:123',
+      100,
+      '🗃 Archived',
+      [],
+    );
+    expect(channel.editMessageButtons).not.toHaveBeenCalled();
+  });
+
+  it('triage:archive on Gmail-failed leaves the card readable for retry (no collapse)', async () => {
+    const deps = makeDeps();
+    const mod = await import('../triage/queue-actions.js');
+    (mod.handleArchive as any).mockResolvedValueOnce({
+      archived: false,
+      reason: 'gmail_failed',
+      error: 'Gmail 503',
+    });
+    await handleCallback(makeQuery('triage:archive:item-fail'), deps);
+    const channel = (deps.findChannel as any).mock.results[0]?.value;
+    // Failure path: keep card text intact so the user has retry context;
+    // only the buttons are cleared.
+    expect(channel.editMessageTextAndButtons).not.toHaveBeenCalled();
     expect(channel.editMessageButtons).toHaveBeenCalledWith(
       'telegram:123',
       100,
       [],
     );
+  });
+
+  // -- Toast feedback ------------------------------------------------
+  // The Telegram bot used to acknowledge button clicks silently — the user
+  // saw "nothing happen" even when the action succeeded. The router now
+  // returns a `{ toast }` so the channel can surface it as visible UI.
+
+  it('triage:archive returns an "Archived" toast', async () => {
+    const deps = makeDeps();
+    const result = await handleCallback(
+      makeQuery('triage:archive:item-A'),
+      deps,
+    );
+    expect(result).toEqual({ toast: '🗃 Archived' });
+  });
+
+  it('triage:dismiss returns a "Dismissed" toast', async () => {
+    const deps = makeDeps();
+    const result = await handleCallback(
+      makeQuery('triage:dismiss:item-B'),
+      deps,
+    );
+    expect(result).toEqual({ toast: '✓ Dismissed' });
+  });
+
+  it('triage:snooze:1h returns a "Snoozed 1h" toast', async () => {
+    const deps = makeDeps();
+    const result = await handleCallback(
+      makeQuery('triage:snooze:1h:item-C'),
+      deps,
+    );
+    expect(result).toEqual({ toast: '⏰ Snoozed 1h' });
+  });
+
+  it('triage:snooze:tomorrow returns a "Snoozed until tomorrow 8am" toast', async () => {
+    const deps = makeDeps();
+    const result = await handleCallback(
+      makeQuery('triage:snooze:tomorrow:item-D'),
+      deps,
+    );
+    expect(result).toEqual({ toast: '⏰ Snoozed until tomorrow 8am' });
+  });
+
+  // -- archive_all empty-queue regression ----------------------------
+  // Reproduces the original bug: the pinned dashboard claimed N pending
+  // but the DB had 0 queued archive_candidates (background paths
+  // resolved them). Clicking "Archive all N" used to log matched=0 and
+  // do nothing visible. It now refreshes the pinned dashboard and
+  // surfaces a toast explaining the click was a no-op.
+
+  it('triage:archive_all on an empty queue refreshes the dashboard and toasts', async () => {
+    const dailyDigest = await import('../daily-digest.js');
+    (dailyDigest.postArchiveDashboard as any).mockClear();
+
+    const fakeDb = {
+      prepare: vi.fn().mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      }),
+    } as any;
+    const deps = { ...makeDeps(), db: fakeDb };
+
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
+
+    expect(dailyDigest.postArchiveDashboard).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      toast: '✓ Queue was already empty — dashboard refreshed',
+    });
+  });
+
+  it('triage:archive_all archives queued items and toasts the count', async () => {
+    const dailyDigest = await import('../daily-digest.js');
+    (dailyDigest.postArchiveDashboard as any).mockClear();
+
+    // Two queued gmail-sourced rows, both with valid metadata.
+    const rows = [
+      {
+        id: 'i1',
+        source: 'gmail',
+        thread_id: 't1',
+        metadata: JSON.stringify({ account: 'personal' }),
+      },
+      {
+        id: 'i2',
+        source: 'gmail',
+        thread_id: 't2',
+        metadata: JSON.stringify({ account: 'personal' }),
+      },
+    ];
+    const updateRun = vi.fn().mockReturnValue({ changes: 2 });
+    const fakeDb = {
+      prepare: vi
+        .fn()
+        // First prepare() = SELECT
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue(rows) })
+        // Second prepare() = UPDATE
+        .mockReturnValueOnce({ run: updateRun }),
+    } as any;
+    const deps = { ...makeDeps(), db: fakeDb };
+
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
+
+    expect(deps.gmailOps!.archiveThread).toHaveBeenCalledTimes(2);
+    expect(updateRun).toHaveBeenCalled();
+    expect(dailyDigest.postArchiveDashboard).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ toast: '🗂 Archived 2' });
+  });
+
+  it('triage:archive_all surfaces failed Gmail calls in the toast', async () => {
+    const dailyDigest = await import('../daily-digest.js');
+    (dailyDigest.postArchiveDashboard as any).mockClear();
+
+    const rows = [
+      {
+        id: 'i1',
+        source: 'gmail',
+        thread_id: 't1',
+        metadata: JSON.stringify({ account: 'personal' }),
+      },
+      {
+        id: 'i2',
+        source: 'gmail',
+        thread_id: 't2',
+        metadata: JSON.stringify({ account: 'personal' }),
+      },
+    ];
+    const updateRun = vi.fn().mockReturnValue({ changes: 1 });
+    const fakeDb = {
+      prepare: vi
+        .fn()
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue(rows) })
+        .mockReturnValueOnce({ run: updateRun }),
+    } as any;
+    const deps = { ...makeDeps(), db: fakeDb };
+    // First call succeeds, second blows up.
+    (deps.gmailOps!.archiveThread as any)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Gmail 503'));
+
+    const result = await handleCallback(makeQuery('triage:archive_all'), deps);
+
+    expect(result).toEqual({ toast: '🗂 Archived 1 · ⚠️ 1 failed' });
   });
 });
 
