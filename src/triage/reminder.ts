@@ -73,15 +73,25 @@ async function withTimeout<T>(
 }
 
 /**
+ * Cluster key for grouping near-duplicate titles into one reminder.
+ * Lowercases, collapses whitespace, and replaces digit runs with `#` so
+ * "Build #1234 failed" and "Build #1235 failed" reduce to the same key.
+ */
+function clusterKey(title: string): string {
+  return title.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Scan tracked_items for attention-queue items that are still open
  * (state IN ('pushed','pending')) and older than `windowHours` since detection,
- * and that have never been reminded. For each one, send a single Telegram
- * reminder and stamp `reminded_at` so we never re-send.
+ * and that have never been reminded. Cluster near-duplicate titles and send
+ * one consolidated reminder per cluster, stamping `reminded_at` on every row
+ * in the cluster so we never re-send.
  *
  * For gmail-sourced rows with `opts.gmailOps` supplied, the thread's INBOX
- * status is checked synchronously before sending — if it's already out of
+ * status is checked synchronously before clustering — if it's already out of
  * INBOX (archived elsewhere) or the user replied in-thread, the row is
- * resolved in place and no reminder fires.
+ * resolved in place and excluded from any reminder.
  */
 export async function runAttentionReminderSweep(
   opts: ReminderSweepOpts,
@@ -103,10 +113,16 @@ export async function runAttentionReminderSweep(
     )
     .all(cutoff) as CandidateRow[];
 
+  if (rows.length === 0) return;
+
+  // Group by normalized title so N similar items become one reminder.
+  // Gmail-sourced rows get a synchronous INBOX precheck first — rows that
+  // are already handled are resolved in place and excluded from clustering.
+  const clusters = new Map<string, { title: string; ids: string[] }>();
   for (const r of rows) {
     // Synchronous Gmail INBOX precheck for gmail-sourced rows. We trust
     // a definitive Gmail response over the local cached state. On error
-    // or timeout we fall through to the reminder — suppressing a real
+    // or timeout we fall through to clustering — suppressing a real
     // reminder due to a transient Gmail outage is the worse failure mode.
     if (opts.gmailOps && r.source === 'gmail' && r.thread_id) {
       const account = parseAccount(r.metadata);
@@ -157,27 +173,40 @@ export async function runAttentionReminderSweep(
       }
     }
 
-    // Claim the item via CAS: only reminded_at=NULL rows get stamped. If two
-    // sweeps (or a restarted process) see the same row, only one wins.
+    const key = clusterKey(r.title);
+    const existing = clusters.get(key);
+    if (existing) existing.ids.push(r.id);
+    else clusters.set(key, { title: r.title, ids: [r.id] });
+  }
+
+  const db = getDb();
+
+  for (const cluster of clusters.values()) {
+    // Atomic CAS: stamp every row in the cluster, count how many we won.
     // Stamping BEFORE the send means a crash mid-send means we skip the
-    // reminder — preferable to double-reminding the user.
-    const claim = getDb()
+    // reminder — preferable to double-reminding the user. A concurrent
+    // sweep claiming some of these IDs is also handled: we only send a
+    // reminder reflecting the rows we actually won.
+    const placeholders = cluster.ids.map(() => '?').join(',');
+    const result = db
       .prepare(
         `UPDATE tracked_items SET reminded_at = ?
-         WHERE id = ? AND reminded_at IS NULL`,
+         WHERE id IN (${placeholders}) AND reminded_at IS NULL`,
       )
-      .run(Date.now(), r.id);
-    if (claim.changes !== 1) continue;
+      .run(Date.now(), ...cluster.ids);
+    const won = result.changes;
+    if (won === 0) continue;
+
+    const text =
+      won > 1
+        ? `⏰ ${won} still waiting: *${cluster.title}*`
+        : `⏰ Still waiting on you: *${cluster.title}*`;
 
     try {
-      await sendTelegramMessage(
-        chatId,
-        `⏰ Still waiting on you: *${r.title}*`,
-        { parse_mode: 'Markdown' },
-      );
+      await sendTelegramMessage(chatId, text, { parse_mode: 'Markdown' });
     } catch (err) {
       logger.warn(
-        { err: String(err), itemId: r.id },
+        { err: String(err), clusterTitle: cluster.title, count: won },
         'Triage: failed to send attention reminder (already marked reminded)',
       );
     }
