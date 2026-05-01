@@ -1,0 +1,126 @@
+# Risk classification rules for the path classifier.
+#
+# Consumed by topcoder1/ci-workflows/.github/workflows/pr-classify.yml. The
+# classifier resolves to the HIGHEST class matched by any changed file:
+#   blocked > sensitive > standard > safe_test > safe_deps > safe_config > trivial
+#
+# Files matching no pattern fall through to `standard` (gets normal Claude
+# review pipeline, no Codex). `sensitive` triggers an extra Codex review for
+# vendor diversity on high-impact code paths.
+#
+# === CUSTOMIZE THE `sensitive:` LIST FOR THIS REPO ===
+# The starter list below catches generic high-risk patterns. Add the
+# repo-specific paths where bugs actually hurt: api, db, schema, scanning,
+# auth, billing, customer-facing classification logic, etc.
+#
+# When adding a sensitive path, also add it to .github/CODEOWNERS so the
+# CODEOWNER human-review gate matches the auto-merge gate. Drift between
+# the two files defeats the purpose.
+
+blocked:
+  - 'Dockerfile*'
+  - 'docker-compose*.yaml'
+  - 'docker-compose*.yml'
+  - '**/.env*'
+  - '**/secrets*'
+  - '.github/workflows/**'
+  - '.github/risk-paths.yml'
+  - '.github/CODEOWNERS'
+  - 'infra/**'
+  - 'terraform/**'
+  - 'k8s/**'
+
+sensitive:
+  # Security & trust boundaries — bypass = privilege escalation
+  - 'src/trust-*.ts'
+  - 'src/auto-approval.ts'
+  - 'src/qa-approval.ts'
+  - 'src/sender-allowlist.ts'
+  - 'src/mount-security.ts'
+  - 'src/ipc-auth.ts'
+  - 'src/ipc.ts'
+
+  # Container runtime — escapes here = full host access
+  - 'src/container-runner.ts'
+  - 'src/container-runtime.ts'
+  - 'container/**'
+
+  # Code signing / release pipeline
+  - 'src/signer/**'
+
+  # External service auth (token handling, OAuth flows)
+  - 'src/gmail-token-refresh.ts'
+  - 'src/gmail-ops.ts'
+  - 'src/calendar-ops.ts'
+  - 'src/whatsapp-auth.ts'
+  - 'src/drive-fetcher.ts'
+
+  # Database schema / migrations — data loss risk
+  - 'src/db.ts'
+  - 'src/db-migration.ts'
+
+  # LLM call surface — prompt injection / cost overrun risk
+  - 'src/llm/**'
+  - 'src/brain/**'
+
+  # Classification & routing — silent misclassification = customer-impacting bug
+  - 'src/classification.ts'
+  - 'src/classification-adjustments.ts'
+  - 'src/message-classifier.ts'
+  - 'src/triage/**'
+  - 'src/router.ts'
+  - 'src/event-router.ts'
+
+  # Remote control surface — anything that drives the agent from outside
+  - 'src/remote-control.ts'
+  - 'src/webhook-consumer.ts'
+
+# safe_test: failing tests can't ship; passing tests can't break runtime.
+safe_test:
+  - 'tests/**'
+  - '**/test_*.py'
+  - '**/*_test.py'
+  - '**/*.test.ts'
+  - '**/*.test.js'
+  - '**/*.spec.ts'
+  - '**/*.spec.js'
+  - '**/__tests__/**'
+
+# safe_deps: dependency manifests. Dependabot patch+minor are auto-merged
+# separately; humans editing manifests may add/remove deps semantically
+# but those still get the standard Claude review pipeline.
+safe_deps:
+  - 'pyproject.toml'
+  - 'uv.lock'
+  - 'requirements*.txt'
+  - 'package.json'
+  - 'package-lock.json'
+  - 'pnpm-lock.yaml'
+  - 'go.mod'
+  - 'go.sum'
+  - 'Cargo.toml'
+  - 'Cargo.lock'
+  - 'Gemfile'
+  - 'Gemfile.lock'
+
+# safe_config: tooling only; failures surface in lint/check immediately.
+safe_config:
+  - 'ruff.toml'
+  - '.ruff.toml'
+  - 'pre-commit*.yaml'
+  - '.pre-commit-config.yaml'
+  - '.editorconfig'
+  - '.vscode/**'
+  - 'mypy.ini'
+  - 'pytest.ini'
+  - 'eslint.config.*'
+  - 'prettier.*'
+  - '.prettierrc*'
+
+# trivial: zero runtime impact.
+trivial:
+  - '**/*.md'
+  - 'LICENSE'
+  - '.gitignore'
+  - '.github/ISSUE_TEMPLATE/**'
+  - 'docs/**'
