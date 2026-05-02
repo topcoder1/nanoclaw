@@ -34,23 +34,49 @@ describe('isTransientAgentError', () => {
     expect(isTransientAgentError('Unable to connect to API')).toBe(true);
   });
 
-  it('does NOT classify a Docker-daemon-down error as transient', () => {
+  it('classifies a Docker-daemon-down error as transient (recovers next batch)', () => {
     const err =
       'Container exited with code 1: Cannot connect to the Docker daemon at unix:///Users/topcoder1/.docker/run/docker.sock. Is the docker daemon running?';
-    expect(isTransientAgentError(err)).toBe(false);
+    expect(isTransientAgentError(err)).toBe(true);
   });
 
-  it('does NOT classify a "Container timed out" error as transient', () => {
+  it('classifies a "Container timed out" error as transient (idle-timeout cleanup, not an agent bug)', () => {
     expect(isTransientAgentError('Container timed out after 1800000ms')).toBe(
-      false,
+      true,
     );
   });
 
-  it('does NOT classify a JSON parse error as transient', () => {
+  it('classifies SIGKILL (code 137) cleanup as transient', () => {
+    expect(
+      isTransientAgentError('Container exited with code 137: <stderr tail>'),
+    ).toBe(true);
+  });
+
+  it('classifies mount/permission race (operation not permitted) as transient', () => {
+    expect(
+      isTransientAgentError(
+        "Container exited with code 125: error while creating mount source path '/Users/topcoder1/Library/Application Support/AddressBook': mkdir … operation not permitted",
+      ),
+    ).toBe(true);
+  });
+
+  it('classifies a container-output parse error as transient (torn-down container mid-stream)', () => {
     expect(
       isTransientAgentError(
         'Failed to parse container output: Unexpected token',
       ),
+    ).toBe(true);
+  });
+
+  it('does NOT classify a generic budget-ceiling error as transient', () => {
+    expect(isTransientAgentError('Agent blocked by budget ceiling')).toBe(
+      false,
+    );
+  });
+
+  it('does NOT classify an arbitrary container exit code as transient', () => {
+    expect(
+      isTransientAgentError('Container exited with code 1: <stderr tail>'),
     ).toBe(false);
   });
 
