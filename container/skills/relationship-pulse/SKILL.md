@@ -11,6 +11,7 @@ Weekly check on relationship health. Runs with the weekly review.
 ## How to Update contact_activity
 
 During email processing, after handling each email:
+
 - Call upsertContactActivity via IPC for sender (inbound) and recipients (outbound)
 - The table accumulates automatically over time
 

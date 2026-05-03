@@ -29,15 +29,15 @@ CREATE TABLE IF NOT EXISTS ux_config (
 
 ### 1.2 Tunables
 
-| Key | Type | Default | Effect |
-|-----|------|---------|--------|
-| `batcher.maxItems` | number | `5` | Flush batcher after N items |
-| `batcher.maxWaitMs` | number | `10000` | Debounce window in ms |
-| `enrichment.maxBodyLength` | number | `200` | Skip drafts longer than this |
-| `enrichment.maxAgeMinutes` | number | `30` | Skip drafts older than this |
-| `enrichment.timeoutMs` | number | `60000` | Agent timeout for enrichment |
-| `enrichment.prompt` | string | (see §3) | Draft enrichment prompt template |
-| `classifier.rules` | JSON | (see §1.3) | Classification rules array |
+| Key                        | Type   | Default    | Effect                           |
+| -------------------------- | ------ | ---------- | -------------------------------- |
+| `batcher.maxItems`         | number | `5`        | Flush batcher after N items      |
+| `batcher.maxWaitMs`        | number | `10000`    | Debounce window in ms            |
+| `enrichment.maxBodyLength` | number | `200`      | Skip drafts longer than this     |
+| `enrichment.maxAgeMinutes` | number | `30`       | Skip drafts older than this      |
+| `enrichment.timeoutMs`     | number | `60000`    | Agent timeout for enrichment     |
+| `enrichment.prompt`        | string | (see §3)   | Draft enrichment prompt template |
+| `classifier.rules`         | JSON   | (see §1.3) | Classification rules array       |
 
 ### 1.3 Classifier Rules Format
 
@@ -74,7 +74,12 @@ export class UxConfig {
   reset(key: string): void;
 
   /** List all config keys with current values */
-  list(): Array<{ key: string; value: string; default: string; updatedAt: string }>;
+  list(): Array<{
+    key: string;
+    value: string;
+    default: string;
+    updatedAt: string;
+  }>;
 
   /** Seed defaults on startup (INSERT OR IGNORE) */
   seedDefaults(): void;
@@ -82,6 +87,7 @@ export class UxConfig {
 ```
 
 Validation rules per key:
+
 - Number keys: must parse as finite number, must be > 0
 - `classifier.rules`: must parse as valid JSON array, each entry must have `patterns` (string[]), `category`, `urgency`, `batchable`
 - `enrichment.prompt`: must contain `{body}` placeholder
@@ -129,11 +135,13 @@ classifier.rules: [6 rules] (default)
 ```
 
 **`config set <key> <value>`** — Updates the value:
+
 - Validates type and range
 - On success: `✅ Set batcher.maxItems = 10`
 - On failure: `❌ Invalid value for batcher.maxItems: must be a positive number`
 
 **`config reset <key>`** — Resets to default:
+
 - `✅ Reset batcher.maxItems to default (5)`
 
 ### 2.3 Security
@@ -165,13 +173,13 @@ Instructions:
 
 ### 3.2 Template Variables
 
-| Variable | Source |
-|----------|--------|
-| `{subject}` | `draft.subject` |
+| Variable     | Source           |
+| ------------ | ---------------- |
+| `{subject}`  | `draft.subject`  |
 | `{threadId}` | `draft.threadId` |
-| `{body}` | `draft.body` |
-| `{account}` | `draft.account` |
-| `{draftId}` | `draft.draftId` |
+| `{body}`     | `draft.body`     |
+| `{account}`  | `draft.account`  |
+| `{draftId}`  | `draft.draftId`  |
 
 Simple string replacement via `template.replace(/\{(\w+)\}/g, ...)`.
 
@@ -220,12 +228,12 @@ Each check wraps in try/catch. A failing check doesn't stop the remaining checks
 
 ## 5. File Structure
 
-| File | Responsibility |
-|------|---------------|
-| `src/ux-config.ts` | DB-backed config read/write/validate |
-| `src/chat-commands.ts` | Parse and execute config/smoketest commands |
-| `src/message-classifier.ts` | Accept optional rules parameter |
-| `src/index.ts` | Wire commands, pass UxConfig to consumers |
+| File                        | Responsibility                              |
+| --------------------------- | ------------------------------------------- |
+| `src/ux-config.ts`          | DB-backed config read/write/validate        |
+| `src/chat-commands.ts`      | Parse and execute config/smoketest commands |
+| `src/message-classifier.ts` | Accept optional rules parameter             |
+| `src/index.ts`              | Wire commands, pass UxConfig to consumers   |
 
 ## 6. Testing Strategy
 

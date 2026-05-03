@@ -23,6 +23,7 @@ Format: a JSON block in your final response.
 ```
 
 **Rules:**
+
 - Only emit after a **successful** multi-step task
 - `trigger` should be a short, natural-language phrase (e.g., "check PR status", "summarize inbox")
 - `action` values should match the tool or IPC type used (e.g., `github_api`, `browser_navigate`, `send_message`)
@@ -42,6 +43,7 @@ Format: a JSON block in your final response.
 ```
 
 **Rules:**
+
 - Keep it under 200 characters
 - Only emit if you actually discovered something new — do not fabricate lessons
 - One lesson per task at most

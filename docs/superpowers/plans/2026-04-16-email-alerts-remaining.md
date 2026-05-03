@@ -14,12 +14,12 @@
 
 The four items live in independent subsystems:
 
-| Track | Item | Subsystem | Est. effort |
-|-------|------|-----------|-------------|
-| A | 3.1 Mini-app reply/forward | `src/mini-app/` + Gmail MCP | ~1 day (design + build) |
-| B | 3.2 WhatsApp stale-Chrome auto-remediate | `setup/` + `src/channels/whatsapp/` | ~3 hr |
-| C | `OPENAI_API_KEY` → semantic search | `src/memory/knowledge-store.ts` + `src/llm/utility.ts` | ~2 hr |
-| D | Browser sidecar startup grace | `src/container-runtime.ts` + `src/browser/playwright-client.ts` | ~1 hr |
+| Track | Item                                     | Subsystem                                                       | Est. effort             |
+| ----- | ---------------------------------------- | --------------------------------------------------------------- | ----------------------- |
+| A     | 3.1 Mini-app reply/forward               | `src/mini-app/` + Gmail MCP                                     | ~1 day (design + build) |
+| B     | 3.2 WhatsApp stale-Chrome auto-remediate | `setup/` + `src/channels/whatsapp/`                             | ~3 hr                   |
+| C     | `OPENAI_API_KEY` → semantic search       | `src/memory/knowledge-store.ts` + `src/llm/utility.ts`          | ~2 hr                   |
+| D     | Browser sidecar startup grace            | `src/container-runtime.ts` + `src/browser/playwright-client.ts` | ~1 hr                   |
 
 **Recommended execution order:** D → C → B → A (smallest/lowest-risk first, biggest UX last).
 
@@ -32,6 +32,7 @@ The four items live in independent subsystems:
 **Problem:** First health check after `docker compose up -d` occasionally fails because the Chrome CDP port isn't listening yet. Subsequent checks pass. Current behavior is a one-time startup flake logged as an error.
 
 **Files:**
+
 - Modify: `src/container-runtime.ts:123-138` (`ensureBrowserSidecar`)
 - Modify: `src/browser/playwright-client.ts:15-27` (`connect`)
 - Test: `src/browser/playwright-client.test.ts` (create)
@@ -50,7 +51,10 @@ describe('waitForSidecarReady', () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ Browser: 'Chromium/1' }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ Browser: 'Chromium/1' }),
+      });
     const ok = await waitForSidecarReady('http://localhost:9222', {
       fetchImpl: fetchMock as unknown as typeof fetch,
       timeoutMs: 5000,
@@ -144,13 +148,20 @@ export async function ensureBrowserSidecar(): Promise<void> {
     );
     return;
   }
-  const { waitForSidecarReady } = await import('./browser/playwright-client.js');
+  const { waitForSidecarReady } =
+    await import('./browser/playwright-client.js');
   const cdpUrl = process.env.BROWSER_CDP_URL ?? 'http://localhost:9222';
-  const ready = await waitForSidecarReady(cdpUrl, { timeoutMs: 15_000, intervalMs: 250 });
+  const ready = await waitForSidecarReady(cdpUrl, {
+    timeoutMs: 15_000,
+    intervalMs: 250,
+  });
   if (ready) {
     logger.info('Browser sidecar started and CDP is ready');
   } else {
-    logger.warn({ cdpUrl }, 'Browser sidecar started but CDP did not respond within 15s');
+    logger.warn(
+      { cdpUrl },
+      'Browser sidecar started but CDP did not respond within 15s',
+    );
   }
 }
 ```
@@ -182,9 +193,10 @@ git commit -m "feat(browser): gate sidecar start on CDP readiness (eliminates fi
 
 **Problem:** `src/memory/knowledge-store.ts` uses SQLite FTS5. `QdrantClient` is imported but unused. The "Add `OPENAI_API_KEY`" follow-up wants vector search available when the key is present, with FTS5 as the fallback.
 
-**Scope guard:** Do NOT replace FTS5. Add a *parallel* semantic path that is used only when both (a) `OPENAI_API_KEY` is set and (b) Qdrant is reachable. Otherwise the existing FTS5 path is used.
+**Scope guard:** Do NOT replace FTS5. Add a _parallel_ semantic path that is used only when both (a) `OPENAI_API_KEY` is set and (b) Qdrant is reachable. Otherwise the existing FTS5 path is used.
 
 **Files:**
+
 - Modify: `src/memory/knowledge-store.ts` (add `queryFactsSemantic`, gate in `queryFacts`)
 - Modify: `src/llm/utility.ts` (export a reusable `embedText(text)` helper)
 - Test: `src/memory/knowledge-store.semantic.test.ts` (create)
@@ -286,7 +298,10 @@ In `src/memory/knowledge-store.ts`:
 ```ts
 import { embedText, isEmbeddingAvailable } from '../llm/utility.js';
 
-export async function queryFacts(q: string, opts: QueryFactsOpts = {}): Promise<Fact[]> {
+export async function queryFacts(
+  q: string,
+  opts: QueryFactsOpts = {},
+): Promise<Fact[]> {
   if (isEmbeddingAvailable()) {
     try {
       const vec = await embedText(q);
@@ -299,7 +314,7 @@ export async function queryFacts(q: string, opts: QueryFactsOpts = {}): Promise<
 }
 ```
 
-Then rename the existing body of `queryFacts` to `queryFactsFts` and add a new `queryFactsSemantic` that calls `QdrantClient.search(...)`. Collection name: `knowledge_facts`. Upsert on `storeFact` in a parallel task if that collection doesn't exist yet — keep this task's scope to *query* only; if the collection is empty, Qdrant returns `[]` and the caller still sees FTS5 results via the catch.
+Then rename the existing body of `queryFacts` to `queryFactsFts` and add a new `queryFactsSemantic` that calls `QdrantClient.search(...)`. Collection name: `knowledge_facts`. Upsert on `storeFact` in a parallel task if that collection doesn't exist yet — keep this task's scope to _query_ only; if the collection is empty, Qdrant returns `[]` and the caller still sees FTS5 results via the catch.
 
 Actually — to keep the fallback clean, make the semantic branch catch "collection not found" and fall through to FTS5.
 
@@ -339,7 +354,7 @@ git commit -m "feat(memory): upsert facts to Qdrant when embeddings are availabl
 
 ## Track B — WhatsApp `/setup` Auto-Remediate Stale Chrome Entries
 
-**Problem:** When `/setup` pairs WhatsApp, stale Chrome entries in Baileys state can silently poison pairing (user ends up with repeated QR regeneration or a zombie session). Remediation is manual today. We want `/setup` to *detect* staleness and either auto-clean or prompt the user.
+**Problem:** When `/setup` pairs WhatsApp, stale Chrome entries in Baileys state can silently poison pairing (user ends up with repeated QR regeneration or a zombie session). Remediation is manual today. We want `/setup` to _detect_ staleness and either auto-clean or prompt the user.
 
 ### Task B1 (REQUIRED): Brainstorm staleness criteria
 
@@ -363,7 +378,7 @@ Once B1 produces concrete criteria, add `detectStaleWhatsAppState()` to `setup/w
 
 ## Track A — Mini-App UX Polish: Reply / Forward
 
-**Problem:** The mini-app's email viewer currently has two buttons: `Archive` and `Open in Gmail` ([email-full.ts:54-55](src/mini-app/templates/email-full.ts:54)). Phase 3 wants *Reply* and *Forward* working inline, not as a redirect to Gmail.
+**Problem:** The mini-app's email viewer currently has two buttons: `Archive` and `Open in Gmail` ([email-full.ts:54-55](src/mini-app/templates/email-full.ts:54)). Phase 3 wants _Reply_ and _Forward_ working inline, not as a redirect to Gmail.
 
 ### Task A1 (REQUIRED): Design brainstorm
 
@@ -371,7 +386,7 @@ Once B1 produces concrete criteria, add `detectStaleWhatsAppState()` to `setup/w
   - **Reply UX:** inline textarea below the email? Full-page composer? Quoted-body default or blank?
   - **Forward UX:** how is the recipient entered? Autocomplete from contacts? Plain input?
   - **Send path:** does the mini-app POST to the nanoclaw server, which then uses `gmail-{alias}` MCP? Or does it piggyback on an existing send endpoint?
-  - **Auth:** how does the mini-app know *which* Gmail account to send from? (Route from the email's `to:` back to the alias.)
+  - **Auth:** how does the mini-app know _which_ Gmail account to send from? (Route from the email's `to:` back to the alias.)
   - **Errors:** network failure, send rejection, rate-limit — what does the user see?
   - **Draft autosave:** out of scope for v1 — confirm deferred.
 
@@ -408,5 +423,5 @@ Expand with full TDD steps after A1 is landed. Skeleton:
 
 - **Landing order:** D → C → B → A. Each track is its own PR.
 - **Do not** start Track A or B without first landing the brainstorm notes commit.
-- **Do not** bundle Track C with a refactor to *replace* FTS5; that's a separate, bigger migration.
+- **Do not** bundle Track C with a refactor to _replace_ FTS5; that's a separate, bigger migration.
 - **Visual verification** (Telegram buttons test from the previous session) is user-side and not blocked by this plan — proceed in parallel.

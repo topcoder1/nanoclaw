@@ -26,11 +26,11 @@
 
 ## File Map
 
-| File | Changes |
-|------|---------|
-| `src/gmail-token-refresh.ts` | Task 1 — add `startGmailRefreshLoop()`, alert callback |
-| `src/gmail-token-refresh.test.ts` | Task 1 — test the loop and alert logic |
-| `src/index.ts` | Task 2 — wire up the loop at startup |
+| File                              | Changes                                                |
+| --------------------------------- | ------------------------------------------------------ |
+| `src/gmail-token-refresh.ts`      | Task 1 — add `startGmailRefreshLoop()`, alert callback |
+| `src/gmail-token-refresh.test.ts` | Task 1 — test the loop and alert logic                 |
+| `src/index.ts`                    | Task 2 — wire up the loop at startup                   |
 
 ---
 
@@ -39,6 +39,7 @@
 **Problem:** Tokens expire between container spawns. Need a periodic background refresh.
 
 **Files:**
+
 - Modify: `src/gmail-token-refresh.ts`
 - Modify: `src/gmail-token-refresh.test.ts`
 
@@ -50,9 +51,8 @@ Add to `src/gmail-token-refresh.test.ts`:
 describe('startGmailRefreshLoop', () => {
   it('should call refreshGmailTokens periodically', async () => {
     vi.useFakeTimers();
-    const { startGmailRefreshLoop, stopGmailRefreshLoop } = await import(
-      './gmail-token-refresh.js'
-    );
+    const { startGmailRefreshLoop, stopGmailRefreshLoop } =
+      await import('./gmail-token-refresh.js');
 
     // Start the loop with a short interval for testing
     startGmailRefreshLoop({ intervalMs: 1000 });
@@ -70,9 +70,8 @@ describe('startGmailRefreshLoop', () => {
   it('should invoke onAuthExpired callback on permanent failure', async () => {
     vi.useFakeTimers();
     const onAuthExpired = vi.fn();
-    const { startGmailRefreshLoop, stopGmailRefreshLoop } = await import(
-      './gmail-token-refresh.js'
-    );
+    const { startGmailRefreshLoop, stopGmailRefreshLoop } =
+      await import('./gmail-token-refresh.js');
 
     startGmailRefreshLoop({
       intervalMs: 1000,
@@ -137,10 +136,7 @@ export function startGmailRefreshLoop(
   const intervalMs = options.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
   const onAuthExpired = options.onAuthExpired;
 
-  logger.info(
-    { intervalMs },
-    'Gmail token refresh loop started',
-  );
+  logger.info({ intervalMs }, 'Gmail token refresh loop started');
 
   refreshTimer = setInterval(() => {
     void refreshGmailTokens().then((result) => {
@@ -213,6 +209,7 @@ failures (revoked tokens) so the user knows to re-auth."
 **Problem:** The loop exists but isn't started. Need to wire it into the NanoClaw startup and route auth-failure alerts to the user's primary channel.
 
 **Files:**
+
 - Modify: `src/index.ts` (startup section)
 
 - [ ] **Step 1: Find the startup section in index.ts**
@@ -224,31 +221,34 @@ Look for where channels connect, scheduled tasks start, and other background ser
 In `src/index.ts`, add to the existing import from `gmail-token-refresh.js`:
 
 ```typescript
-import { refreshGmailTokens, startGmailRefreshLoop } from './gmail-token-refresh.js';
+import {
+  refreshGmailTokens,
+  startGmailRefreshLoop,
+} from './gmail-token-refresh.js';
 ```
 
 Then, after channels are connected and the main group is known (look for where `startDealWatchLoop` or `startTaskScheduler` is called), add:
 
-```typescript
-  // Keep Gmail OAuth tokens fresh in the background. Tokens expire every
-  // 60 min; this loop refreshes every 45 min so agents never see expired
-  // tokens. Alerts the user via their primary channel if a token needs
-  // manual re-authorization (invalid_grant from Google).
-  startGmailRefreshLoop({
-    onAuthExpired: (summary) => {
-      const mainJid = findMainGroupJid(registeredGroups);
-      if (mainJid) {
-        const alertMsg =
-          `⚠️ Gmail auth expired — I can't access email until you re-authorize.\n\n` +
-          `Run on your Mac:\n` +
-          '```\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n```\n\n' +
-          `Details: ${summary}`;
-        void sendToChannel(mainJid, alertMsg);
-      }
-      logger.warn({ summary }, 'Gmail OAuth expired — user alert sent');
-    },
-  });
-```
+````typescript
+// Keep Gmail OAuth tokens fresh in the background. Tokens expire every
+// 60 min; this loop refreshes every 45 min so agents never see expired
+// tokens. Alerts the user via their primary channel if a token needs
+// manual re-authorization (invalid_grant from Google).
+startGmailRefreshLoop({
+  onAuthExpired: (summary) => {
+    const mainJid = findMainGroupJid(registeredGroups);
+    if (mainJid) {
+      const alertMsg =
+        `⚠️ Gmail auth expired — I can't access email until you re-authorize.\n\n` +
+        `Run on your Mac:\n` +
+        '```\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n```\n\n' +
+        `Details: ${summary}`;
+      void sendToChannel(mainJid, alertMsg);
+    }
+    logger.warn({ summary }, 'Gmail OAuth expired — user alert sent');
+  },
+});
+````
 
 Note: `findMainGroupJid` and `sendToChannel` (or equivalent) should already exist in index.ts. Use whatever the existing pattern is for sending messages to the main group. Check how the budget ceiling alert or error notifications are sent for the exact function signature.
 

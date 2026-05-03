@@ -11,6 +11,7 @@ When the user says "teach: [procedure name]", activate teach mode:
 ## Procedure Format
 
 Each step has:
+
 - action: navigate | click | find | type | extract | wait
 - target: URL, selector, or text
 - description: human-readable description

@@ -16,40 +16,41 @@
 
 ### New Files
 
-| File | Responsibility |
-|------|---------------|
-| `src/message-classifier.ts` | Rule-based classifier: pattern match on content/sender to assign category, urgency, batchable, actions |
-| `src/message-formatter.ts` | Takes `MessageMeta` + raw text → channel-formatted output (HTML for Telegram) |
-| `src/question-detector.ts` | Detects question patterns in outbound text, returns button configs |
-| `src/message-batcher.ts` | Holds `auto-handled` + `info` items in buffer, flushes on count/time/priority triggers |
-| `src/status-bar.ts` | `StatusBarManager` event consumer — maintains pinned status message via edit-in-place |
-| `src/auto-approval.ts` | `AutoApprovalTimer` — countdown timers for silence-means-approval on urgent plans |
-| `src/failure-escalator.ts` | `FailureEscalator` — sends loud failure messages with retry/escalate buttons |
-| `src/email-preview.ts` | Gmail API fetch + cache for email body preview/expansion |
-| `src/archive-tracker.ts` | Post-action archive flow: tracks acted emails, batch sweep for morning digest |
-| `src/draft-enrichment.ts` | `DraftEnrichmentWatcher` — detects SuperPilot drafts, evaluates enrichment, modifies via Gmail API |
-| `src/mini-app/server.ts` | Express server serving task detail HTML pages + API endpoints |
-| `src/mini-app/templates/task-detail.ts` | HTML template function for task detail page |
-| `src/mini-app/templates/email-full.ts` | HTML template function for full email view |
+| File                                    | Responsibility                                                                                         |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/message-classifier.ts`             | Rule-based classifier: pattern match on content/sender to assign category, urgency, batchable, actions |
+| `src/message-formatter.ts`              | Takes `MessageMeta` + raw text → channel-formatted output (HTML for Telegram)                          |
+| `src/question-detector.ts`              | Detects question patterns in outbound text, returns button configs                                     |
+| `src/message-batcher.ts`                | Holds `auto-handled` + `info` items in buffer, flushes on count/time/priority triggers                 |
+| `src/status-bar.ts`                     | `StatusBarManager` event consumer — maintains pinned status message via edit-in-place                  |
+| `src/auto-approval.ts`                  | `AutoApprovalTimer` — countdown timers for silence-means-approval on urgent plans                      |
+| `src/failure-escalator.ts`              | `FailureEscalator` — sends loud failure messages with retry/escalate buttons                           |
+| `src/email-preview.ts`                  | Gmail API fetch + cache for email body preview/expansion                                               |
+| `src/archive-tracker.ts`                | Post-action archive flow: tracks acted emails, batch sweep for morning digest                          |
+| `src/draft-enrichment.ts`               | `DraftEnrichmentWatcher` — detects SuperPilot drafts, evaluates enrichment, modifies via Gmail API     |
+| `src/mini-app/server.ts`                | Express server serving task detail HTML pages + API endpoints                                          |
+| `src/mini-app/templates/task-detail.ts` | HTML template function for task detail page                                                            |
+| `src/mini-app/templates/email-full.ts`  | HTML template function for full email view                                                             |
 
 ### Modified Files
 
-| File | Changes |
-|------|---------|
-| `src/types.ts` | Add `MessageMeta`, `MessageCategory`, `MessageUrgency`, `ActionStyle` types; extend `Action` with `style` and `confirmRequired` |
-| `src/events.ts` | Add 7 new event types + `EventMap` entries |
-| `src/event-bus.ts` | No changes — existing API is sufficient |
-| `src/db.ts` | Add `task_detail_state` and `acted_emails` tables |
-| `src/router.ts` | Wire classifier + formatter into `formatOutbound()` pipeline; add `routeOutboundWithMeta()` |
-| `src/channels/telegram.ts` | Add `editMessageButtons()`, `sendMessageWithWebApp()`, Mini App `web_app` button support |
-| `src/index.ts` | Initialize new consumers (StatusBarManager, AutoApprovalTimer, FailureEscalator, etc.) at startup |
-| `src/daily-digest.ts` or `src/digest-engine.ts` | Add inbox cleanup section to morning digest |
+| File                                            | Changes                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types.ts`                                  | Add `MessageMeta`, `MessageCategory`, `MessageUrgency`, `ActionStyle` types; extend `Action` with `style` and `confirmRequired` |
+| `src/events.ts`                                 | Add 7 new event types + `EventMap` entries                                                                                      |
+| `src/event-bus.ts`                              | No changes — existing API is sufficient                                                                                         |
+| `src/db.ts`                                     | Add `task_detail_state` and `acted_emails` tables                                                                               |
+| `src/router.ts`                                 | Wire classifier + formatter into `formatOutbound()` pipeline; add `routeOutboundWithMeta()`                                     |
+| `src/channels/telegram.ts`                      | Add `editMessageButtons()`, `sendMessageWithWebApp()`, Mini App `web_app` button support                                        |
+| `src/index.ts`                                  | Initialize new consumers (StatusBarManager, AutoApprovalTimer, FailureEscalator, etc.) at startup                               |
+| `src/daily-digest.ts` or `src/digest-engine.ts` | Add inbox cleanup section to morning digest                                                                                     |
 
 ---
 
 ### Task 1: Types & Event Definitions
 
 **Files:**
+
 - Modify: `src/types.ts`
 - Modify: `src/events.ts`
 - Test: `src/__tests__/agentic-ux-types.test.ts`
@@ -126,9 +127,18 @@ export type MessageCategory =
   | 'account'
   | 'auto-handled';
 
-export type MessageUrgency = 'info' | 'attention' | 'action-required' | 'urgent';
+export type MessageUrgency =
+  | 'info'
+  | 'attention'
+  | 'action-required'
+  | 'urgent';
 
-export type ActionStyle = 'primary' | 'destructive-safe' | 'plan-execution' | 'secondary' | 'timed-auto';
+export type ActionStyle =
+  | 'primary'
+  | 'destructive-safe'
+  | 'plan-execution'
+  | 'secondary'
+  | 'timed-auto';
 
 export interface Action {
   label: string;
@@ -251,6 +261,7 @@ git commit -m "feat(ux): add MessageMeta types and agentic UX event definitions"
 ### Task 2: Message Classifier
 
 **Files:**
+
 - Create: `src/message-classifier.ts`
 - Test: `src/__tests__/message-classifier.test.ts`
 
@@ -425,11 +436,7 @@ const RULES: ClassificationRule[] = [
   },
   // Email — draft enrichment, SuperPilot
   {
-    patterns: [
-      /enriched.*draft/i,
-      /SuperPilot.*draft/i,
-      /draft.*enriched/i,
-    ],
+    patterns: [/enriched.*draft/i, /SuperPilot.*draft/i, /draft.*enriched/i],
     category: 'email',
     urgency: 'attention',
     batchable: false,
@@ -475,6 +482,7 @@ git commit -m "feat(ux): add rule-based message classifier"
 ### Task 3: Question Detector
 
 **Files:**
+
 - Create: `src/question-detector.ts`
 - Test: `src/__tests__/question-detector.test.ts`
 
@@ -488,7 +496,7 @@ import { detectQuestion } from '../question-detector.js';
 describe('detectQuestion', () => {
   it('detects yes/no question with "Want me to"', () => {
     const result = detectQuestion(
-      'Want me to reply yes to Florian\'s exception?',
+      "Want me to reply yes to Florian's exception?",
     );
     expect(result).not.toBeNull();
     expect(result!.type).toBe('yes-no');
@@ -505,9 +513,7 @@ describe('detectQuestion', () => {
   });
 
   it('detects financial confirmation with "expected"', () => {
-    const result = detectQuestion(
-      'Total: $54,900.00. Were both expected?',
-    );
+    const result = detectQuestion('Total: $54,900.00. Were both expected?');
     expect(result).not.toBeNull();
     expect(result!.type).toBe('financial-confirm');
     expect(result!.actions[0].label).toBe('Yes, all expected');
@@ -515,9 +521,7 @@ describe('detectQuestion', () => {
   });
 
   it('detects financial confirmation with "All expected"', () => {
-    const result = detectQuestion(
-      'Total new: $59,558.45 in. All expected?',
-    );
+    const result = detectQuestion('Total new: $59,558.45 in. All expected?');
     expect(result).not.toBeNull();
     expect(result!.type).toBe('financial-confirm');
   });
@@ -596,9 +600,21 @@ export function detectQuestion(text: string): DetectedQuestion | null {
       type: 'financial-confirm',
       questionId: qid,
       actions: [
-        { label: 'Yes, all expected', callbackData: `answer:${qid}:yes`, style: 'primary' },
-        { label: 'Not all \u2014 review', callbackData: `answer:${qid}:review`, style: 'destructive-safe' },
-        { label: 'Details \u2197', callbackData: `answer:${qid}:details`, style: 'secondary' },
+        {
+          label: 'Yes, all expected',
+          callbackData: `answer:${qid}:yes`,
+          style: 'primary',
+        },
+        {
+          label: 'Not all \u2014 review',
+          callbackData: `answer:${qid}:review`,
+          style: 'destructive-safe',
+        },
+        {
+          label: 'Details \u2197',
+          callbackData: `answer:${qid}:details`,
+          style: 'secondary',
+        },
       ],
     };
   }
@@ -611,8 +627,16 @@ export function detectQuestion(text: string): DetectedQuestion | null {
       questionId: qid,
       actions: [
         { label: 'Yes', callbackData: `answer:${qid}:yes`, style: 'primary' },
-        { label: 'No', callbackData: `answer:${qid}:no`, style: 'destructive-safe' },
-        { label: 'Let me think...', callbackData: `answer:${qid}:defer`, style: 'secondary' },
+        {
+          label: 'No',
+          callbackData: `answer:${qid}:no`,
+          style: 'destructive-safe',
+        },
+        {
+          label: 'Let me think...',
+          callbackData: `answer:${qid}:defer`,
+          style: 'secondary',
+        },
       ],
     };
   }
@@ -638,6 +662,7 @@ git commit -m "feat(ux): add question detector for auto-attaching yes/no buttons
 ### Task 4: Message Formatter
 
 **Files:**
+
 - Create: `src/message-formatter.ts`
 - Test: `src/__tests__/message-formatter.test.ts`
 
@@ -712,7 +737,11 @@ describe('formatWithMeta', () => {
   });
 
   it('formats batch of auto-handled items', () => {
-    const items = ['Newsletter A dismissed', 'Receipt B processed', 'Promo C ignored'];
+    const items = [
+      'Newsletter A dismissed',
+      'Receipt B processed',
+      'Promo C ignored',
+    ];
     const result = formatWithMeta(items.join('\n'), {
       category: 'auto-handled',
       urgency: 'info',
@@ -801,6 +830,7 @@ git commit -m "feat(ux): add message formatter with categorical icons and HTML o
 ### Task 5: Message Batcher
 
 **Files:**
+
 - Create: `src/message-batcher.ts`
 - Test: `src/__tests__/message-batcher.test.ts`
 
@@ -821,7 +851,9 @@ describe('MessageBatcher', () => {
     batcher = new MessageBatcher({
       maxItems: 5,
       maxWaitMs: 10_000,
-      onFlush: (items) => { flushed.push([...items]); },
+      onFlush: (items) => {
+        flushed.push([...items]);
+      },
     });
   });
 
@@ -889,8 +921,8 @@ Expected: FAIL — module not found
 // src/message-batcher.ts
 
 export interface MessageBatcherOpts {
-  maxItems: number;       // Flush after this many items (default: 5)
-  maxWaitMs: number;      // Flush after this many ms since first buffered item (default: 10000)
+  maxItems: number; // Flush after this many items (default: 5)
+  maxWaitMs: number; // Flush after this many ms since first buffered item (default: 10000)
   onFlush: (items: string[]) => void;
 }
 
@@ -963,6 +995,7 @@ git commit -m "feat(ux): add message batcher with count/time/priority flush trig
 ### Task 6: Database Tables
 
 **Files:**
+
 - Modify: `src/db.ts`
 - Test: `src/__tests__/agentic-ux-db.test.ts`
 
@@ -1020,9 +1053,18 @@ describe('Agentic UX DB tables', () => {
   it('inserts and queries task_detail_state', () => {
     db.prepare(
       'INSERT INTO task_detail_state (task_id, group_jid, title, steps_json, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('t1', 'tg:123', 'Spamhaus Investigation', '[]', new Date().toISOString(), new Date().toISOString());
+    ).run(
+      't1',
+      'tg:123',
+      'Spamhaus Investigation',
+      '[]',
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
 
-    const row = db.prepare('SELECT * FROM task_detail_state WHERE task_id = ?').get('t1') as Record<string, unknown>;
+    const row = db
+      .prepare('SELECT * FROM task_detail_state WHERE task_id = ?')
+      .get('t1') as Record<string, unknown>;
     expect(row.title).toBe('Spamhaus Investigation');
     expect(row.status).toBe('active');
   });
@@ -1030,9 +1072,17 @@ describe('Agentic UX DB tables', () => {
   it('inserts and queries acted_emails', () => {
     db.prepare(
       'INSERT INTO acted_emails (email_id, thread_id, account, action_taken, acted_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('msg_1', 'thread_1', 'personal', 'confirmed', new Date().toISOString());
+    ).run(
+      'msg_1',
+      'thread_1',
+      'personal',
+      'confirmed',
+      new Date().toISOString(),
+    );
 
-    const rows = db.prepare('SELECT * FROM acted_emails WHERE archived_at IS NULL').all();
+    const rows = db
+      .prepare('SELECT * FROM acted_emails WHERE archived_at IS NULL')
+      .all();
     expect(rows).toHaveLength(1);
   });
 
@@ -1041,9 +1091,17 @@ describe('Agentic UX DB tables', () => {
     const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     db.prepare(
       'INSERT INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('d1', 'dev', 'original text', now.toISOString(), expires.toISOString());
+    ).run(
+      'd1',
+      'dev',
+      'original text',
+      now.toISOString(),
+      expires.toISOString(),
+    );
 
-    const row = db.prepare('SELECT * FROM draft_originals WHERE draft_id = ?').get('d1') as Record<string, unknown>;
+    const row = db
+      .prepare('SELECT * FROM draft_originals WHERE draft_id = ?')
+      .get('d1') as Record<string, unknown>;
     expect(row.original_body).toBe('original text');
   });
 });
@@ -1112,6 +1170,7 @@ git commit -m "feat(ux): add task_detail_state, acted_emails, draft_originals DB
 ### Task 7: Telegram Channel Extensions
 
 **Files:**
+
 - Modify: `src/channels/telegram.ts`
 - Test: `src/channels/telegram.test.ts` (add new tests)
 
@@ -1132,19 +1191,24 @@ describe('Telegram agentic UX extensions', () => {
 
     const chatId = '123456';
     const messageId = 789;
-    const newActions = [
-      { label: '✓ Archived', callbackData: 'noop' },
-    ];
+    const newActions = [{ label: '✓ Archived', callbackData: 'noop' }];
 
     const keyboard = {
       inline_keyboard: [
-        newActions.map((a) => ({ text: a.label, callback_data: a.callbackData })),
+        newActions.map((a) => ({
+          text: a.label,
+          callback_data: a.callbackData,
+        })),
       ],
     };
 
-    await mockApi.editMessageReplyMarkup(chatId, messageId, { reply_markup: keyboard });
+    await mockApi.editMessageReplyMarkup(chatId, messageId, {
+      reply_markup: keyboard,
+    });
     expect(mockApi.editMessageReplyMarkup).toHaveBeenCalledWith(
-      chatId, messageId, { reply_markup: keyboard },
+      chatId,
+      messageId,
+      { reply_markup: keyboard },
     );
   });
 
@@ -1250,6 +1314,7 @@ git commit -m "feat(ux): add editMessageButtons and editMessageTextAndButtons to
 ### Task 8: Router Pipeline Integration
 
 **Files:**
+
 - Modify: `src/router.ts`
 - Test: `src/router.test.ts` (add new tests)
 
@@ -1283,7 +1348,7 @@ describe('classifyAndFormat', () => {
 
   it('attaches yes/no buttons to questions', () => {
     const result = classifyAndFormat(
-      'Want me to reply yes to Florian\'s exception?',
+      "Want me to reply yes to Florian's exception?",
     );
     expect(result.meta.questionType).toBe('yes-no');
     expect(result.meta.actions).toHaveLength(3);
@@ -1325,7 +1390,16 @@ export interface ClassifiedMessage {
  */
 export function classifyAndFormat(rawText: string): ClassifiedMessage {
   const text = stripInternalTags(rawText);
-  if (!text) return { text: '', meta: { category: 'auto-handled', urgency: 'info', actions: [], batchable: true } };
+  if (!text)
+    return {
+      text: '',
+      meta: {
+        category: 'auto-handled',
+        urgency: 'info',
+        actions: [],
+        batchable: true,
+      },
+    };
 
   const meta = classifyMessage(text);
 
@@ -1359,6 +1433,7 @@ git commit -m "feat(ux): wire classifier + formatter + question detector into ro
 ### Task 9: Status Bar Manager
 
 **Files:**
+
 - Create: `src/status-bar.ts`
 - Test: `src/__tests__/status-bar.test.ts`
 
@@ -1381,7 +1456,9 @@ describe('StatusBarManager', () => {
     bus = new EventBus();
     lastUpdate = null;
     manager = new StatusBarManager(bus, {
-      onUpdate: (text) => { lastUpdate = text; },
+      onUpdate: (text) => {
+        lastUpdate = text;
+      },
     });
   });
 
@@ -1415,14 +1492,24 @@ describe('StatusBarManager', () => {
       type: 'task.started',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', containerName: 'c1', slotIndex: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        containerName: 'c1',
+        slotIndex: 0,
+      },
     } as TaskStartedEvent);
 
     bus.emit('task.complete', {
       type: 'task.complete',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', status: 'success', durationMs: 5000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        status: 'success',
+        durationMs: 5000,
+      },
     } as TaskCompleteEvent);
 
     vi.advanceTimersByTime(2000);
@@ -1578,9 +1665,12 @@ export class StatusBarManager {
 
     // Daily stats
     const stats: string[] = [];
-    if (this.autoHandledCount > 0) stats.push(`${this.autoHandledCount} auto-handled`);
-    if (this.draftsEnrichedCount > 0) stats.push(`${this.draftsEnrichedCount} drafts enriched`);
-    if (this.pendingItems.size > 0) stats.push(`${this.pendingItems.size} needs you`);
+    if (this.autoHandledCount > 0)
+      stats.push(`${this.autoHandledCount} auto-handled`);
+    if (this.draftsEnrichedCount > 0)
+      stats.push(`${this.draftsEnrichedCount} drafts enriched`);
+    if (this.pendingItems.size > 0)
+      stats.push(`${this.pendingItems.size} needs you`);
     if (this.blockedCount > 0) stats.push(`${this.blockedCount} blocked`);
 
     if (stats.length > 0) {
@@ -1616,6 +1706,7 @@ git commit -m "feat(ux): add StatusBarManager with debounced event-driven update
 ### Task 10: Auto-Approval Timer
 
 **Files:**
+
 - Create: `src/auto-approval.ts`
 - Test: `src/__tests__/auto-approval.test.ts`
 
@@ -1778,6 +1869,7 @@ git commit -m "feat(ux): add AutoApprovalTimer with silence-means-approval count
 ### Task 11: Failure Escalator
 
 **Files:**
+
 - Create: `src/failure-escalator.ts`
 - Test: `src/__tests__/failure-escalator.test.ts`
 
@@ -1793,13 +1885,18 @@ import type { TaskCompleteEvent } from '../events.js';
 describe('FailureEscalator', () => {
   let bus: EventBus;
   let escalator: FailureEscalator;
-  let lastEscalation: { text: string; actions: Array<{ label: string }> } | null;
+  let lastEscalation: {
+    text: string;
+    actions: Array<{ label: string }>;
+  } | null;
 
   beforeEach(() => {
     bus = new EventBus();
     lastEscalation = null;
     escalator = new FailureEscalator(bus, {
-      onEscalate: (text, actions) => { lastEscalation = { text, actions }; },
+      onEscalate: (text, actions) => {
+        lastEscalation = { text, actions };
+      },
     });
   });
 
@@ -1876,9 +1973,21 @@ export class FailureEscalator {
         ].join('\n');
 
         const actions: Action[] = [
-          { label: 'Retry', callbackData: `retry:${e.payload.taskId}`, style: 'primary' },
-          { label: 'View Details ↗', callbackData: `details:${e.payload.taskId}`, style: 'secondary' },
-          { label: 'Dismiss', callbackData: `dismiss:${e.payload.taskId}`, style: 'secondary' },
+          {
+            label: 'Retry',
+            callbackData: `retry:${e.payload.taskId}`,
+            style: 'primary',
+          },
+          {
+            label: 'View Details ↗',
+            callbackData: `details:${e.payload.taskId}`,
+            style: 'secondary',
+          },
+          {
+            label: 'Dismiss',
+            callbackData: `dismiss:${e.payload.taskId}`,
+            style: 'secondary',
+          },
         ];
 
         opts.onEscalate(text, actions);
@@ -1910,6 +2019,7 @@ git commit -m "feat(ux): add FailureEscalator for loud failure notifications wit
 ### Task 12: Archive Tracker
 
 **Files:**
+
 - Create: `src/archive-tracker.ts`
 - Test: `src/__tests__/archive-tracker.test.ts`
 
@@ -2019,7 +2129,9 @@ export class ArchiveTracker {
 
   getUnarchived(): ActedEmail[] {
     return this.db
-      .prepare(`SELECT * FROM acted_emails WHERE archived_at IS NULL ORDER BY acted_at DESC`)
+      .prepare(
+        `SELECT * FROM acted_emails WHERE archived_at IS NULL ORDER BY acted_at DESC`,
+      )
       .all() as ActedEmail[];
   }
 }
@@ -2042,6 +2154,7 @@ git commit -m "feat(ux): add ArchiveTracker for post-action email archive flow"
 ### Task 13: Mini App Server
 
 **Files:**
+
 - Create: `src/mini-app/server.ts`
 - Create: `src/mini-app/templates/task-detail.ts`
 - Create: `src/mini-app/templates/email-full.ts`
@@ -2067,7 +2180,11 @@ describe('Mini App templates', () => {
         { label: 'Request delisting', status: 'pending', output: null },
       ],
       logs: [
-        { time: '12:03:41', level: 'success', text: 'Spamhaus lookup complete' },
+        {
+          time: '12:03:41',
+          level: 'success',
+          text: 'Spamhaus lookup complete',
+        },
         { time: '12:03:42', level: 'info', text: 'Starting port scan' },
       ],
       startedAt: new Date().toISOString(),
@@ -2191,7 +2308,11 @@ export function renderTaskDetail(data: TaskDetailData): string {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 ```
 
@@ -2211,13 +2332,18 @@ export interface EmailFullData {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 export function renderEmailFull(data: EmailFullData): string {
-  const attachmentsHtml = data.attachments.length > 0
-    ? `<div style="border-top:1px solid #21262d;padding-top:12px;margin-top:12px;"><div style="font-size:11px;color:#484f58;margin-bottom:8px;">ATTACHMENTS</div>${data.attachments.map((a) => `<div style="font-size:13px;color:#58a6ff;">📎 ${escapeHtml(a.name)} (${escapeHtml(a.size)})</div>`).join('')}</div>`
-    : '';
+  const attachmentsHtml =
+    data.attachments.length > 0
+      ? `<div style="border-top:1px solid #21262d;padding-top:12px;margin-top:12px;"><div style="font-size:11px;color:#484f58;margin-bottom:8px;">ATTACHMENTS</div>${data.attachments.map((a) => `<div style="font-size:13px;color:#58a6ff;">📎 ${escapeHtml(a.name)} (${escapeHtml(a.size)})</div>`).join('')}</div>`
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2339,6 +2465,7 @@ git commit -m "feat(ux): add Mini App Express server with task detail and email 
 ### Task 14: Email Preview (Gmail Fetch + Cache)
 
 **Files:**
+
 - Create: `src/email-preview.ts`
 - Test: `src/__tests__/email-preview.test.ts`
 
@@ -2398,7 +2525,10 @@ export function truncatePreview(text: string, maxChars: number): string {
   let cutoff = text.lastIndexOf(' ', maxChars);
   if (cutoff === -1) cutoff = maxChars;
 
-  return text.slice(0, cutoff).trimEnd() + '\n\n— truncated, tap "Full Email" for complete message —';
+  return (
+    text.slice(0, cutoff).trimEnd() +
+    '\n\n— truncated, tap "Full Email" for complete message —'
+  );
 }
 
 /**
@@ -2451,6 +2581,7 @@ git commit -m "feat(ux): add email preview with truncation and in-memory body ca
 ### Task 15: Callback Handler & Wiring
 
 **Files:**
+
 - Modify: `src/index.ts` — initialize all new components at startup
 - Create: `src/callback-router.ts` — routes callback queries to appropriate handlers
 
@@ -2483,7 +2614,10 @@ export function handleCallback(
   const action = parts[0];
   const entityId = parts[1] || '';
 
-  logger.debug({ action, entityId, chatJid: query.chatJid }, 'Callback query received');
+  logger.debug(
+    { action, entityId, chatJid: query.chatJid },
+    'Callback query received',
+  );
 
   switch (action) {
     case 'archive':
@@ -2531,15 +2665,36 @@ import { handleCallback } from '../callback-router.js';
 
 describe('handleCallback', () => {
   const mockDeps = {
-    archiveTracker: { markArchived: vi.fn(), recordAction: vi.fn(), getUnarchived: vi.fn() },
-    autoApproval: { cancel: vi.fn(), start: vi.fn(), getRemainingMs: vi.fn(), destroy: vi.fn() },
-    statusBar: { removePendingItem: vi.fn(), addPendingItem: vi.fn(), incrementAutoHandled: vi.fn(), incrementDraftsEnriched: vi.fn(), destroy: vi.fn() },
+    archiveTracker: {
+      markArchived: vi.fn(),
+      recordAction: vi.fn(),
+      getUnarchived: vi.fn(),
+    },
+    autoApproval: {
+      cancel: vi.fn(),
+      start: vi.fn(),
+      getRemainingMs: vi.fn(),
+      destroy: vi.fn(),
+    },
+    statusBar: {
+      removePendingItem: vi.fn(),
+      addPendingItem: vi.fn(),
+      incrementAutoHandled: vi.fn(),
+      incrementDraftsEnriched: vi.fn(),
+      destroy: vi.fn(),
+    },
     findChannel: vi.fn(),
   };
 
   it('routes stop to autoApproval.cancel', () => {
     handleCallback(
-      { id: '1', chatJid: 'tg:123', messageId: 1, data: 'stop:task-1', senderName: 'Jon' },
+      {
+        id: '1',
+        chatJid: 'tg:123',
+        messageId: 1,
+        data: 'stop:task-1',
+        senderName: 'Jon',
+      },
       mockDeps as any,
     );
     expect(mockDeps.autoApproval.cancel).toHaveBeenCalledWith('task-1');
@@ -2547,15 +2702,30 @@ describe('handleCallback', () => {
 
   it('routes confirm_archive to archiveTracker', () => {
     handleCallback(
-      { id: '2', chatJid: 'tg:123', messageId: 2, data: 'confirm_archive:msg_1', senderName: 'Jon' },
+      {
+        id: '2',
+        chatJid: 'tg:123',
+        messageId: 2,
+        data: 'confirm_archive:msg_1',
+        senderName: 'Jon',
+      },
       mockDeps as any,
     );
-    expect(mockDeps.archiveTracker.markArchived).toHaveBeenCalledWith('msg_1', 'archived');
+    expect(mockDeps.archiveTracker.markArchived).toHaveBeenCalledWith(
+      'msg_1',
+      'archived',
+    );
   });
 
   it('routes answer:defer to keep pending', () => {
     handleCallback(
-      { id: '3', chatJid: 'tg:123', messageId: 3, data: 'answer:q_1:defer', senderName: 'Jon' },
+      {
+        id: '3',
+        chatJid: 'tg:123',
+        messageId: 3,
+        data: 'answer:q_1:defer',
+        senderName: 'Jon',
+      },
       mockDeps as any,
     );
     expect(mockDeps.statusBar.removePendingItem).not.toHaveBeenCalled();
@@ -2563,7 +2733,13 @@ describe('handleCallback', () => {
 
   it('routes answer:yes to remove pending', () => {
     handleCallback(
-      { id: '4', chatJid: 'tg:123', messageId: 4, data: 'answer:q_1:yes', senderName: 'Jon' },
+      {
+        id: '4',
+        chatJid: 'tg:123',
+        messageId: 4,
+        data: 'answer:q_1:yes',
+        senderName: 'Jon',
+      },
       mockDeps as any,
     );
     expect(mockDeps.statusBar.removePendingItem).toHaveBeenCalledWith('q_1');
@@ -2588,6 +2764,7 @@ git commit -m "feat(ux): add callback router for inline button dispatch"
 ### Task 16: Startup Wiring in `src/index.ts`
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add imports and initialization**
@@ -2690,6 +2867,7 @@ git commit -m "feat(ux): wire agentic UX components into startup initialization"
 ### Task 17: End-to-End Integration Test
 
 **Files:**
+
 - Create: `src/__tests__/agentic-ux-integration.test.ts`
 
 - [ ] **Step 1: Write integration test**
@@ -2761,11 +2939,15 @@ describe('Agentic UX Integration', () => {
     let escalation: string | null = null;
 
     const statusBar = new StatusBarManager(bus, {
-      onUpdate: (text) => { statusText = text; },
+      onUpdate: (text) => {
+        statusText = text;
+      },
     });
 
     const _escalator = new FailureEscalator(bus, {
-      onEscalate: (text) => { escalation = text; },
+      onEscalate: (text) => {
+        escalation = text;
+      },
     });
 
     // Task starts
@@ -2773,7 +2955,12 @@ describe('Agentic UX Integration', () => {
       type: 'task.started',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', containerName: 'Spamhaus investigation', slotIndex: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        containerName: 'Spamhaus investigation',
+        slotIndex: 0,
+      },
     });
 
     vi.advanceTimersByTime(2000);
@@ -2785,7 +2972,12 @@ describe('Agentic UX Integration', () => {
       type: 'task.complete',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: 't1', groupJid: 'tg:123', status: 'error', durationMs: 5000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'tg:123',
+        status: 'error',
+        durationMs: 5000,
+      },
     });
 
     vi.advanceTimersByTime(2000);
@@ -2831,27 +3023,28 @@ git commit -m "test(ux): add agentic UX end-to-end integration tests"
 
 ## Summary
 
-| Task | Component | New Files | Tests |
-|------|-----------|-----------|-------|
-| 1 | Types & Events | — | agentic-ux-types.test.ts |
-| 2 | Message Classifier | message-classifier.ts | message-classifier.test.ts |
-| 3 | Question Detector | question-detector.ts | question-detector.test.ts |
-| 4 | Message Formatter | message-formatter.ts | message-formatter.test.ts |
-| 5 | Message Batcher | message-batcher.ts | message-batcher.test.ts |
-| 6 | Database Tables | — (modify db.ts) | agentic-ux-db.test.ts |
-| 7 | Telegram Extensions | — (modify telegram.ts) | telegram-agentic.test.ts |
-| 8 | Router Pipeline | — (modify router.ts) | router.test.ts (extended) |
-| 9 | Status Bar Manager | status-bar.ts | status-bar.test.ts |
-| 10 | Auto-Approval Timer | auto-approval.ts | auto-approval.test.ts |
-| 11 | Failure Escalator | failure-escalator.ts | failure-escalator.test.ts |
-| 12 | Archive Tracker | archive-tracker.ts | archive-tracker.test.ts |
-| 13 | Mini App Server | mini-app/server.ts, templates/ | mini-app-server.test.ts |
-| 14 | Email Preview | email-preview.ts | email-preview.test.ts |
-| 15 | Callback Router | callback-router.ts | callback-router.test.ts |
-| 16 | Startup Wiring | — (modify index.ts) | — (build check) |
-| 17 | Integration Tests | — | agentic-ux-integration.test.ts |
+| Task | Component           | New Files                      | Tests                          |
+| ---- | ------------------- | ------------------------------ | ------------------------------ |
+| 1    | Types & Events      | —                              | agentic-ux-types.test.ts       |
+| 2    | Message Classifier  | message-classifier.ts          | message-classifier.test.ts     |
+| 3    | Question Detector   | question-detector.ts           | question-detector.test.ts      |
+| 4    | Message Formatter   | message-formatter.ts           | message-formatter.test.ts      |
+| 5    | Message Batcher     | message-batcher.ts             | message-batcher.test.ts        |
+| 6    | Database Tables     | — (modify db.ts)               | agentic-ux-db.test.ts          |
+| 7    | Telegram Extensions | — (modify telegram.ts)         | telegram-agentic.test.ts       |
+| 8    | Router Pipeline     | — (modify router.ts)           | router.test.ts (extended)      |
+| 9    | Status Bar Manager  | status-bar.ts                  | status-bar.test.ts             |
+| 10   | Auto-Approval Timer | auto-approval.ts               | auto-approval.test.ts          |
+| 11   | Failure Escalator   | failure-escalator.ts           | failure-escalator.test.ts      |
+| 12   | Archive Tracker     | archive-tracker.ts             | archive-tracker.test.ts        |
+| 13   | Mini App Server     | mini-app/server.ts, templates/ | mini-app-server.test.ts        |
+| 14   | Email Preview       | email-preview.ts               | email-preview.test.ts          |
+| 15   | Callback Router     | callback-router.ts             | callback-router.test.ts        |
+| 16   | Startup Wiring      | — (modify index.ts)            | — (build check)                |
+| 17   | Integration Tests   | —                              | agentic-ux-integration.test.ts |
 
 **Not included (separate follow-up):**
+
 - Draft enrichment watcher (requires SuperPilot integration design)
 - Morning digest inbox cleanup section (requires modifying existing digest-engine.ts)
 - Mini App SSE/polling for live updates (optimization after basic flow works)

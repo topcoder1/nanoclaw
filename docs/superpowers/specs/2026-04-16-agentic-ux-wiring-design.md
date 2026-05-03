@@ -43,8 +43,15 @@ export class GmailOpsRouter implements GmailOps {
   register(alias: string, channel: GmailChannel): void;
   async archiveThread(account: string, threadId: string): Promise<void>;
   async listRecentDrafts(account: string): Promise<DraftInfo[]>;
-  async updateDraft(account: string, draftId: string, newBody: string): Promise<void>;
-  async getMessageBody(account: string, messageId: string): Promise<string | null>;
+  async updateDraft(
+    account: string,
+    draftId: string,
+    newBody: string,
+  ): Promise<void>;
+  async getMessageBody(
+    account: string,
+    messageId: string,
+  ): Promise<string | null>;
 }
 ```
 
@@ -82,7 +89,7 @@ archiveTracker.recordAction(
   event.payload.emailId,
   event.payload.threadId,
   event.payload.account,
-  event.payload.action  // e.g., 'replied', 'delegated', 'dismissed'
+  event.payload.action, // e.g., 'replied', 'delegated', 'dismissed'
 );
 ```
 
@@ -157,18 +164,18 @@ New Mini App route `GET /draft-diff/:draftId`:
 
 ### 5.1 Updated Action Roster
 
-| Action | Handler |
-|--------|---------|
-| `archive:{emailId}` | Show confirm/cancel buttons (5s timeout) |
-| `confirm_archive:{emailId}` | Gmail archive + DB mark + edit msg |
-| `cancel_archive:{emailId}` | Revert to original buttons |
-| `expand:{emailId}:{account}` | Fetch body, cache, show 800-char preview |
-| `collapse:{emailId}` | Revert to 300-char summary |
-| `revert:{draftId}` | Revert draft + edit msg |
-| `keep:{draftId}` | Remove buttons |
-| `answer:{questionId}:{value}` | (existing) |
-| `stop:{taskId}` | (existing) |
-| `dismiss:{itemId}` | (existing) |
+| Action                        | Handler                                  |
+| ----------------------------- | ---------------------------------------- |
+| `archive:{emailId}`           | Show confirm/cancel buttons (5s timeout) |
+| `confirm_archive:{emailId}`   | Gmail archive + DB mark + edit msg       |
+| `cancel_archive:{emailId}`    | Revert to original buttons               |
+| `expand:{emailId}:{account}`  | Fetch body, cache, show 800-char preview |
+| `collapse:{emailId}`          | Revert to 300-char summary               |
+| `revert:{draftId}`            | Revert draft + edit msg                  |
+| `keep:{draftId}`              | Remove buttons                           |
+| `answer:{questionId}:{value}` | (existing)                               |
+| `stop:{taskId}`               | (existing)                               |
+| `dismiss:{itemId}`            | (existing)                               |
 
 ### 5.2 Interface Changes
 
@@ -178,7 +185,7 @@ New Mini App route `GET /draft-diff/:draftId`:
 export async function handleCallback(
   query: CallbackQuery,
   deps: CallbackRouterDeps,
-): Promise<void>
+): Promise<void>;
 ```
 
 `CallbackRouterDeps` adds:

@@ -17,12 +17,12 @@
 
 ## Summary table
 
-| Severity | Count | Status |
-|---|---|---|
-| CRITICAL | 1 | blocked — needs user decision |
-| HIGH | 3 | 2 fixable, 1 architectural |
-| MEDIUM | 6 | fixable |
-| LOW | 3 | fixable or deferred |
+| Severity | Count | Status                        |
+| -------- | ----- | ----------------------------- |
+| CRITICAL | 1     | blocked — needs user decision |
+| HIGH     | 3     | 2 fixable, 1 architectural    |
+| MEDIUM   | 6     | fixable                       |
+| LOW      | 3     | fixable or deferred           |
 
 **Tests:** 37/37 passing. **Typecheck:** clean. **Lint:** 4 errors, 22 warnings (errors all in test files).
 
@@ -36,6 +36,7 @@
 **Category:** Security / Access control
 
 **Evidence:**
+
 ```
 $ curl -sS -o /tmp/pub.html -w "HTTP %{http_code}\n" https://miniapp.inboxsuperpilot.com/
 HTTP 200
@@ -52,6 +53,7 @@ $ curl -sS -X POST -H "content-type: application/json" -d '{}' \
 `~/.cloudflared/config-nanoclaw-miniapp.yml` routes `miniapp.inboxsuperpilot.com` → `http://localhost:3847` with no Cloudflare Access policy and no `cf-access-*` headers observed. `src/mini-app/server.ts` adds zero auth middleware. `src/index.ts:1725` instantiates `startMiniAppServer` and mounts it at the public port.
 
 **Impact:** Any unauthenticated visitor can:
+
 1. Read inbox subject lines + account aliases from `/` (attention + archive queues).
 2. Read full email bodies of any tracked item via `GET /email/:emailId` (URL ids are predictable timestamp+6char-random: `sse-${Date.now()}-xxxxxx`).
 3. Archive threads in any Gmail account tied to the instance via `POST /api/archive/bulk` (just needs valid item IDs).
@@ -63,13 +65,13 @@ This is production data — `reference_superpilot_db.md` in memory notes the loc
 
 **Fix options (requires user decision):**
 
-| Option | Completeness | Effort | Pros | Cons |
-|---|---|---|---|---|
-| A. Cloudflare Access (email-based zero-trust) | 10/10 | 10 min | Built into tunnel, per-email ACL, audit log | Requires CF dashboard change |
-| B. Signed-URL tokens on every callback link (HMAC over path+expiry) | 9/10 | 1 hr | Self-contained, works without CF | Server-side token store or stateless HMAC |
-| C. IP allowlist (home/mobile ranges) | 5/10 | 20 min | Simple | Breaks mobile, fragile |
-| D. Pull tunnel down, localhost-only | 10/10 | 5 min | Zero attack surface | Can't use mini-app off LAN (Telegram WebView still works via LAN) |
-| E. Shared-secret `?k=` query | 3/10 | 20 min | Trivial | Token in URL = Referer leak, shoulder-surf |
+| Option                                                              | Completeness | Effort | Pros                                        | Cons                                                              |
+| ------------------------------------------------------------------- | ------------ | ------ | ------------------------------------------- | ----------------------------------------------------------------- |
+| A. Cloudflare Access (email-based zero-trust)                       | 10/10        | 10 min | Built into tunnel, per-email ACL, audit log | Requires CF dashboard change                                      |
+| B. Signed-URL tokens on every callback link (HMAC over path+expiry) | 9/10         | 1 hr   | Self-contained, works without CF            | Server-side token store or stateless HMAC                         |
+| C. IP allowlist (home/mobile ranges)                                | 5/10         | 20 min | Simple                                      | Breaks mobile, fragile                                            |
+| D. Pull tunnel down, localhost-only                                 | 10/10        | 5 min  | Zero attack surface                         | Can't use mini-app off LAN (Telegram WebView still works via LAN) |
+| E. Shared-secret `?k=` query                                        | 3/10         | 20 min | Trivial                                     | Token in URL = Referer leak, shoulder-surf                        |
 
 **RECOMMENDATION:** A + B together. CF Access as the perimeter (keeps the tunnel useful for legitimate devices), signed URLs as defense-in-depth for anyone who slips past CF. If A is too slow to set up, start with D (localhost-only) and ship B next.
 
@@ -159,6 +161,7 @@ The `'getMessageMeta' in opts.gmailOps` runtime check is fine, but casting to `a
 **Severity:** MEDIUM
 **Category:** Consistency / correctness
 **Files:**
+
 - `email-full.ts:19-25` → escapes `& < > "`
 - `draft-diff.ts:10-11` → escapes `& < >` only (missing `"` and `'`)
 - `task-detail.ts:116-122` → escapes `& < > "`
@@ -199,6 +202,7 @@ A caller can POST an array of 100k IDs; the handler sends them through a single 
 **Files:** multiple
 
 Three shapes coexist:
+
 - New reply/draft routes: `{ ok: true, ... }` / `{ ok: false, error, code }`
 - `POST /api/email/:emailId/archive`: `{ success: true }` / `{ error }`
 - `POST /api/archive/bulk`: `{ archived, requested, failed, failures }` or `{ error }`
@@ -252,6 +256,7 @@ Lint rule `no-catch-all/no-catch-all` flags 14 catch blocks that silently swallo
 **Baseline:** 62 / 100
 
 Breakdown:
+
 - Console/tests: 100 (all green)
 - Security: 15 (CRITICAL present, HIGH stacked)
 - Type safety: 80 (one `any` cast, four lint errors)
@@ -273,21 +278,21 @@ Carrying the baseline as 62 because security is the honest signal.
 
 Exhaustive tier → fix all except architecturally-gated:
 
-| ID | Severity | Decision |
-|---|---|---|
-| 001 | CRIT | BLOCKED on user choice — stop here |
-| 002 | HIGH | FIX |
-| 003 | HIGH | FIX |
-| 004 | HIGH | FIX |
-| 005 | MED | FIX |
-| 006 | MED | FIX |
-| 007 | MED | FIX |
-| 008 | MED | FIX |
-| 009 | MED | FIX |
-| 010 | MED | DEFER (follow-up) |
-| 011 | LOW | DEFER (follow-up) |
-| 012 | LOW | FIX |
-| 013 | LOW | DEFER (follow-up) |
+| ID  | Severity | Decision                           |
+| --- | -------- | ---------------------------------- |
+| 001 | CRIT     | BLOCKED on user choice — stop here |
+| 002 | HIGH     | FIX                                |
+| 003 | HIGH     | FIX                                |
+| 004 | HIGH     | FIX                                |
+| 005 | MED      | FIX                                |
+| 006 | MED      | FIX                                |
+| 007 | MED      | FIX                                |
+| 008 | MED      | FIX                                |
+| 009 | MED      | FIX                                |
+| 010 | MED      | DEFER (follow-up)                  |
+| 011 | LOW      | DEFER (follow-up)                  |
+| 012 | LOW      | FIX                                |
+| 013 | LOW      | DEFER (follow-up)                  |
 
 ---
 
@@ -295,14 +300,14 @@ Exhaustive tier → fix all except architecturally-gated:
 
 Atomic commits, all on branch `claude/confident-hopper-114e75`:
 
-| Commit | Issues | Files |
-|---|---|---|
-| `42806aa` | ISSUE-003 | server.ts, mini-app-routes.test.ts |
-| `988062c` | ISSUE-004, ISSUE-009 | server.ts |
-| `c751e3e` | ISSUE-002, ISSUE-008 | templates/task-detail.ts |
-| `fe12763` | ISSUE-006 | server.ts |
-| `955db64` | ISSUE-007 | templates/escape.ts (new), templates/*.ts, server.ts |
-| `2de0e9a` | ISSUE-005, ISSUE-012 | server.ts, mini-app-routes.test.ts |
+| Commit    | Issues               | Files                                                 |
+| --------- | -------------------- | ----------------------------------------------------- |
+| `42806aa` | ISSUE-003            | server.ts, mini-app-routes.test.ts                    |
+| `988062c` | ISSUE-004, ISSUE-009 | server.ts                                             |
+| `c751e3e` | ISSUE-002, ISSUE-008 | templates/task-detail.ts                              |
+| `fe12763` | ISSUE-006            | server.ts                                             |
+| `955db64` | ISSUE-007            | templates/escape.ts (new), templates/\*.ts, server.ts |
+| `2de0e9a` | ISSUE-005, ISSUE-012 | server.ts, mini-app-routes.test.ts                    |
 
 ### Verification
 
@@ -312,21 +317,21 @@ Atomic commits, all on branch `claude/confident-hopper-114e75`:
 
 ### Status per issue
 
-| ID | Severity | Final status |
-|---|---|---|
+| ID  | Severity | Final status                                  |
+| --- | -------- | --------------------------------------------- |
 | 001 | CRITICAL | BLOCKED — user handling via Cloudflare Access |
-| 002 | HIGH | FIXED (c751e3e) |
-| 003 | HIGH | FIXED (42806aa) + new spoofing test |
-| 004 | HIGH | FIXED (988062c) |
-| 005 | MED | FIXED (2de0e9a) |
-| 006 | MED | FIXED (fe12763) |
-| 007 | MED | FIXED (955db64) |
-| 008 | MED | FIXED (c751e3e) |
-| 009 | MED | FIXED (988062c) |
-| 010 | MED | DEFERRED — response shape follow-up |
-| 011 | LOW | DEFERRED — SSE DOM-diff follow-up |
-| 012 | LOW | FIXED (2de0e9a) |
-| 013 | LOW | DEFERRED — catch-log follow-up |
+| 002 | HIGH     | FIXED (c751e3e)                               |
+| 003 | HIGH     | FIXED (42806aa) + new spoofing test           |
+| 004 | HIGH     | FIXED (988062c)                               |
+| 005 | MED      | FIXED (2de0e9a)                               |
+| 006 | MED      | FIXED (fe12763)                               |
+| 007 | MED      | FIXED (955db64)                               |
+| 008 | MED      | FIXED (c751e3e)                               |
+| 009 | MED      | FIXED (988062c)                               |
+| 010 | MED      | DEFERRED — response shape follow-up           |
+| 011 | LOW      | DEFERRED — SSE DOM-diff follow-up             |
+| 012 | LOW      | FIXED (2de0e9a)                               |
+| 013 | LOW      | DEFERRED — catch-log follow-up                |
 
 ### Health score delta
 

@@ -292,7 +292,10 @@ Create `src/learning/rules-engine.ts` and `src/learning/rules-engine.test.ts`.
     lastMatchedAt: string;
   }
 
-  export type AddRuleInput = Omit<LearnedRule, 'id' | 'createdAt' | 'lastMatchedAt'>;
+  export type AddRuleInput = Omit<
+    LearnedRule,
+    'id' | 'createdAt' | 'lastMatchedAt'
+  >;
 
   interface RuleRow {
     id: string;
@@ -374,7 +377,10 @@ Create `src/learning/rules-engine.ts` and `src/learning/rules-engine.test.ts`.
       now,
     );
 
-    logger.debug({ id, source: input.source, groupId: input.groupId }, 'Rule added');
+    logger.debug(
+      { id, source: input.source, groupId: input.groupId },
+      'Rule added',
+    );
     return id;
   }
 
@@ -384,9 +390,13 @@ Create `src/learning/rules-engine.ts` and `src/learning/rules-engine.test.ts`.
     limit = 5,
   ): LearnedRule[] {
     const db = getDb();
-    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
-    const classFilter = actionClasses.map(() => "action_classes LIKE ?").join(' OR ');
+    const classFilter = actionClasses
+      .map(() => 'action_classes LIKE ?')
+      .join(' OR ');
     const sql = classFilter
       ? `SELECT * FROM learned_rules
          WHERE (group_id = ? OR group_id IS NULL)
@@ -411,7 +421,10 @@ Create `src/learning/rules-engine.ts` and `src/learning/rules-engine.test.ts`.
   export function markMatched(ruleId: string): void {
     const db = getDb();
     const now = new Date().toISOString();
-    db.prepare(`UPDATE learned_rules SET last_matched_at = ? WHERE id = ?`).run(now, ruleId);
+    db.prepare(`UPDATE learned_rules SET last_matched_at = ? WHERE id = ?`).run(
+      now,
+      ruleId,
+    );
   }
 
   export function pruneStaleRules(): number {
@@ -426,13 +439,17 @@ Create `src/learning/rules-engine.ts` and `src/learning/rules-engine.test.ts`.
 
   export function deleteRule(id: string): void {
     const db = getDb();
-    db.prepare(`DELETE FROM learned_rules_fts WHERE rowid = (SELECT rowid FROM learned_rules WHERE id = ?)`).run(id);
+    db.prepare(
+      `DELETE FROM learned_rules_fts WHERE rowid = (SELECT rowid FROM learned_rules WHERE id = ?)`,
+    ).run(id);
     db.prepare(`DELETE FROM learned_rules WHERE id = ?`).run(id);
   }
 
   export function decayConfidence(): number {
     const db = getDb();
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const result = db
       .prepare(
         `UPDATE learned_rules
@@ -485,23 +502,31 @@ Create `src/learning/outcome-enricher.ts` and `src/learning/outcome-enricher.tes
 
   describe('inferActionClasses', () => {
     it('maps email keywords to email action classes', () => {
-      const classes = inferActionClasses('check my gmail inbox for unread messages');
+      const classes = inferActionClasses(
+        'check my gmail inbox for unread messages',
+      );
       expect(classes).toContain('email.read');
       expect(classes).toContain('email.send');
     });
 
     it('maps github keywords to github action classes', () => {
-      const classes = inferActionClasses('what is the status of my PR on github?');
+      const classes = inferActionClasses(
+        'what is the status of my PR on github?',
+      );
       expect(classes).toContain('github.read');
     });
 
     it('maps browser keywords to browser action classes', () => {
-      const classes = inferActionClasses('navigate to the website and click login');
+      const classes = inferActionClasses(
+        'navigate to the website and click login',
+      );
       expect(classes).toContain('browser.read');
     });
 
     it('maps schedule keywords to task.schedule', () => {
-      const classes = inferActionClasses('remind me to check the schedule tomorrow');
+      const classes = inferActionClasses(
+        'remind me to check the schedule tomorrow',
+      );
       expect(classes).toContain('task.schedule');
     });
 
@@ -635,7 +660,10 @@ Create `src/learning/outcome-enricher.ts` and `src/learning/outcome-enricher.tes
     return Array.from(found);
   }
 
-  export function buildRulesBlock(message: string, groupId: string): string | null {
+  export function buildRulesBlock(
+    message: string,
+    groupId: string,
+  ): string | null {
     const actionClasses = inferActionClasses(message);
     const rules = queryRules(actionClasses, groupId, 5);
 
@@ -658,7 +686,10 @@ Create `src/learning/outcome-enricher.ts` and `src/learning/outcome-enricher.tes
       markMatched(rule.id);
     }
 
-    logger.debug({ groupId, ruleCount: lines.length }, 'Injecting learned rules into prompt');
+    logger.debug(
+      { groupId, ruleCount: lines.length },
+      'Injecting learned rules into prompt',
+    );
     return header + lines.join('\n');
   }
   ```
@@ -700,11 +731,7 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
     findProcedure: (...args: unknown[]) => mockFindProcedure(...args),
   }));
 
-  import {
-    startTrace,
-    addTrace,
-    finalizeTrace,
-  } from './procedure-recorder.js';
+  import { startTrace, addTrace, finalizeTrace } from './procedure-recorder.js';
 
   describe('startTrace', () => {
     beforeEach(() => vi.clearAllMocks());
@@ -749,38 +776,79 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
 
     it('discards trace on failure', () => {
       startTrace('g1', 'task-fail');
-      addTrace('g1', 'task-fail', { type: 'browser_navigate', timestamp: Date.now(), inputSummary: 'x', result: 'success' });
-      addTrace('g1', 'task-fail', { type: 'send_message', timestamp: Date.now(), inputSummary: 'y', result: 'success' });
+      addTrace('g1', 'task-fail', {
+        type: 'browser_navigate',
+        timestamp: Date.now(),
+        inputSummary: 'x',
+        result: 'success',
+      });
+      addTrace('g1', 'task-fail', {
+        type: 'send_message',
+        timestamp: Date.now(),
+        inputSummary: 'y',
+        result: 'success',
+      });
       finalizeTrace('g1', 'task-fail', false);
       expect(mockSaveProcedure).not.toHaveBeenCalled();
     });
 
     it('saves procedure from IPC trace on success with 2+ actions', () => {
       startTrace('g1', 'task-ok');
-      addTrace('g1', 'task-ok', { type: 'github_api', timestamp: Date.now(), inputSummary: 'GET /pulls', result: 'success' });
-      addTrace('g1', 'task-ok', { type: 'send_message', timestamp: Date.now(), inputSummary: 'PR is open', result: 'success' });
+      addTrace('g1', 'task-ok', {
+        type: 'github_api',
+        timestamp: Date.now(),
+        inputSummary: 'GET /pulls',
+        result: 'success',
+      });
+      addTrace('g1', 'task-ok', {
+        type: 'send_message',
+        timestamp: Date.now(),
+        inputSummary: 'PR is open',
+        result: 'success',
+      });
       finalizeTrace('g1', 'task-ok', true);
       expect(mockSaveProcedure).toHaveBeenCalledOnce();
     });
 
     it('skips save when fewer than 2 actions', () => {
       startTrace('g1', 'task-single');
-      addTrace('g1', 'task-single', { type: 'send_message', timestamp: Date.now(), inputSummary: 'hi', result: 'success' });
+      addTrace('g1', 'task-single', {
+        type: 'send_message',
+        timestamp: Date.now(),
+        inputSummary: 'hi',
+        result: 'success',
+      });
       finalizeTrace('g1', 'task-single', true);
       expect(mockSaveProcedure).not.toHaveBeenCalled();
     });
 
     it('uses agent procedure name/description when provided', () => {
       startTrace('g1', 'task-agent');
-      addTrace('g1', 'task-agent', { type: 'github_api', timestamp: Date.now(), inputSummary: 'GET /pulls', result: 'success' });
-      addTrace('g1', 'task-agent', { type: 'send_message', timestamp: Date.now(), inputSummary: 'done', result: 'success' });
+      addTrace('g1', 'task-agent', {
+        type: 'github_api',
+        timestamp: Date.now(),
+        inputSummary: 'GET /pulls',
+        result: 'success',
+      });
+      addTrace('g1', 'task-agent', {
+        type: 'send_message',
+        timestamp: Date.now(),
+        inputSummary: 'done',
+        result: 'success',
+      });
       finalizeTrace('g1', 'task-agent', true, {
         name: 'check-pr-status',
         trigger: 'check PR status',
         description: 'Check GitHub PR status and summarize',
         steps: [
-          { action: 'github_api', details: 'GET /repos/{owner}/{repo}/pulls/{number}' },
-          { action: 'format_response', details: 'Summarize PR title, status, reviewers' },
+          {
+            action: 'github_api',
+            details: 'GET /repos/{owner}/{repo}/pulls/{number}',
+          },
+          {
+            action: 'format_response',
+            details: 'Summarize PR title, status, reviewers',
+          },
         ],
       });
       const saved = mockSaveProcedure.mock.calls[0][0];
@@ -802,8 +870,18 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
         groupId: 'g1',
       });
       startTrace('g1', 'task-dup');
-      addTrace('g1', 'task-dup', { type: 'github_api', timestamp: Date.now(), inputSummary: 'GET /pulls', result: 'success' });
-      addTrace('g1', 'task-dup', { type: 'send_message', timestamp: Date.now(), inputSummary: 'done', result: 'success' });
+      addTrace('g1', 'task-dup', {
+        type: 'github_api',
+        timestamp: Date.now(),
+        inputSummary: 'GET /pulls',
+        result: 'success',
+      });
+      addTrace('g1', 'task-dup', {
+        type: 'send_message',
+        timestamp: Date.now(),
+        inputSummary: 'done',
+        result: 'success',
+      });
       finalizeTrace('g1', 'task-dup', true, {
         name: 'check-pr-status',
         trigger: 'check PR status',
@@ -876,7 +954,9 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
   ): number {
     if (existing.length === 0 || candidate.length === 0) return 0;
     const existingActions = new Set(existing.map((s) => s.action));
-    const matches = candidate.filter((s) => existingActions.has(s.action)).length;
+    const matches = candidate.filter((s) =>
+      existingActions.has(s.action),
+    ).length;
     return matches / Math.max(existing.length, candidate.length);
   }
 
@@ -896,7 +976,10 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
     }
 
     if (actions.length < 2) {
-      logger.debug({ groupId, taskId, actionCount: actions.length }, 'Trace too short, skipping');
+      logger.debug(
+        { groupId, taskId, actionCount: actions.length },
+        'Trace too short, skipping',
+      );
       return;
     }
 
@@ -914,7 +997,10 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
       );
       const extraTraceSteps = actions
         .filter((a) => !agentProcedure.steps.some((s) => s.action === a.type))
-        .map((a) => ({ action: a.type, details: a.inputSummary.slice(0, 100) }));
+        .map((a) => ({
+          action: a.type,
+          details: a.inputSummary.slice(0, 100),
+        }));
 
       steps = [...validAgentSteps, ...extraTraceSteps];
       name = agentProcedure.name;
@@ -940,7 +1026,10 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
           success_count: existing.success_count + 1,
           updated_at: now,
         });
-        logger.debug({ name: existing.name, groupId }, 'Procedure success_count incremented');
+        logger.debug(
+          { name: existing.name, groupId },
+          'Procedure success_count incremented',
+        );
         return;
       }
       name = `${name}-v${Date.now()}`;
@@ -960,7 +1049,10 @@ Create `src/learning/procedure-recorder.ts` and `src/learning/procedure-recorder
     };
 
     saveProcedure(proc);
-    logger.info({ name, trigger, groupId, stepCount: steps.length }, 'Procedure saved');
+    logger.info(
+      { name, trigger, groupId, stepCount: steps.length },
+      'Procedure saved',
+    );
   }
   ```
 
@@ -1002,7 +1094,8 @@ Create `src/learning/procedure-matcher.ts` and `src/learning/procedure-matcher.t
     findProcedure: (...args: unknown[]) => mockFindProcedure(...args),
     listProcedures: (...args: unknown[]) => mockListProcedures(...args),
     saveProcedure: (...args: unknown[]) => mockSaveProcedure(...args),
-    updateProcedureStats: (...args: unknown[]) => mockUpdateProcedureStats(...args),
+    updateProcedureStats: (...args: unknown[]) =>
+      mockUpdateProcedureStats(...args),
   }));
 
   import {
@@ -1163,9 +1256,15 @@ Create `src/learning/procedure-matcher.ts` and `src/learning/procedure-matcher.t
     updateProcedureStats(procedure.name, success, groupId);
 
     if (!success) {
-      logger.warn({ name: procedure.name, groupId }, 'Procedure execution failed');
+      logger.warn(
+        { name: procedure.name, groupId },
+        'Procedure execution failed',
+      );
     } else {
-      logger.info({ name: procedure.name, groupId, durationMs }, 'Procedure executed');
+      logger.info(
+        { name: procedure.name, groupId, durationMs },
+        'Procedure executed',
+      );
     }
 
     return success;
@@ -1180,9 +1279,7 @@ Create `src/learning/procedure-matcher.ts` and `src/learning/procedure-matcher.t
 
     for (const gid of allGroupIds) {
       const procs = listProcedures(gid);
-      const match = procs.find(
-        (p) => p.name === name && p.groupId === gid,
-      );
+      const match = procs.find((p) => p.name === name && p.groupId === gid);
       if (match) matchingGroups.push(match);
     }
 
@@ -1202,7 +1299,11 @@ Create `src/learning/procedure-matcher.ts` and `src/learning/procedure-matcher.t
 
     saveProcedure(merged);
     logger.info(
-      { name, fromGroups: matchingGroups.map((p) => p.groupId), stepCount: merged.steps.length },
+      {
+        name,
+        fromGroups: matchingGroups.map((p) => p.groupId),
+        stepCount: merged.steps.length,
+      },
       'Procedure promoted to global scope',
     );
     return true;
@@ -1253,13 +1354,21 @@ Create `src/learning/feedback-capture.ts` and `src/learning/feedback-capture.tes
     const recentBotTs = now - 60_000; // 1 minute ago
 
     it('detects correction keywords', () => {
-      const result = detectFeedback("that's wrong, use the API instead", recentBotTs, 'g1');
+      const result = detectFeedback(
+        "that's wrong, use the API instead",
+        recentBotTs,
+        'g1',
+      );
       expect(result).not.toBeNull();
       expect(result!.type).toBe('correction');
     });
 
     it('detects positive keywords', () => {
-      const result = detectFeedback('perfect, that worked exactly right', recentBotTs, 'g1');
+      const result = detectFeedback(
+        'perfect, that worked exactly right',
+        recentBotTs,
+        'g1',
+      );
       expect(result).not.toBeNull();
       expect(result!.type).toBe('positive');
     });
@@ -1285,7 +1394,10 @@ Create `src/learning/feedback-capture.ts` and `src/learning/feedback-capture.tes
     beforeEach(() => vi.clearAllMocks());
 
     it('calls addRule with user_feedback source and 0.9 confidence', () => {
-      saveFeedbackAsRule({ type: 'correction', text: 'Use API not browser for GitHub' }, 'g1');
+      saveFeedbackAsRule(
+        { type: 'correction', text: 'Use API not browser for GitHub' },
+        'g1',
+      );
       expect(mockAddRule).toHaveBeenCalledWith(
         expect.objectContaining({
           source: 'user_feedback',
@@ -1298,7 +1410,10 @@ Create `src/learning/feedback-capture.ts` and `src/learning/feedback-capture.tes
 
     it('returns the rule id from addRule', () => {
       mockAddRule.mockReturnValue('new-rule-id');
-      const id = saveFeedbackAsRule({ type: 'correction', text: 'Do not use browser' }, 'g1');
+      const id = saveFeedbackAsRule(
+        { type: 'correction', text: 'Do not use browser' },
+        'g1',
+      );
       expect(id).toBe('new-rule-id');
     });
   });
@@ -1491,9 +1606,7 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
     });
 
     it('wires task.started to startTrace', () => {
-      const { startTrace } = vi.mocked(
-        await import('./procedure-recorder.js'),
-      );
+      const { startTrace } = vi.mocked(await import('./procedure-recorder.js'));
       const bus = new EventBus();
 
       initLearningSystem(bus, {
@@ -1603,13 +1716,16 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
       lastBotMessageTs[groupId] = Date.now();
     });
 
-    setInterval(() => {
-      const pruned = pruneStaleRules();
-      const decayed = decayConfidence();
-      if (pruned > 0 || decayed > 0) {
-        logger.info({ pruned, decayed }, 'Learning maintenance run');
-      }
-    }, 24 * 60 * 60 * 1000);
+    setInterval(
+      () => {
+        const pruned = pruneStaleRules();
+        const decayed = decayConfidence();
+        if (pruned > 0 || decayed > 0) {
+          logger.info({ pruned, decayed }, 'Learning maintenance run');
+        }
+      },
+      24 * 60 * 60 * 1000,
+    );
   }
 
   function analyzeOutcomePatterns(groupId: string): void {
@@ -1620,7 +1736,8 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
       limit: 100,
     });
 
-    const failuresByClass: Record<string, { errors: string[]; count: number }> = {};
+    const failuresByClass: Record<string, { errors: string[]; count: number }> =
+      {};
     for (const o of outcomes) {
       if (o.result === 'failure' && o.error) {
         if (!failuresByClass[o.action_class]) {
@@ -1647,7 +1764,10 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
         evidenceCount: data.count,
       });
 
-      logger.debug({ actionClass, count: data.count, groupId }, 'Outcome pattern rule created');
+      logger.debug(
+        { actionClass, count: data.count, groupId },
+        'Outcome pattern rule created',
+      );
     }
   }
   ```
@@ -1688,6 +1808,7 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
   ```
 
   **Rules:**
+
   - Only emit after a **successful** multi-step task
   - `trigger` should be a short, natural-language phrase (e.g., "check PR status", "summarize inbox")
   - `action` values should match the tool or IPC type used (e.g., `github_api`, `browser_navigate`, `send_message`)
@@ -1707,6 +1828,7 @@ Create `src/learning/index.ts`, `src/learning/index.test.ts`, and `container/ski
   ```
 
   **Rules:**
+
   - Keep it under 200 characters
   - Only emit if you actually discovered something new — do not fabricate lessons
   - One lesson per task at most
@@ -1761,7 +1883,9 @@ Modify `src/index.ts` and `src/ipc.ts` to wire the learning system.
     EMAIL_INTELLIGENCE_ENABLED: false,
   }));
 
-  vi.mock('./group-folder.js', () => ({ isValidGroupFolder: vi.fn().mockReturnValue(true) }));
+  vi.mock('./group-folder.js', () => ({
+    isValidGroupFolder: vi.fn().mockReturnValue(true),
+  }));
 
   import { processTaskIpc } from './ipc.js';
 
@@ -1781,7 +1905,11 @@ Modify `src/index.ts` and `src/ipc.ts` to wire the learning system.
 
     it('saves feedback as rule via addRule', async () => {
       await processTaskIpc(
-        { type: 'learn_feedback', feedback: 'Use API not browser for GitHub', groupId: 'g1' } as Parameters<typeof processTaskIpc>[0],
+        {
+          type: 'learn_feedback',
+          feedback: 'Use API not browser for GitHub',
+          groupId: 'g1',
+        } as Parameters<typeof processTaskIpc>[0],
         'g1',
         false,
         mockDeps,
@@ -1840,14 +1968,25 @@ Modify `src/index.ts` and `src/ipc.ts` to wire the learning system.
   // Trace IPC actions for procedure recording
   if (data.taskId) {
     const traceableTypes = new Set([
-      'browser_navigate', 'browser_act', 'browser_extract', 'browser_observe',
-      'schedule_task', 'cancel_task', 'relay_message', 'email_trigger',
+      'browser_navigate',
+      'browser_act',
+      'browser_extract',
+      'browser_observe',
+      'schedule_task',
+      'cancel_task',
+      'relay_message',
+      'email_trigger',
     ]);
     if (traceableTypes.has(data.type)) {
       addTrace(sourceGroup, data.taskId, {
         type: data.type,
         timestamp: Date.now(),
-        inputSummary: (data.instruction ?? data.prompt ?? data.text ?? data.type).slice(0, 200),
+        inputSummary: (
+          data.instruction ??
+          data.prompt ??
+          data.text ??
+          data.type
+        ).slice(0, 200),
         result: 'success',
       });
     }
@@ -1903,7 +2042,8 @@ Modify `src/index.ts` and `src/ipc.ts` to wire the learning system.
     const lessonMatch = output.result.match(/"_lesson"\s*:\s*"([^"]{1,400})"/);
     if (lessonMatch) {
       const { addRule } = await import('./learning/rules-engine.js');
-      const { inferActionClasses } = await import('./learning/outcome-enricher.js');
+      const { inferActionClasses } =
+        await import('./learning/outcome-enricher.js');
       const lessonText = lessonMatch[1];
       addRule({
         rule: lessonText,
@@ -1922,15 +2062,23 @@ Modify `src/index.ts` and `src/ipc.ts` to wire the learning system.
 
   ```typescript
   if (output.result) {
-    const procMatch = output.result.match(/"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/);
+    const procMatch = output.result.match(
+      /"_procedure"\s*:\s*(\{[\s\S]*?\})\s*\}/,
+    );
     if (procMatch) {
       try {
-        const agentProc = JSON.parse(procMatch[1]) as import('./learning/procedure-recorder.js').AgentProcedure;
-        const { finalizeTrace } = await import('./learning/procedure-recorder.js');
+        const agentProc = JSON.parse(
+          procMatch[1],
+        ) as import('./learning/procedure-recorder.js').AgentProcedure;
+        const { finalizeTrace } =
+          await import('./learning/procedure-recorder.js');
         const taskIdForProc = `agent-${group.folder}-${startMs}`;
         finalizeTrace(group.folder, taskIdForProc, true, agentProc);
       } catch {
-        logger.debug({ groupId: group.folder }, 'Failed to parse _procedure block');
+        logger.debug(
+          { groupId: group.folder },
+          'Failed to parse _procedure block',
+        );
       }
     }
   }
@@ -1976,8 +2124,10 @@ Modify `src/index.ts` message handling to check for matching procedures before e
   const mockExecuteProcedure = vi.fn().mockResolvedValue(true);
 
   vi.mock('./procedure-matcher.js', () => ({
-    checkProcedureMatch: (...args: unknown[]) => mockCheckProcedureMatch(...args),
-    formatProcedureOffer: (...args: unknown[]) => mockFormatProcedureOffer(...args),
+    checkProcedureMatch: (...args: unknown[]) =>
+      mockCheckProcedureMatch(...args),
+    formatProcedureOffer: (...args: unknown[]) =>
+      mockFormatProcedureOffer(...args),
     executeProcedure: (...args: unknown[]) => mockExecuteProcedure(...args),
   }));
 
@@ -2027,7 +2177,10 @@ Modify `src/index.ts` message handling to check for matching procedures before e
 
       expect(handled).toBe(true);
       expect(mockExecuteProcedure).toHaveBeenCalled();
-      expect(mockSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining('learned procedure'));
+      expect(mockSendMessage).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining('learned procedure'),
+      );
     });
 
     it('sends offer message when auto_execute is false', async () => {
@@ -2043,7 +2196,9 @@ Modify `src/index.ts` message handling to check for matching procedures before e
         updated_at: new Date().toISOString(),
         groupId: 'g1',
       });
-      mockFormatProcedureOffer.mockReturnValue('I have a learned procedure... [Yes / Yes, always / No]');
+      mockFormatProcedureOffer.mockReturnValue(
+        'I have a learned procedure... [Yes / Yes, always / No]',
+      );
 
       const handled = await handleMessageWithProcedureCheck(
         'check PR status',
@@ -2054,7 +2209,10 @@ Modify `src/index.ts` message handling to check for matching procedures before e
       );
 
       expect(handled).toBe(true);
-      expect(mockSendMessage).toHaveBeenCalledWith('g1', expect.stringContaining('learned procedure'));
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'g1',
+        expect.stringContaining('learned procedure'),
+      );
     });
   });
   ```
@@ -2089,14 +2247,20 @@ Modify `src/index.ts` message handling to check for matching procedures before e
     if (!procedure) return false;
 
     if (procedure.auto_execute) {
-      logger.info({ name: procedure.name, groupId }, 'Auto-executing procedure');
+      logger.info(
+        { name: procedure.name, groupId },
+        'Auto-executing procedure',
+      );
       const success = await executeProcedure(procedure, groupId, runAgent);
 
       if (!success) {
         if (procedure.groupId) {
           updateProcedureStats(procedure.name, false, procedure.groupId);
         }
-        await sendMessage(groupId, 'Learned procedure failed, running normally.');
+        await sendMessage(
+          groupId,
+          'Learned procedure failed, running normally.',
+        );
         enqueueTask(async () => {
           await runAgent(message);
         });

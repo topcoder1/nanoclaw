@@ -50,8 +50,8 @@ interface ContainerInput {
   verbose?: boolean;
   // New fields
   provider?: 'anthropic' | 'openai' | 'google' | 'ollama' | 'groq' | 'together';
-  model?: string;           // e.g. 'gpt-4o', 'gemini-2.0-flash', 'llama3:70b'
-  providerBaseUrl?: string;  // For OpenAI-compatible endpoints
+  model?: string; // e.g. 'gpt-4o', 'gemini-2.0-flash', 'llama3:70b'
+  providerBaseUrl?: string; // For OpenAI-compatible endpoints
 }
 ```
 
@@ -73,14 +73,14 @@ if (provider === 'anthropic') {
 
 ### What each runtime handles
 
-| Feature | Claude (claude-agent-sdk) | Non-Claude (Vercel AI SDK) |
-|---------|--------------------------|----------------------------|
-| Agent loop | `query()` with `MessageStream` | `generateText()` with `maxSteps: 50` |
-| Session files | `.jsonl` transcript + session resumption | `CoreMessage[]` JSON files |
-| Hooks | `preCompact`, `preToolUse` | Custom pre-tool-use check |
-| Tools | MCP auto-discovery + IPC | Zod-schema tool definitions + IPC bridge |
-| Subagents | Agent teams (built-in) | Not supported (escalate to Claude instead) |
-| Model escalation | In-SDK (Sonnet → Opus via Agent tool) | Host-side auto-escalation only |
+| Feature          | Claude (claude-agent-sdk)                | Non-Claude (Vercel AI SDK)                 |
+| ---------------- | ---------------------------------------- | ------------------------------------------ |
+| Agent loop       | `query()` with `MessageStream`           | `generateText()` with `maxSteps: 50`       |
+| Session files    | `.jsonl` transcript + session resumption | `CoreMessage[]` JSON files                 |
+| Hooks            | `preCompact`, `preToolUse`               | Custom pre-tool-use check                  |
+| Tools            | MCP auto-discovery + IPC                 | Zod-schema tool definitions + IPC bridge   |
+| Subagents        | Agent teams (built-in)                   | Not supported (escalate to Claude instead) |
+| Model escalation | In-SDK (Sonnet → Opus via Agent tool)    | Host-side auto-escalation only             |
 
 ---
 
@@ -102,6 +102,7 @@ Groups configure their default provider and model in `groups/{name}/config.json`
 ```
 
 All fields are optional. Defaults:
+
 - `provider`: `"anthropic"`
 - `model`: `null` (uses provider default — Sonnet for Claude, gpt-4o-mini for OpenAI)
 - `escalationModel`: `null` (uses provider's strongest — Opus for Claude, gpt-4o for OpenAI)
@@ -125,14 +126,14 @@ This is a new IPC message type. The host reads it and passes provider/model to t
 
 API keys are injected by OneCLI at container spawn time. The host resolves which env var name to pass based on the provider:
 
-| Provider | Env Var | OneCLI Key |
-|----------|---------|------------|
-| `anthropic` | `ANTHROPIC_API_KEY` | Existing (already injected) |
-| `openai` | `OPENAI_API_KEY` | `OPENAI_API_KEY` |
-| `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_AI_KEY` |
-| `groq` | `GROQ_API_KEY` | `GROQ_API_KEY` |
-| `together` | `TOGETHER_AI_API_KEY` | `TOGETHER_API_KEY` |
-| `ollama` | (none — local) | N/A |
+| Provider    | Env Var                        | OneCLI Key                  |
+| ----------- | ------------------------------ | --------------------------- |
+| `anthropic` | `ANTHROPIC_API_KEY`            | Existing (already injected) |
+| `openai`    | `OPENAI_API_KEY`               | `OPENAI_API_KEY`            |
+| `google`    | `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_AI_KEY`             |
+| `groq`      | `GROQ_API_KEY`                 | `GROQ_API_KEY`              |
+| `together`  | `TOGETHER_AI_API_KEY`          | `TOGETHER_API_KEY`          |
+| `ollama`    | (none — local)                 | N/A                         |
 
 For Ollama, `providerBaseUrl` defaults to `http://host.docker.internal:11434/v1`.
 
@@ -201,6 +202,7 @@ export async function embedText(
 ### Provider selection
 
 Utility functions default to the cheapest fast model available. Resolution order:
+
 1. Explicit `model` option
 2. `UTILITY_LLM_MODEL` env var (e.g. `openai:gpt-4o-mini`)
 3. OpenAI `gpt-4o-mini` if `OPENAI_API_KEY` is set
@@ -221,20 +223,18 @@ The non-Claude agent loop. Handles tool calling, IPC bridging, session persisten
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
-function createProviderFactory(
-  provider: string,
-  baseUrl?: string | null,
-) {
+function createProviderFactory(provider: string, baseUrl?: string | null) {
   switch (provider) {
     case 'openai':
     case 'groq':
     case 'together':
     case 'ollama':
       return createOpenAI({
-        apiKey: process.env.OPENAI_API_KEY
-          ?? process.env.GROQ_API_KEY
-          ?? process.env.TOGETHER_AI_API_KEY
-          ?? 'ollama',
+        apiKey:
+          process.env.OPENAI_API_KEY ??
+          process.env.GROQ_API_KEY ??
+          process.env.TOGETHER_AI_API_KEY ??
+          'ollama',
         baseURL: baseUrl ?? undefined,
       });
     case 'google':
@@ -312,9 +312,7 @@ import { experimental_createMCPClient as createMCPClient } from 'ai';
 async function connectMcpTools(
   mcpServerPath: string,
 ): Promise<Record<string, CoreTool>> {
-  const mcpConfig = JSON.parse(
-    fs.readFileSync(mcpServerPath, 'utf-8'),
-  );
+  const mcpConfig = JSON.parse(fs.readFileSync(mcpServerPath, 'utf-8'));
 
   const allTools: Record<string, CoreTool> = {};
 
@@ -354,7 +352,9 @@ function buildIpcTools(): Record<string, CoreTool> {
     schedule: tool({
       description: 'Schedule a task for later execution',
       parameters: z.object({
-        when: z.string().describe('When to run (cron expression or relative time)'),
+        when: z
+          .string()
+          .describe('When to run (cron expression or relative time)'),
         prompt: z.string().describe('Task prompt'),
         label: z.string().optional().describe('Human-readable label'),
       }),
@@ -400,7 +400,8 @@ async function checkTrust(
   toolInput: Record<string, unknown>,
   chatJid: string,
 ): Promise<{ allowed: boolean; reason?: string }> {
-  const trustUrl = process.env.TRUST_GATEWAY_URL ?? 'http://host.docker.internal:10255';
+  const trustUrl =
+    process.env.TRUST_GATEWAY_URL ?? 'http://host.docker.internal:10255';
   const resp = await fetch(`${trustUrl}/check`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -447,6 +448,7 @@ Claude's `.jsonl` session files are managed by the SDK. Vercel sessions use a si
 ### System prompt construction
 
 The Vercel runner builds a system prompt from:
+
 1. Group's `CLAUDE.md` (instructions, personality)
 2. Global `CLAUDE.md` (shared rules)
 3. Learning system rules block (injected by host via enriched prompt)
@@ -468,7 +470,7 @@ Automatically upgrade a cheap default model to a stronger one when the message a
 
 ### Complexity scoring
 
-```typescript
+````typescript
 // File: src/llm/escalation.ts
 
 interface EscalationResult {
@@ -482,30 +484,52 @@ export function scoreComplexity(message: string): EscalationResult {
   const reasons: string[] = [];
 
   // Length signals
-  if (message.length > 500) { score += 2; reasons.push('long message'); }
-  if (message.length > 2000) { score += 3; reasons.push('very long message'); }
+  if (message.length > 500) {
+    score += 2;
+    reasons.push('long message');
+  }
+  if (message.length > 2000) {
+    score += 3;
+    reasons.push('very long message');
+  }
 
   // Code signals
-  if (/```/.test(message)) { score += 3; reasons.push('code block'); }
+  if (/```/.test(message)) {
+    score += 3;
+    reasons.push('code block');
+  }
   if (/\b(function|class|import|export|const|let|var)\b/.test(message)) {
-    score += 2; reasons.push('code keywords');
+    score += 2;
+    reasons.push('code keywords');
   }
 
   // Technical depth signals
-  if (/\b(debug|fix|refactor|architect|design|security|vulnerability)\b/i.test(message)) {
-    score += 2; reasons.push('technical keywords');
+  if (
+    /\b(debug|fix|refactor|architect|design|security|vulnerability)\b/i.test(
+      message,
+    )
+  ) {
+    score += 2;
+    reasons.push('technical keywords');
   }
   if (/\b(analyze|compare|evaluate|trade-?off)\b/i.test(message)) {
-    score += 2; reasons.push('analysis keywords');
+    score += 2;
+    reasons.push('analysis keywords');
   }
 
   // Multi-part signals
   const questionMarks = (message.match(/\?/g) || []).length;
-  if (questionMarks >= 3) { score += 2; reasons.push('multi-question'); }
+  if (questionMarks >= 3) {
+    score += 2;
+    reasons.push('multi-question');
+  }
 
   // File references
   const fileRefs = (message.match(/\b[\w/-]+\.\w{1,5}\b/g) || []).length;
-  if (fileRefs >= 3) { score += 2; reasons.push('multi-file reference'); }
+  if (fileRefs >= 3) {
+    score += 2;
+    reasons.push('multi-file reference');
+  }
 
   const shouldEscalate = score >= 5;
   return {
@@ -514,7 +538,7 @@ export function scoreComplexity(message: string): EscalationResult {
     score,
   };
 }
-```
+````
 
 ### Escalation flow
 
@@ -529,12 +553,12 @@ export function scoreComplexity(message: string): EscalationResult {
 
 Each group can set `escalationModel` in config. If not set, the provider's strongest model is used:
 
-| Provider | Default Model | Escalation Model |
-|----------|--------------|-----------------|
+| Provider    | Default Model       | Escalation Model  |
+| ----------- | ------------------- | ----------------- |
 | `anthropic` | `claude-sonnet-4-6` | `claude-opus-4-6` |
-| `openai` | `gpt-4o-mini` | `gpt-4o` |
-| `google` | `gemini-2.0-flash` | `gemini-2.5-pro` |
-| `ollama` | (user-configured) | (user-configured) |
+| `openai`    | `gpt-4o-mini`       | `gpt-4o`          |
+| `google`    | `gemini-2.0-flash`  | `gemini-2.5-pro`  |
+| `ollama`    | (user-configured)   | (user-configured) |
 
 ### Threshold
 
@@ -573,13 +597,13 @@ Root needs these for the utility LLM service (`src/llm/utility.ts`) and provider
 
 ### Environment variables
 
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `OPENAI_API_KEY` | OpenAI/compatible providers | If using OpenAI/Groq/Together |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini | If using Google |
-| `GROQ_API_KEY` | Groq (overrides OPENAI_API_KEY for Groq) | If using Groq |
-| `TOGETHER_AI_API_KEY` | Together AI | If using Together |
-| `UTILITY_LLM_MODEL` | Default model for utility functions | No (auto-detected) |
+| Variable                       | Purpose                                  | Required                      |
+| ------------------------------ | ---------------------------------------- | ----------------------------- |
+| `OPENAI_API_KEY`               | OpenAI/compatible providers              | If using OpenAI/Groq/Together |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini                            | If using Google               |
+| `GROQ_API_KEY`                 | Groq (overrides OPENAI_API_KEY for Groq) | If using Groq                 |
+| `TOGETHER_AI_API_KEY`          | Together AI                              | If using Together             |
+| `UTILITY_LLM_MODEL`            | Default model for utility functions      | No (auto-detected)            |
 
 All keys are managed by OneCLI and injected at runtime. No keys are stored in `.env` or committed.
 
@@ -629,6 +653,7 @@ container/agent-runner/src/
 ## Scope Boundaries
 
 ### In scope
+
 - Dual-runtime agent runner (claude-agent-sdk + Vercel AI SDK)
 - Per-group provider/model configuration
 - IPC and MCP tool bridging for Vercel path
@@ -638,6 +663,7 @@ container/agent-runner/src/
 - Trust gateway integration for Vercel path
 
 ### Out of scope (future sub-projects)
+
 - Browser Act integration (Sub-project 2)
 - Mem0 + Qdrant semantic memory (Sub-project 3)
 - Model routing intelligence / cost optimization (Sub-project 4)

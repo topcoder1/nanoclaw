@@ -13,11 +13,13 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
 ## Sections to Include
 
 ### 1. Calendar Today
+
 - List all events from Google Calendar for today
 - For meetings with 2+ attendees, note attendee names
 - Flag meetings starting within 2 hours
 
 ### 2. Emails Needing Response
+
 - Call `get_awaiting_reply()` from superpilot MCP
 - Call `get_triaged_emails(since=yesterday)` for recent arrivals
 - Show [account] tag, sender, subject, and age for each
@@ -37,11 +39,13 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
     failures, never paraphrase.
 
 ### 3. Commitments Due
+
 - Check the commitments table for items due today or this week
 - Separate "mine" (things I promised) from "theirs" (things owed to me)
 - Flag overdue items
 
 ### 4. Discord Overnight
+
 - Run the Discord digest to summarize overnight activity:
   ```bash
   python3 /workspace/project/scripts/discord-digest.py --output-only
@@ -65,6 +69,7 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
   that can be embedded directly under the "DISCORD OVERNIGHT" section.
 
 ### 5. Meeting Prep (First Meeting)
+
 - For the first meeting today with 2+ attendees:
   - Search KB for each attendee (search_kb with contact tag)
   - Check recent emails with attendees
@@ -74,6 +79,7 @@ Daily at 7:30 AM CST. Scheduled as a cron task: `30 7 * * *`
 ## Format
 
 Keep the briefing scannable:
+
 - Section headers with counts
 - Bullet points, not paragraphs
 - Most urgent items first within each section
@@ -83,6 +89,7 @@ Keep the briefing scannable:
 ## Graceful Degradation
 
 If any section fails (superpilot unreachable, calendar API error, etc.):
+
 - Skip that section
 - Note "[Section unavailable]" briefly
 - Continue with remaining sections

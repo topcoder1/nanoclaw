@@ -134,7 +134,10 @@ export function normalizeConfidenceMarkers(
 Update `formatOutbound` to call `normalizeConfidenceMarkers`. Since all current channels support Unicode, `plainText` defaults to `false` and the markers pass through unchanged. This leaves a clean hook for future plain-text channels.
 
 ```typescript
-export function formatOutbound(rawText: string, plainText: boolean = false): string {
+export function formatOutbound(
+  rawText: string,
+  plainText: boolean = false,
+): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
   return normalizeConfidenceMarkers(text, plainText);
@@ -180,12 +183,22 @@ function validateActionIntent(
 
   // Destructive tools should not appear with purely read-intent descriptions
   const destructiveTools = ['delete', 'remove', 'drop', 'truncate', 'wipe'];
-  const readOnlyDescriptions = ['read', 'fetch', 'list', 'get', 'search', 'find', 'check', 'view'];
+  const readOnlyDescriptions = [
+    'read',
+    'fetch',
+    'list',
+    'get',
+    'search',
+    'find',
+    'check',
+    'view',
+  ];
 
   const toolIsDestructive = destructiveTools.some((d) => tool.includes(d));
   const descIsReadOnly =
-    readOnlyDescriptions.some((r) => desc.startsWith(r) || desc.includes(`to ${r}`)) &&
-    !destructiveTools.some((d) => desc.includes(d));
+    readOnlyDescriptions.some(
+      (r) => desc.startsWith(r) || desc.includes(`to ${r}`),
+    ) && !destructiveTools.some((d) => desc.includes(d));
 
   if (toolIsDestructive && descIsReadOnly) {
     return `tool "${toolName}" appears destructive but description implies read-only: "${description}"`;
@@ -200,26 +213,29 @@ function validateActionIntent(
 In `handleEvaluate`, after extracting `desc` and `toolName`, call the validator before the `evaluateTrust` call:
 
 ```typescript
-  // Pre-action intent validation (v1: rule-based)
-  const intentMismatch = validateActionIntent(toolName, desc);
-  if (intentMismatch) {
-    logger.warn({ toolName, groupId, reason: intentMismatch }, 'Intent mismatch detected');
-    const failedEvent: VerifyFailedEvent = {
-      type: 'verify.failed',
-      source: 'trust-gateway',
+// Pre-action intent validation (v1: rule-based)
+const intentMismatch = validateActionIntent(toolName, desc);
+if (intentMismatch) {
+  logger.warn(
+    { toolName, groupId, reason: intentMismatch },
+    'Intent mismatch detected',
+  );
+  const failedEvent: VerifyFailedEvent = {
+    type: 'verify.failed',
+    source: 'trust-gateway',
+    groupId,
+    timestamp: Date.now(),
+    payload: {
+      taskId: '',
       groupId,
-      timestamp: Date.now(),
-      payload: {
-        taskId: '',
-        groupId,
-        toolName,
-        reason: intentMismatch,
-      },
-    };
-    eventBus.emit('verify.failed', failedEvent);
-    // Log the mismatch but do not block — trust evaluation proceeds normally.
-    // A future plan will optionally reject here or escalate to the user.
-  }
+      toolName,
+      reason: intentMismatch,
+    },
+  };
+  eventBus.emit('verify.failed', failedEvent);
+  // Log the mismatch but do not block — trust evaluation proceeds normally.
+  // A future plan will optionally reject here or escalate to the user.
+}
 ```
 
 Also import `VerifyFailedEvent` at the top of the file:
@@ -270,23 +286,19 @@ CREATE TABLE IF NOT EXISTS trust_actions (
 After the `createSchema` function's ALTER TABLE migration block (where `context_mode` is added), add two more migrations:
 
 ```typescript
-  // Add confidence_level column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`,
-    );
-  } catch {
-    // Column already exists — ignore
-  }
+// Add confidence_level column if it doesn't exist (migration for existing DBs)
+try {
+  database.exec(`ALTER TABLE trust_actions ADD COLUMN confidence_level TEXT`);
+} catch {
+  // Column already exists — ignore
+}
 
-  // Add was_correct column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`,
-    );
-  } catch {
-    // Column already exists — ignore
-  }
+// Add was_correct column if it doesn't exist (migration for existing DBs)
+try {
+  database.exec(`ALTER TABLE trust_actions ADD COLUMN was_correct INTEGER`);
+} catch {
+  // Column already exists — ignore
+}
 ```
 
 **Note:** No new query functions are needed. Plan 7 will add `insertOutcome` / `updateOutcome` functions when it builds the learning system. The schema is prepared now to avoid a breaking migration later.
@@ -306,7 +318,8 @@ import { normalizeConfidenceMarkers } from './router.js';
 
 describe('normalizeConfidenceMarkers', () => {
   it('passes markers through unchanged in rich-text mode', () => {
-    const text = '✓ Verified: your refill is ready (source: browser)\n~ Unverified: Thursday appointment (source: memory)';
+    const text =
+      '✓ Verified: your refill is ready (source: browser)\n~ Unverified: Thursday appointment (source: memory)';
     expect(normalizeConfidenceMarkers(text, false)).toBe(text);
   });
 
@@ -339,14 +352,14 @@ Expected: zero TypeScript errors, all tests pass.
 
 ## Summary
 
-| Task | Files Changed | Cost |
-|------|---------------|------|
-| 1. Event types | `src/events.ts` | Zero |
-| 2. Self-check prompt | `container/agent-runner/src/index.ts` | Zero |
-| 3. Confidence markers | `src/router.ts` | Zero |
-| 4. Intent validation | `src/trust-gateway.ts` | Zero (rule-based) |
-| 5. Calibration schema | `src/db.ts` | Zero |
-| 6. Tests | `src/router.test.ts` | Zero |
+| Task                  | Files Changed                         | Cost              |
+| --------------------- | ------------------------------------- | ----------------- |
+| 1. Event types        | `src/events.ts`                       | Zero              |
+| 2. Self-check prompt  | `container/agent-runner/src/index.ts` | Zero              |
+| 3. Confidence markers | `src/router.ts`                       | Zero              |
+| 4. Intent validation  | `src/trust-gateway.ts`                | Zero (rule-based) |
+| 5. Calibration schema | `src/db.ts`                           | Zero              |
+| 6. Tests              | `src/router.test.ts`                  | Zero              |
 
 Total new files: 0 (one test file created if absent). Total changed files: 5. No new dependencies.
 

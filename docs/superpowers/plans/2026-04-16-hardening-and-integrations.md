@@ -15,6 +15,7 @@
 **Root cause:** The config mock is missing `STORE_DIR` (and several other config exports added during scope expansion). When `runAgent` calls `listProcedures()`, `procedure-store.ts` does `path.join(STORE_DIR, 'procedures')` with `STORE_DIR = undefined`, throwing `TypeError`. This kills `runAgent` before `runContainerAgent` is ever called.
 
 **Files:**
+
 - Modify: `src/index.test.ts:9-25` (config mock)
 
 - [ ] **Step 1: Verify current failures**
@@ -88,6 +89,7 @@ vi.mock factory, causing runAgent to throw before reaching the container."
 **Problem:** `parseStepFromNarration` only matches exact prefix verbs. The `extract` action exists in the type but has no parser branch. Polite phrasing ("please click", "can you open") is silently dropped. No fallback for unrecognized verbs.
 
 **Files:**
+
 - Modify: `container/skills/teach-mode/teach-mode.ts:18-46`
 - Modify: `container/skills/teach-mode/teach-mode.test.ts`
 
@@ -170,14 +172,23 @@ Expected: Multiple failures for extract, polite phrasing, scroll, select pattern
 Replace the function body in `container/skills/teach-mode/teach-mode.ts` (lines 18–46):
 
 ```typescript
-export function parseStepFromNarration(narration: string): ProcedureStep | null {
+export function parseStepFromNarration(
+  narration: string,
+): ProcedureStep | null {
   // Strip polite/filler prefixes before matching the action verb
   const stripped = narration
-    .replace(/^(please|can you|now|then|next,?|and then|first,?|finally,?)\s+/i, '')
+    .replace(
+      /^(please|can you|now|then|next,?|and then|first,?|finally,?)\s+/i,
+      '',
+    )
     .trim();
   const lower = stripped.toLowerCase().trim();
 
-  if (lower.startsWith('go to ') || lower.startsWith('navigate to ') || lower.startsWith('open ')) {
+  if (
+    lower.startsWith('go to ') ||
+    lower.startsWith('navigate to ') ||
+    lower.startsWith('open ')
+  ) {
     const url = stripped.replace(/^(go to|navigate to|open)\s+/i, '').trim();
     return { action: 'navigate', target: url, description: narration };
   }
@@ -188,26 +199,39 @@ export function parseStepFromNarration(narration: string): ProcedureStep | null 
   }
 
   if (
-    lower.startsWith('click ') || lower.startsWith('press ') ||
-    lower.startsWith('tap ') || lower.startsWith('select ') ||
+    lower.startsWith('click ') ||
+    lower.startsWith('press ') ||
+    lower.startsWith('tap ') ||
+    lower.startsWith('select ') ||
     lower.startsWith('choose ')
   ) {
-    const target = stripped.replace(/^(click|press|tap|select|choose)\s+(on\s+)?/i, '').trim();
+    const target = stripped
+      .replace(/^(click|press|tap|select|choose)\s+(on\s+)?/i, '')
+      .trim();
     return { action: 'click', target, description: narration };
   }
 
-  if (lower.startsWith('find ') || lower.startsWith('look for ') || lower.startsWith('locate ')) {
+  if (
+    lower.startsWith('find ') ||
+    lower.startsWith('look for ') ||
+    lower.startsWith('locate ')
+  ) {
     const target = stripped.replace(/^(find|look for|locate)\s+/i, '').trim();
     return { action: 'find', target, description: narration };
   }
 
-  if (lower.startsWith('type ') || lower.startsWith('enter ') || lower.startsWith('input ')) {
+  if (
+    lower.startsWith('type ') ||
+    lower.startsWith('enter ') ||
+    lower.startsWith('input ')
+  ) {
     const target = stripped.replace(/^(type|enter|input)\s+/i, '').trim();
     return { action: 'type', target, description: narration };
   }
 
   if (
-    lower.startsWith('extract ') || lower.startsWith('grab ') ||
+    lower.startsWith('extract ') ||
+    lower.startsWith('grab ') ||
     lower.startsWith('copy ')
   ) {
     const target = stripped.replace(/^(extract|grab|copy)\s+/i, '').trim();
@@ -215,7 +239,11 @@ export function parseStepFromNarration(narration: string): ProcedureStep | null 
   }
 
   if (lower.startsWith('wait ')) {
-    return { action: 'wait', target: stripped.replace(/^wait\s+/i, ''), description: narration };
+    return {
+      action: 'wait',
+      target: stripped.replace(/^wait\s+/i, ''),
+      description: narration,
+    };
   }
 
   return null;
@@ -247,6 +275,7 @@ actions. 20 new test cases covering all patterns."
 **Problem:** The container-side `ProcedureStep` uses `description` and `target` fields, but the store-side `ProcedureStep` uses `details`. When `executeProcedure` renders steps, it does `s.details || s.action` — teach-mode procedures have no `details` field, so they render as bare action names like "navigate" instead of "Go to alto.com".
 
 **Files:**
+
 - Modify: `container/skills/teach-mode/teach-mode.ts:48-60` (buildProcedure)
 - Modify: `container/skills/teach-mode/teach-mode.test.ts`
 - Test: `src/learning/procedure-matcher.test.ts`
@@ -322,27 +351,41 @@ export function buildProcedure(
 In `container/skills/teach-mode/teach-mode.test.ts`, update the `buildProcedure` test "preserves all steps in order":
 
 ```typescript
-  it('preserves all steps in order and adds details field', () => {
-    const steps = [
-      { action: 'navigate' as const, target: 'a.com', description: 'Go to a.com' },
-      { action: 'click' as const, target: 'Login', description: 'Click Login' },
-      { action: 'type' as const, target: 'user@test.com', description: 'Type user@test.com' },
-      { action: 'click' as const, target: 'Submit', description: 'Click Submit' },
-      { action: 'wait' as const, target: '3 seconds', description: 'Wait 3 seconds' },
-    ];
-    const proc = buildProcedure('login flow', steps, 'g1');
-    expect(proc.steps).toHaveLength(5);
-    expect(proc.steps[0].action).toBe('navigate');
-    expect(proc.steps[0].details).toBe('Go to a.com');
-    expect(proc.steps[4].action).toBe('wait');
-    expect(proc.steps[4].details).toBe('Wait 3 seconds');
-  });
+it('preserves all steps in order and adds details field', () => {
+  const steps = [
+    {
+      action: 'navigate' as const,
+      target: 'a.com',
+      description: 'Go to a.com',
+    },
+    { action: 'click' as const, target: 'Login', description: 'Click Login' },
+    {
+      action: 'type' as const,
+      target: 'user@test.com',
+      description: 'Type user@test.com',
+    },
+    { action: 'click' as const, target: 'Submit', description: 'Click Submit' },
+    {
+      action: 'wait' as const,
+      target: '3 seconds',
+      description: 'Wait 3 seconds',
+    },
+  ];
+  const proc = buildProcedure('login flow', steps, 'g1');
+  expect(proc.steps).toHaveLength(5);
+  expect(proc.steps[0].action).toBe('navigate');
+  expect(proc.steps[0].details).toBe('Go to a.com');
+  expect(proc.steps[4].action).toBe('wait');
+  expect(proc.steps[4].details).toBe('Wait 3 seconds');
+});
 ```
 
 Also update the end-to-end test assertion to check `details`:
 
 ```typescript
-    expect(content.procedure.steps[0].details).toBe('Go to https://alto.com/pharmacy');
+expect(content.procedure.steps[0].details).toBe(
+  'Go to https://alto.com/pharmacy',
+);
 ```
 
 - [ ] **Step 5: Run all tests**
@@ -367,11 +410,13 @@ executeProcedure renders 'Go to alto.com' instead of bare 'navigate'."
 **Problem:** `auto_execute` is hardcoded to `false` and never updated. Procedures accumulate on disk forever. No decay policy.
 
 **Design:**
+
 - After 5 consecutive successes (`success_count >= 5` and `failure_count === 0`), promote to `auto_execute: true`
 - After 3 consecutive failures (failure_count >= 3 and success_count === 0) OR if `failure_count / (success_count + failure_count) > 0.5` with at least 5 total runs, mark as deprecated (don't delete — rename to `{name}.deprecated.json`)
 - `promoteProcedure` cleans up group copies after promoting to global
 
 **Files:**
+
 - Modify: `src/memory/procedure-store.ts:150-182` (updateProcedureStats)
 - Modify: `src/memory/procedure-store.test.ts`
 - Modify: `src/learning/procedure-matcher.ts:67-104` (promoteProcedure cleanup)
@@ -381,40 +426,40 @@ executeProcedure renders 'Go to alto.com' instead of bare 'navigate'."
 Add to `src/memory/procedure-store.test.ts`:
 
 ```typescript
-  describe('auto-execute promotion', () => {
-    it('promotes to auto_execute after 5 consecutive successes', () => {
-      saveProcedure(makeProcedure({ success_count: 4, failure_count: 0 }));
-      updateProcedureStats('test_procedure', true);
-      const found = findProcedure('test this thing');
-      expect(found!.auto_execute).toBe(true);
-      expect(found!.success_count).toBe(5);
-    });
-
-    it('does not promote if any failures exist', () => {
-      saveProcedure(makeProcedure({ success_count: 4, failure_count: 1 }));
-      updateProcedureStats('test_procedure', true);
-      const found = findProcedure('test this thing');
-      expect(found!.auto_execute).toBe(false);
-    });
+describe('auto-execute promotion', () => {
+  it('promotes to auto_execute after 5 consecutive successes', () => {
+    saveProcedure(makeProcedure({ success_count: 4, failure_count: 0 }));
+    updateProcedureStats('test_procedure', true);
+    const found = findProcedure('test this thing');
+    expect(found!.auto_execute).toBe(true);
+    expect(found!.success_count).toBe(5);
   });
 
-  describe('procedure deprecation', () => {
-    it('deprecates after 3 consecutive failures with no successes', () => {
-      saveProcedure(makeProcedure({ success_count: 0, failure_count: 2 }));
-      updateProcedureStats('test_procedure', false);
-      // Original file should be gone
-      const found = findProcedure('test this thing');
-      expect(found).toBeNull();
-    });
-
-    it('deprecates when failure rate exceeds 50% with 5+ runs', () => {
-      saveProcedure(makeProcedure({ success_count: 2, failure_count: 2 }));
-      updateProcedureStats('test_procedure', false);
-      // failure_count = 3, total = 5, rate = 60% > 50%
-      const found = findProcedure('test this thing');
-      expect(found).toBeNull();
-    });
+  it('does not promote if any failures exist', () => {
+    saveProcedure(makeProcedure({ success_count: 4, failure_count: 1 }));
+    updateProcedureStats('test_procedure', true);
+    const found = findProcedure('test this thing');
+    expect(found!.auto_execute).toBe(false);
   });
+});
+
+describe('procedure deprecation', () => {
+  it('deprecates after 3 consecutive failures with no successes', () => {
+    saveProcedure(makeProcedure({ success_count: 0, failure_count: 2 }));
+    updateProcedureStats('test_procedure', false);
+    // Original file should be gone
+    const found = findProcedure('test this thing');
+    expect(found).toBeNull();
+  });
+
+  it('deprecates when failure rate exceeds 50% with 5+ runs', () => {
+    saveProcedure(makeProcedure({ success_count: 2, failure_count: 2 }));
+    updateProcedureStats('test_procedure', false);
+    // failure_count = 3, total = 5, rate = 60% > 50%
+    const found = findProcedure('test this thing');
+    expect(found).toBeNull();
+  });
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -464,7 +509,10 @@ export function updateProcedureStats(
       // Rename to .deprecated.json instead of deleting
       const deprecatedPath = filePath.replace(/\.json$/, '.deprecated.json');
       fs.renameSync(filePath, deprecatedPath);
-      logger.info({ name, groupId, filePath: deprecatedPath }, 'Procedure deprecated');
+      logger.info(
+        { name, groupId, filePath: deprecatedPath },
+        'Procedure deprecated',
+      );
       return true;
     }
 
@@ -503,6 +551,7 @@ after 3 failures with no successes, or >50% failure rate after 5 runs."
 **Problem:** `pruneOrphanedTraces()` is defined but never called. Trace buffer grows unboundedly. The prune check uses `actions[0].timestamp` (first action) which would prune active long-running traces.
 
 **Files:**
+
 - Modify: `src/learning/procedure-recorder.ts:32-42` (pruneOrphanedTraces)
 - Modify: `src/learning/procedure-recorder.test.ts`
 - Modify: `src/learning/index.ts` (schedule pruning)
@@ -620,18 +669,26 @@ In `src/learning/index.ts`, add a pruning interval after the event handlers. Fin
 
 ```typescript
 // Prune orphaned trace buffers every 15 minutes
-setInterval(() => {
-  const pruned = pruneOrphanedTraces();
-  if (pruned > 0) {
-    logger.debug({ pruned }, 'Pruned orphaned traces');
-  }
-}, 15 * 60 * 1000);
+setInterval(
+  () => {
+    const pruned = pruneOrphanedTraces();
+    if (pruned > 0) {
+      logger.debug({ pruned }, 'Pruned orphaned traces');
+    }
+  },
+  15 * 60 * 1000,
+);
 ```
 
 Import `pruneOrphanedTraces` at the top of `src/learning/index.ts`:
 
 ```typescript
-import { startTrace, addTrace, finalizeTrace, pruneOrphanedTraces } from './procedure-recorder.js';
+import {
+  startTrace,
+  addTrace,
+  finalizeTrace,
+  pruneOrphanedTraces,
+} from './procedure-recorder.js';
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -659,6 +716,7 @@ buffer cap. Scheduled every 15 minutes via initLearningSystem."
 **Design:** Register a handler in `src/index.ts` that listens for `webhook.received` events and enqueues them as tasks for the appropriate group (defaults to `main`).
 
 **Files:**
+
 - Modify: `src/index.ts` (add event listener)
 - Modify: `src/events.ts` (ensure WebhookReceivedEvent type exists)
 - Create: `src/__tests__/webhook-consumer.test.ts`
@@ -782,13 +840,17 @@ import { handleWebhookEvent } from './webhook-consumer.js';
 
 // After startWebhookServer(WEBHOOK_PORT, WEBHOOK_SECRET):
 eventBus.on('webhook.received', (event) => {
-  handleWebhookEvent(event, (prompt) => {
-    // Enqueue as a task for the main group
-    const mainGroup = Object.values(registeredGroups).find((g) => g.isMain);
-    if (mainGroup) {
-      enqueueTask(mainGroup.folder, prompt);
-    }
-  }, 'main');
+  handleWebhookEvent(
+    event,
+    (prompt) => {
+      // Enqueue as a task for the main group
+      const mainGroup = Object.values(registeredGroups).find((g) => g.isMain);
+      if (mainGroup) {
+        enqueueTask(mainGroup.folder, prompt);
+      }
+    },
+    'main',
+  );
 });
 ```
 
@@ -817,10 +879,12 @@ Empty payloads are silently skipped."
 **Problem:** Qdrant collection exists and is healthy but has 0 vectors. No automatic ingestion pipeline — only explicit agent IPC `learn_fact` calls add facts.
 
 **Design:** Add automatic fact ingestion at two points:
+
 1. After each successful agent task (capture the task summary as a fact)
 2. From SSE email classifications (capture important email summaries)
 
 **Files:**
+
 - Modify: `src/index.ts` (post-task fact capture)
 - Modify: `src/sse-classifier.ts` (email fact capture)
 - Create: `src/__tests__/knowledge-ingestion.test.ts`
@@ -984,6 +1048,7 @@ tasks and very short prompts are skipped. Non-fatal on errors."
 **Problem:** PR #1795 (`feat/scope-expansion` branch) is missing the latest commits: IPC bug fix, config fix, teach-mode tests, and all the work from this plan.
 
 **Files:**
+
 - No code changes — git operations only
 
 - [ ] **Step 1: Update feat/scope-expansion branch from main**

@@ -24,12 +24,15 @@ NanoClaw currently operates as a narrator — it reports what happened and asks 
 ### Hybrid: Message Renderer + Event-Driven Consumers
 
 **Message Renderer Pipeline** (for individual message formatting):
+
 ```
 Agent Output → Classifier → Formatter → Action Attacher → Channel Dispatch
 ```
+
 Inserted into the existing `router.ts` pipeline between agent output and `routeOutbound()`.
 
 **Event-Driven Consumers** (for aggregate/live views):
+
 ```
 Event Bus → StatusBarManager
            → AutoApprovalTimer
@@ -37,6 +40,7 @@ Event Bus → StatusBarManager
            → DraftEnrichmentWatcher
            → FailureEscalator
 ```
+
 New consumers subscribe to existing event bus. The pinned status bar and Mini App are naturally event-driven — they aggregate state across multiple agents and time.
 
 This avoids coupling agents to UI concerns (agents don't know about categories or buttons) while getting live-update benefits where they matter.
@@ -49,13 +53,13 @@ This avoids coupling agents to UI concerns (agents don't know about categories o
 
 Sits in the router between agent output and channel dispatch. Analyzes message content and context to assign metadata:
 
-| Field | Values | Purpose |
-|-------|--------|---------|
-| `category` | `financial`, `security`, `email`, `team`, `account`, `auto-handled` | Icon + color bar |
-| `urgency` | `info`, `attention`, `action-required`, `urgent` | Sort order, notification behavior |
-| `actions` | Array of `{ label, callback, style, confirmRequired }` | Inline buttons |
-| `batchable` | boolean | Can be grouped with similar items |
-| `miniAppUrl` | optional URL | "View Details" button opens Mini App |
+| Field        | Values                                                              | Purpose                              |
+| ------------ | ------------------------------------------------------------------- | ------------------------------------ |
+| `category`   | `financial`, `security`, `email`, `team`, `account`, `auto-handled` | Icon + color bar                     |
+| `urgency`    | `info`, `attention`, `action-required`, `urgent`                    | Sort order, notification behavior    |
+| `actions`    | Array of `{ label, callback, style, confirmRequired }`              | Inline buttons                       |
+| `batchable`  | boolean                                                             | Can be grouped with similar items    |
+| `miniAppUrl` | optional URL                                                        | "View Details" button opens Mini App |
 
 ### Classification Approach
 
@@ -67,14 +71,14 @@ Rule-based (no ML needed — message types are well-defined):
 
 ### Rendering Rules
 
-| Category + Urgency | Visual Treatment |
-|---------------------|-----------------|
-| `auto-handled` + `info` | Dimmed text, grey left bar, batched together |
-| `financial` + `action-required` | Green left bar, cross-referenced explanation, two-step confirm button |
-| `security` + `urgent` | Red left bar, plan summary, execute/modify/defer buttons, silence-means-approval timer |
-| `email` + `attention` | Blue left bar, diff summary if draft enriched, view/send/revert buttons |
-| `team` + `info` | Purple left bar, condensed single-line format |
-| `account` + `info` | Silent execution, only surfaces on failure (red bar, retry/escalate buttons) |
+| Category + Urgency              | Visual Treatment                                                                       |
+| ------------------------------- | -------------------------------------------------------------------------------------- |
+| `auto-handled` + `info`         | Dimmed text, grey left bar, batched together                                           |
+| `financial` + `action-required` | Green left bar, cross-referenced explanation, two-step confirm button                  |
+| `security` + `urgent`           | Red left bar, plan summary, execute/modify/defer buttons, silence-means-approval timer |
+| `email` + `attention`           | Blue left bar, diff summary if draft enriched, view/send/revert buttons                |
+| `team` + `info`                 | Purple left bar, condensed single-line format                                          |
+| `account` + `info`              | Silent execution, only surfaces on failure (red bar, retry/escalate buttons)           |
 
 ### Integration Point
 
@@ -116,6 +120,7 @@ TODAY: 12 auto-handled · 3 drafts enriched · 2 needs you · 1 blocked
 ### Implementation
 
 New `StatusBarManager` class subscribes to event bus:
+
 - `task.started` / `task.progress` / `task.complete` → update Active section
 - `item.classified` with `urgency >= attention` → add to Needs You
 - `item.resolved` / callback query processed → remove from Needs You
@@ -128,23 +133,23 @@ New `StatusBarManager` class subscribes to event bus:
 
 ### Button Types
 
-| Type | Example | Behavior |
-|------|---------|----------|
-| Primary action | `✓ Confirm Both` | Green, one tap executes |
-| Destructive safe | `📥 Archive` | Grey → tap → transforms to `⚠ Confirm Archive \| Cancel` for 5s |
-| Plan execution | `▶ Execute Plan` | Red/orange, one tap starts the agent |
-| Secondary | `Review Details`, `View Diff` | Grey, opens detail or Mini App |
-| Timed auto-approve | `▶ Starting in 15m...` | Countdown visible, tap to cancel or accelerate |
+| Type               | Example                       | Behavior                                                        |
+| ------------------ | ----------------------------- | --------------------------------------------------------------- |
+| Primary action     | `✓ Confirm Both`              | Green, one tap executes                                         |
+| Destructive safe   | `📥 Archive`                  | Grey → tap → transforms to `⚠ Confirm Archive \| Cancel` for 5s |
+| Plan execution     | `▶ Execute Plan`              | Red/orange, one tap starts the agent                            |
+| Secondary          | `Review Details`, `View Diff` | Grey, opens detail or Mini App                                  |
+| Timed auto-approve | `▶ Starting in 15m...`        | Countdown visible, tap to cancel or accelerate                  |
 
 ### Interaction Modes by Domain
 
-| Domain | Buttons | Autonomy |
-|--------|---------|----------|
-| Account management | None (silent). Failure: retry/escalate/dismiss | Execute silently, escalate on failure |
-| Financial | Two-step confirm + review details | Cross-reference and explain, user confirms |
-| Security/ops | Execute/modify/defer + auto-approve timer | Brief with plan. Urgent: 15-min silence-means-approval |
-| Email drafts | View Diff / Send Now / Revert | Draft-and-hold, notify of changes |
-| Routine approvals | Single-tap primary button | Quick-reply shorthand always works |
+| Domain             | Buttons                                        | Autonomy                                               |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------ |
+| Account management | None (silent). Failure: retry/escalate/dismiss | Execute silently, escalate on failure                  |
+| Financial          | Two-step confirm + review details              | Cross-reference and explain, user confirms             |
+| Security/ops       | Execute/modify/defer + auto-approve timer      | Brief with plan. Urgent: 15-min silence-means-approval |
+| Email drafts       | View Diff / Send Now / Revert                  | Draft-and-hold, notify of changes                      |
+| Routine approvals  | Single-tap primary button                      | Quick-reply shorthand always works                     |
 
 ### Callback Routing
 
@@ -155,6 +160,7 @@ New `StatusBarManager` class subscribes to event bus:
 ### Two-Step Safety
 
 For destructive and financial actions:
+
 1. User taps the action button (e.g., "Archive")
 2. Message edits in-place: original button replaced with `⚠ Confirm [action] | Cancel` + 5-second countdown
 3. If countdown expires or user taps Cancel → reverts to original buttons
@@ -164,11 +170,11 @@ For destructive and financial actions:
 
 Always available alongside buttons:
 
-| Shortcut | Action |
-|----------|--------|
-| `y` or `go` | Approve the most recent pending action |
-| `stop` | Cancel any silence-means-approval timer |
-| `status` | Force status bar refresh |
+| Shortcut    | Action                                  |
+| ----------- | --------------------------------------- |
+| `y` or `go` | Approve the most recent pending action  |
+| `stop`      | Cancel any silence-means-approval timer |
+| `status`    | Force status bar refresh                |
 
 ---
 
@@ -230,6 +236,7 @@ How NanoClaw works with SuperPilot's auto-drafts — a quality layer, not a repl
 ### When SuperPilot Doesn't Draft
 
 If SuperPilot skipped an email (no rule matched, deemed not worth replying), NanoClaw can create a new draft if it determines a reply is warranted based on broader context:
+
 - Cross-channel knowledge (team discussed this in Telegram/Discord)
 - Financial context (invoice referenced, payment received)
 - Action items that need acknowledgment
@@ -263,13 +270,13 @@ Event bus consumers that power the pinned status bar, auto-approval, and agent c
 
 ### New Event Consumers
 
-| Consumer | Subscribes To | Produces |
-|----------|--------------|----------|
-| `StatusBarManager` | `task.*`, `item.*`, `digest.*` | Edits pinned message on state change |
-| `AutoApprovalTimer` | `plan.proposed` | Starts countdown, emits `plan.auto-approved` or `plan.cancelled` |
-| `MiniAppStateManager` | `task.*` | Updates task state in SQLite for Mini App polling |
-| `DraftEnrichmentWatcher` | `email.draft.created` | Triggers enrichment evaluator |
-| `FailureEscalator` | `task.failed`, `task.blocked` | Sends loud failure message with retry/escalate buttons |
+| Consumer                 | Subscribes To                  | Produces                                                         |
+| ------------------------ | ------------------------------ | ---------------------------------------------------------------- |
+| `StatusBarManager`       | `task.*`, `item.*`, `digest.*` | Edits pinned message on state change                             |
+| `AutoApprovalTimer`      | `plan.proposed`                | Starts countdown, emits `plan.auto-approved` or `plan.cancelled` |
+| `MiniAppStateManager`    | `task.*`                       | Updates task state in SQLite for Mini App polling                |
+| `DraftEnrichmentWatcher` | `email.draft.created`          | Triggers enrichment evaluator                                    |
+| `FailureEscalator`       | `task.failed`, `task.blocked`  | Sends loud failure message with retry/escalate buttons           |
 
 ### StatusBarManager
 
@@ -302,6 +309,7 @@ Event bus consumers that power the pinned status bar, auto-approval, and agent c
 ### Batching Rules
 
 Messages classified as `auto-handled` + `info` are held in a buffer. Buffer flushes on:
+
 - **5 items accumulated** — sends single collapsed message
 - **10 minutes elapsed** since first buffered item
 - **Higher-priority message arrives** — flush batch first, then send important message (always at bottom/most recent)
@@ -373,17 +381,18 @@ When NanoClaw asks a question, appropriate buttons are auto-attached based on qu
 ### Question Detection
 
 The message classifier detects question patterns in outbound messages:
+
 - Yes/no: "Want me to...?", "Should I...?", "All expected?", "Is this correct?"
 - Confirmation: "Were both expected?", "Approve this?"
 - Multi-option: numbered lists with a question at the end
 
 ### Button Variants
 
-| Question Type | Buttons |
-|---------------|---------|
-| Yes/No | `Yes \| No \| Let me think...` |
+| Question Type          | Buttons                                              |
+| ---------------------- | ---------------------------------------------------- |
+| Yes/No                 | `Yes \| No \| Let me think...`                       |
 | Financial confirmation | `Yes, all expected \| Not all — review \| Details ↗` |
-| Multi-option | One button per option + `Let me respond` fallback |
+| Multi-option           | One button per option + `Let me respond` fallback    |
 
 ### "Let me think..." / Defer Behavior
 
@@ -407,6 +416,7 @@ After an action is performed on an email, NanoClaw offers archiving without auto
 ### Layer 1: Inline Post-Action
 
 After the user acts on an email (confirms, replies, approves):
+
 1. Message edits in-place: buttons replaced with result text + new buttons
 2. Result format: `✓ [action completed]` + `📥 Archive | Done`
 3. "Archive" → two-step confirm (consistent with safety pattern throughout)
@@ -416,6 +426,7 @@ After the user acts on an email (confirms, replies, approves):
 ### Layer 2: Morning Digest Batch Sweep
 
 For acted-on emails that weren't archived:
+
 - Morning digest includes an "Inbox Cleanup" section
 - Lists only emails where NanoClaw completed an action (replied, confirmed, verified)
 - Never includes emails that were just read or previewed
@@ -437,36 +448,36 @@ For acted-on emails that weren't archived:
 
 Events that must be added to the event bus (not already emitted):
 
-| Event | Emitted By | Data |
-|-------|-----------|------|
-| `plan.proposed` | Agent container on plan output | `{ taskId, plan, urgency, domain }` |
-| `plan.auto-approved` | AutoApprovalTimer | `{ taskId }` |
-| `plan.cancelled` | AutoApprovalTimer on user cancel | `{ taskId }` |
-| `email.draft.created` | Gmail watcher | `{ draftId, threadId, account }` |
-| `email.draft.enriched` | DraftEnrichmentWatcher | `{ draftId, changes }` |
-| `task.progress` | Container runner | `{ taskId, step, total, substatus }` |
-| `email.action.completed` | Archive tracker | `{ emailId, threadId, account, action }` |
+| Event                    | Emitted By                       | Data                                     |
+| ------------------------ | -------------------------------- | ---------------------------------------- |
+| `plan.proposed`          | Agent container on plan output   | `{ taskId, plan, urgency, domain }`      |
+| `plan.auto-approved`     | AutoApprovalTimer                | `{ taskId }`                             |
+| `plan.cancelled`         | AutoApprovalTimer on user cancel | `{ taskId }`                             |
+| `email.draft.created`    | Gmail watcher                    | `{ draftId, threadId, account }`         |
+| `email.draft.enriched`   | DraftEnrichmentWatcher           | `{ draftId, changes }`                   |
+| `task.progress`          | Container runner                 | `{ taskId, step, total, substatus }`     |
+| `email.action.completed` | Archive tracker                  | `{ emailId, threadId, account, action }` |
 
 Existing events already emitted and consumed: `task.started`, `task.complete`, `task.failed`, `task.queued`, `item.classified`, `digest.sent`.
 
 ## Files Modified
 
-| File | Changes |
-|------|---------|
-| `src/router.ts` | Insert classifier + formatter pipeline before `routeOutbound()` |
-| `src/types.ts` | Add `MessageMeta` interface, extend `Action` type |
-| `src/db.ts` | Add task state table, draft originals table |
-| `src/events.ts` | Add new event types listed above |
-| `src/channels/telegram.ts` | Mini App button support (`web_app` keyboard), two-step callback handling |
-| New: `src/message-classifier.ts` | Rule-based classifier |
-| New: `src/message-formatter.ts` | Category → visual format rendering |
-| New: `src/status-bar.ts` | StatusBarManager event consumer |
-| New: `src/auto-approval.ts` | AutoApprovalTimer event consumer |
-| New: `src/draft-enrichment.ts` | DraftEnrichmentWatcher + evaluator |
-| New: `src/mini-app/server.ts` | Express server for Mini App HTML |
-| New: `src/mini-app/templates/` | HTML templates for task detail pages |
-| New: `src/failure-escalator.ts` | FailureEscalator event consumer |
-| New: `src/message-batcher.ts` | Batch buffer + flush logic |
-| New: `src/email-preview.ts` | Gmail API fetch, preview truncation, caching |
-| New: `src/question-detector.ts` | Pattern matching for auto-attaching yes/no/multi-option buttons |
-| New: `src/archive-tracker.ts` | Post-action archive flow, acted_emails table, batch sweep |
+| File                             | Changes                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| `src/router.ts`                  | Insert classifier + formatter pipeline before `routeOutbound()`          |
+| `src/types.ts`                   | Add `MessageMeta` interface, extend `Action` type                        |
+| `src/db.ts`                      | Add task state table, draft originals table                              |
+| `src/events.ts`                  | Add new event types listed above                                         |
+| `src/channels/telegram.ts`       | Mini App button support (`web_app` keyboard), two-step callback handling |
+| New: `src/message-classifier.ts` | Rule-based classifier                                                    |
+| New: `src/message-formatter.ts`  | Category → visual format rendering                                       |
+| New: `src/status-bar.ts`         | StatusBarManager event consumer                                          |
+| New: `src/auto-approval.ts`      | AutoApprovalTimer event consumer                                         |
+| New: `src/draft-enrichment.ts`   | DraftEnrichmentWatcher + evaluator                                       |
+| New: `src/mini-app/server.ts`    | Express server for Mini App HTML                                         |
+| New: `src/mini-app/templates/`   | HTML templates for task detail pages                                     |
+| New: `src/failure-escalator.ts`  | FailureEscalator event consumer                                          |
+| New: `src/message-batcher.ts`    | Batch buffer + flush logic                                               |
+| New: `src/email-preview.ts`      | Gmail API fetch, preview truncation, caching                             |
+| New: `src/question-detector.ts`  | Pattern matching for auto-attaching yes/no/multi-option buttons          |
+| New: `src/archive-tracker.ts`    | Post-action archive flow, acted_emails table, batch sweep                |

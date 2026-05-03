@@ -59,11 +59,11 @@ NanoClaw should decrease your workload on low-priority stuff and eliminate noise
 
 **Relationship between systems:**
 
-| System | Role |
-|--------|------|
-| **NanoClaw** | Orchestration + intelligence. Decides what to do, when, and how. The brain. |
-| **Superpilot** | Email pipeline + knowledge base. Triages email, stores/retrieves knowledge. The filing cabinet. |
-| **Superpilot MCP** | Wrapper around superpilot's FastAPI + new endpoints for NanoClaw-specific needs. |
+| System             | Role                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| **NanoClaw**       | Orchestration + intelligence. Decides what to do, when, and how. The brain.                     |
+| **Superpilot**     | Email pipeline + knowledge base. Triages email, stores/retrieves knowledge. The filing cabinet. |
+| **Superpilot MCP** | Wrapper around superpilot's FastAPI + new endpoints for NanoClaw-specific needs.                |
 
 NanoClaw does NOT replace superpilot. Superpilot continues doing what it's good at (email classification, KB-grounded drafting, Gmail Push). NanoClaw adds the action/automation/cross-channel intelligence layer on top.
 
@@ -98,29 +98,34 @@ Each trigger spawns a full container agent session with all MCP tools. **Session
 **Priority ordering within session:** Escalations first, then proposals, then auto-handled items. If session nears timeout (12 min mark), save progress and defer remaining items to next cycle.
 
 **Phase 1 — Gather**
+
 - Pull triaged emails from superpilot MCP (`get_triaged_emails`)
 - Check Discord for mentions, DMs, activity in watched channels
 - Load pending approvals (proposals awaiting your response)
 - Check follow-ups and commitments due
 
 **Phase 2 — Reason**
+
 - Cross-reference: email from X + Discord message from X = same topic
 - Prioritize by urgency, relationship importance, deadline proximity
 - Search KB for context (`search_kb`)
 - Classify each item into action tier: AUTO, PROPOSE, or ESCALATE
 
 **Phase 3 — Act**
+
 - **AUTO:** Create calendar events, archive emails, file documents, update KB, log to project repos
 - **PROPOSE:** Draft replies, prepare research summaries, stage GitHub issues — hold for approval
 - **ESCALATE:** Compose escalation message with context and suggested action — send immediately
 
 **Phase 4 — Research** (when needed)
+
 - Multi-step web browsing for context
 - Read documents, check GitHub repos, search KB
 - Synthesize findings into actionable summaries
 - Store research results in KB for future retrieval
 
 **Phase 5 — Report & Learn**
+
 - Send proactive messages (batched summary, proposals, escalations)
 - Update CLAUDE.md with new behavioral insights
 - Store findings in superpilot KB
@@ -136,11 +141,11 @@ Each trigger spawns a full container agent session with all MCP tools. **Session
 
 ### Three Tiers
 
-| Tier | What happens | Examples |
-|------|-------------|----------|
-| **AUTO** | Acts silently. Reports in digest only. | Calendar events from explicit dates, archiving newsletters, filing attachments, KB storage, read receipts |
-| **PROPOSE** | Proposes action, waits for approval on Telegram. | Draft email replies, GitHub issues, research next steps, messages on your behalf, document updates |
-| **ESCALATE** | Needs your direct judgment. Sent immediately. | Money/legal/contracts, VIP contacts, novel situations, confidence <80%, anything ambiguous |
+| Tier         | What happens                                     | Examples                                                                                                  |
+| ------------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **AUTO**     | Acts silently. Reports in digest only.           | Calendar events from explicit dates, archiving newsletters, filing attachments, KB storage, read receipts |
+| **PROPOSE**  | Proposes action, waits for approval on Telegram. | Draft email replies, GitHub issues, research next steps, messages on your behalf, document updates        |
+| **ESCALATE** | Needs your direct judgment. Sent immediately.    | Money/legal/contracts, VIP contacts, novel situations, confidence <80%, anything ambiguous                |
 
 ### Trust Graduation
 
@@ -156,12 +161,14 @@ Trust rules live in the main group's CLAUDE.md as explicit, human-readable rules
 ## Autonomy Rules
 
 ### AUTO (no approval needed)
+
 - Calendar events from explicit dates in emails
 - Archive newsletters and marketing emails
 - File attachments to KB
 - Update contact profiles from email signatures
 
 ### PROPOSE (approval required)
+
 - Reply to any email
 - Create GitHub issues
 - Post in Discord channels
@@ -169,6 +176,7 @@ Trust rules live in the main group's CLAUDE.md as explicit, human-readable rules
 - Research tasks >5 min
 
 ### ESCALATE (always escalate)
+
 - Anything involving money >$500
 - Legal documents or contracts
 - VIP contacts: [list]
@@ -187,41 +195,41 @@ Superpilot was built for a Chrome extension user, not an automation client. Some
 
 **Email Intelligence:**
 
-| Tool | Existing SP Endpoint | New Work Needed |
-|------|---------------------|-----------------|
-| `get_email_thread(thread_id)` | `POST /understand` → full thread understanding | MCP wrapper only (~20 lines) |
-| `get_thread_summary(thread_id)` | `POST /email-intelligence/summarize` (deprecated but functional) | MCP wrapper only |
-| `get_thread_actions(thread_id, messages)` | `POST /email-intelligence/actions` (per-thread, requires subject+messages) | MCP wrapper + message fetching shim |
-| `get_awaiting_reply()` | `GET /inbox/awaiting-reply` | MCP wrapper only |
-| `classify_email(email_id)` | `GET /email-category/vnext/{email_id}` | MCP wrapper only |
-| `generate_reply(thread_id, ...)` | `POST /email-intelligence/hybrid-reply` (KB-grounded) | MCP wrapper only |
-| `create_draft(to, subject, body, account)` | `POST /drafts` | MCP wrapper only |
+| Tool                                       | Existing SP Endpoint                                                       | New Work Needed                     |
+| ------------------------------------------ | -------------------------------------------------------------------------- | ----------------------------------- |
+| `get_email_thread(thread_id)`              | `POST /understand` → full thread understanding                             | MCP wrapper only (~20 lines)        |
+| `get_thread_summary(thread_id)`            | `POST /email-intelligence/summarize` (deprecated but functional)           | MCP wrapper only                    |
+| `get_thread_actions(thread_id, messages)`  | `POST /email-intelligence/actions` (per-thread, requires subject+messages) | MCP wrapper + message fetching shim |
+| `get_awaiting_reply()`                     | `GET /inbox/awaiting-reply`                                                | MCP wrapper only                    |
+| `classify_email(email_id)`                 | `GET /email-category/vnext/{email_id}`                                     | MCP wrapper only                    |
+| `generate_reply(thread_id, ...)`           | `POST /email-intelligence/hybrid-reply` (KB-grounded)                      | MCP wrapper only                    |
+| `create_draft(to, subject, body, account)` | `POST /drafts`                                                             | MCP wrapper only                    |
 
 **Knowledge Base:**
 
-| Tool | Existing SP Endpoint | New Work Needed |
-|------|---------------------|-----------------|
-| `search_kb(query, tags?)` | KB uses ChromaDB hybrid search internally, but **no search API endpoint exposed** | **New endpoint: `GET /kb/search?q=...&tags=...`** (~50 lines) |
-| `upload_to_kb(content, title, tags)` | `POST /kb/text` (upload text document) | MCP wrapper only |
-| `upload_file_to_kb(file_path, title, tags)` | `POST /kb/upload` (upload file) | MCP wrapper only |
-| `list_kb_documents(tags?, limit?)` | `GET /kb` (document list) | MCP wrapper only |
+| Tool                                        | Existing SP Endpoint                                                              | New Work Needed                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `search_kb(query, tags?)`                   | KB uses ChromaDB hybrid search internally, but **no search API endpoint exposed** | **New endpoint: `GET /kb/search?q=...&tags=...`** (~50 lines) |
+| `upload_to_kb(content, title, tags)`        | `POST /kb/text` (upload text document)                                            | MCP wrapper only                                              |
+| `upload_file_to_kb(file_path, title, tags)` | `POST /kb/upload` (upload file)                                                   | MCP wrapper only                                              |
+| `list_kb_documents(tags?, limit?)`          | `GET /kb` (document list)                                                         | MCP wrapper only                                              |
 
 **NanoClaw Integration (all new):**
 
-| Tool | New Work Needed |
-|------|-----------------|
+| Tool                                  | New Work Needed                                                                                                                                                                   |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_triaged_emails(since, account?)` | **New SP endpoint** (~100 lines): query email_classifications + understand cache, return batch of triaged emails since timestamp. New DB query joining classifications + threads. |
-| `mark_processed(item_ids)` | **NanoClaw-side only** — writes to NanoClaw's `processed_items` SQLite table, not superpilot. |
+| `mark_processed(item_ids)`            | **NanoClaw-side only** — writes to NanoClaw's `processed_items` SQLite table, not superpilot.                                                                                     |
 
 ### Effort Estimate
 
-| Component | Lines | Where |
-|-----------|-------|-------|
-| MCP server framework + 8 wrapper tools | ~300 | New Python sidecar |
-| `search_kb` endpoint in superpilot | ~50 | Superpilot backend |
-| `get_triaged_emails` endpoint in superpilot | ~100 | Superpilot backend |
-| IPC writer (superpilot → NanoClaw) | ~30 | Superpilot backend |
-| **Total** | **~480 lines across 2 codebases** | |
+| Component                                   | Lines                             | Where              |
+| ------------------------------------------- | --------------------------------- | ------------------ |
+| MCP server framework + 8 wrapper tools      | ~300                              | New Python sidecar |
+| `search_kb` endpoint in superpilot          | ~50                               | Superpilot backend |
+| `get_triaged_emails` endpoint in superpilot | ~100                              | Superpilot backend |
+| IPC writer (superpilot → NanoClaw)          | ~30                               | Superpilot backend |
+| **Total**                                   | **~480 lines across 2 codebases** |                    |
 
 ### Auth: Localhost Service Token
 
@@ -243,6 +251,7 @@ Superpilot MCP runs on host at a fixed port (e.g., `localhost:8100`). Container 
 ### Three Layers
 
 **Layer 1 — CLAUDE.md (the brain)**
+
 - Autonomy rules and trust tiers
 - Contact profiles (2-3 lines each: name, company, role, tone, handling rules)
 - Email patterns ("meeting requests from X → auto-calendar")
@@ -251,6 +260,7 @@ Superpilot MCP runs on host at a fixed port (e.g., `localhost:8100`). Container 
 - **Budget:** ~500 lines max. Overflows to KB.
 
 **Layer 2 — Superpilot KB (the filing cabinet)**
+
 - Email thread summaries, research findings, company profiles
 - Documents, templates, meeting notes
 - Tagged by project, contact, topic
@@ -258,6 +268,7 @@ Superpilot MCP runs on host at a fixed port (e.g., `localhost:8100`). Container 
 - **Budget:** 50 entries per project max
 
 **Layer 3 — Project Repos (`~/dev/*`)**
+
 - Actual codebases with their own docs
 - Agent reads/updates docs directly via filesystem access (mount project dirs into container)
 - Code changes go through GitHub PRs/issues (auditable)
@@ -265,25 +276,27 @@ Superpilot MCP runs on host at a fixed port (e.g., `localhost:8100`). Container 
 
 ### Decision Tree: What Goes Where
 
-| What happened | Where it goes |
-|--------------|---------------|
-| New behavior learned (how you handle things) | CLAUDE.md |
-| Important email thread summary | Superpilot KB (tagged by project) |
-| Research findings that took effort | Superpilot KB |
-| Project decision from email | Project docs in `~/dev/*` + KB |
-| Code change needed | GitHub issue or PR |
-| Contact profile update | CLAUDE.md (2-3 lines) |
-| Routine email handled | **Store nothing** |
-| Newsletter/notification archived | **Store nothing** |
+| What happened                                | Where it goes                     |
+| -------------------------------------------- | --------------------------------- |
+| New behavior learned (how you handle things) | CLAUDE.md                         |
+| Important email thread summary               | Superpilot KB (tagged by project) |
+| Research findings that took effort           | Superpilot KB                     |
+| Project decision from email                  | Project docs in `~/dev/*` + KB    |
+| Code change needed                           | GitHub issue or PR                |
+| Contact profile update                       | CLAUDE.md (2-3 lines)             |
+| Routine email handled                        | **Store nothing**                 |
+| Newsletter/notification archived             | **Store nothing**                 |
 
 ### Storage Discipline
 
 **Storage gate — three questions before storing anything:**
+
 1. **Will I need this again?** If probably not, don't store it.
 2. **Can I find this elsewhere?** If it's in the email thread, a repo, or googleable — don't duplicate. Store a pointer.
 3. **Is this signal or noise?** "Deal closes April 30" = signal. "Thanks for the update!" = noise.
 
 **What NOT to store:**
+
 - Pleasantries, acknowledgments, routine scheduling
 - Information already in project repos
 - Googleable facts
@@ -293,39 +306,42 @@ Superpilot MCP runs on host at a fixed port (e.g., `localhost:8100`). Container 
 
 **Decay by default:**
 
-| Entry type | TTL | Reset on retrieval? |
-|-----------|-----|-------------------|
-| Email thread summaries | 30 days | Yes |
-| Research findings | 90 days | Yes |
-| Project decisions | 180 days | Yes |
-| Company profiles | 1 year | Yes |
-| Contact profiles (CLAUDE.md) | Evergreen | N/A |
+| Entry type                   | TTL       | Reset on retrieval? |
+| ---------------------------- | --------- | ------------------- |
+| Email thread summaries       | 30 days   | Yes                 |
+| Research findings            | 90 days   | Yes                 |
+| Project decisions            | 180 days  | Yes                 |
+| Company profiles             | 1 year    | Yes                 |
+| Contact profiles (CLAUDE.md) | Evergreen | N/A                 |
 
 Unretrieved entries after TTL → archived to cold storage (not deleted).
 
 **Implementation:** Each KB document gets a `nanoclaw_ttl_days` and `nanoclaw_last_retrieved` field in its metadata. The weekly housekeeping task queries documents where `now - last_retrieved > ttl_days` and archives them. Retrieval resets `last_retrieved`. Requires a small metadata schema addition to superpilot's KB document model.
 
 **Consolidation over accumulation:**
+
 - 15 email summaries about product-center → 1 updated project narrative
 - Weekly housekeeping task consolidates, doesn't just accumulate
 - Like sleep for memory — compress raw events into understanding
 
 **Retrieval-driven quality:**
+
 - Track which KB entries get retrieved and used
 - Low-retrieval entries get pruned during housekeeping
 - High-retrieval entries get boosted
 
 **Storage budgets (hard caps):**
 
-| Store | Budget |
-|-------|--------|
-| CLAUDE.md | ~500 lines |
-| KB entries per project | 50 |
-| Active contact profiles | 30 |
+| Store                   | Budget     |
+| ----------------------- | ---------- |
+| CLAUDE.md               | ~500 lines |
+| KB entries per project  | 50         |
+| Active contact profiles | 30         |
 
 At limit → must consolidate or prune before adding more.
 
 **Weekly housekeeping task:**
+
 1. Expire entries past TTL with no recent retrieval
 2. Consolidate multiple entries on same topic → single richer entry
 3. Check storage budgets, prune if over
@@ -338,13 +354,13 @@ At limit → must consolidate or prune before adding more.
 
 ### Message Types
 
-| Type | When | Urgency |
-|------|------|---------|
-| **Batched summary** | Per cycle (after processing batch) | Normal |
-| **Approval request** | When PROPOSE action is ready | Normal |
-| **Escalation alert** | Immediately when detected | High |
-| **Discord activity alert** | When mentioned or action item detected | Normal |
-| **Research results** | When research task completes | Normal |
+| Type                       | When                                   | Urgency |
+| -------------------------- | -------------------------------------- | ------- |
+| **Batched summary**        | Per cycle (after processing batch)     | Normal  |
+| **Approval request**       | When PROPOSE action is ready           | Normal  |
+| **Escalation alert**       | Immediately when detected              | High    |
+| **Discord activity alert** | When mentioned or action item detected | Normal  |
+| **Research results**       | When research task completes           | Normal  |
 
 ### Channel Routing
 
@@ -361,6 +377,7 @@ Default: **Telegram** for all proactive messages. Configurable per message type 
 ### Approval Flow
 
 Natural language responses on Telegram:
+
 - `approve` / `yes` / `send it` → execute proposed action
 - `edit: make it more casual` → revise and re-propose
 - `skip` / `ignore` → don't act, no demotion
@@ -371,9 +388,11 @@ Natural language responses on Telegram:
 
 ```markdown
 ## Notification Intensity
+
 Default: normal
 
 Overrides:
+
 - Morning briefing: always on
 - Auto-handled emails: silent (only in weekly review)
 - Proposals: normal (batched per cycle)
@@ -386,6 +405,7 @@ Overrides:
 ```
 
 **Intensity levels:**
+
 - **Silent** — auto-handle, report in weekly review only
 - **Digest** — batch into morning briefing or daily summary
 - **Normal** — batched summaries per cycle, individual escalations
@@ -500,13 +520,13 @@ Meeting request detected:
 
 ### Calendar Ownership
 
-| Calendar operation | Owner | Why |
-|-------------------|-------|-----|
-| Extract date from email → create event | Superpilot | Happens during email triage |
-| Check availability for scheduling reply | NanoClaw | Requires reasoning |
-| Morning briefing with calendar preview | NanoClaw | Cross-domain orchestration |
-| Meeting prep packets | NanoClaw | Needs KB + email + calendar |
-| Find mutual availability | NanoClaw | Back-and-forth reasoning |
+| Calendar operation                      | Owner      | Why                         |
+| --------------------------------------- | ---------- | --------------------------- |
+| Extract date from email → create event  | Superpilot | Happens during email triage |
+| Check availability for scheduling reply | NanoClaw   | Requires reasoning          |
+| Morning briefing with calendar preview  | NanoClaw   | Cross-domain orchestration  |
+| Meeting prep packets                    | NanoClaw   | Needs KB + email + calendar |
+| Find mutual availability                | NanoClaw   | Back-and-forth reasoning    |
 
 ---
 
@@ -516,15 +536,16 @@ Meeting request detected:
 
 Each agent session uses Claude API tokens. Estimated costs:
 
-| Trigger | Frequency | Est. cost/session | Daily cost |
-|---------|-----------|-------------------|------------|
-| Email push (batched) | ~10-20/day | $0.50-1.50 | $5-30 |
-| Discord events | ~5-10/day | $0.30-0.80 | $1.50-8 |
-| Poll sweep | 48/day (every 30m) | $0.10-0.30 | $5-15 |
-| Scheduled tasks (briefing, review) | 3-5/day | $0.50-1.00 | $1.50-5 |
-| **Total estimate** | | | **$13-58/day** |
+| Trigger                            | Frequency          | Est. cost/session | Daily cost     |
+| ---------------------------------- | ------------------ | ----------------- | -------------- |
+| Email push (batched)               | ~10-20/day         | $0.50-1.50        | $5-30          |
+| Discord events                     | ~5-10/day          | $0.30-0.80        | $1.50-8        |
+| Poll sweep                         | 48/day (every 30m) | $0.10-0.30        | $5-15          |
+| Scheduled tasks (briefing, review) | 3-5/day            | $0.50-1.00        | $1.50-5        |
+| **Total estimate**                 |                    |                   | **$13-58/day** |
 
 **Cost controls:**
+
 - Poll sweep should be lightweight (check `processed_items`, only spawn full session if unprocessed items found)
 - Batching reduces sessions: 20 emails in 5 batched sessions, not 20 individual sessions
 - Track cost in weekly review for visibility
@@ -533,6 +554,7 @@ Each agent session uses Claude API tokens. Estimated costs:
 ### Superpilot-Down Fallback
 
 If superpilot is unreachable:
+
 - Agent skips email intelligence phases (no crash, no retry loop)
 - Discord monitoring, calendar, and scheduled tasks continue normally
 - Agent logs "superpilot unreachable" and includes it in next summary
@@ -542,8 +564,9 @@ If superpilot is unreachable:
 ### Kill Switch
 
 Add to `src/config.ts`:
+
 ```typescript
-EMAIL_INTELLIGENCE_ENABLED: boolean  // default true, set false to disable entirely
+EMAIL_INTELLIGENCE_ENABLED: boolean; // default true, set false to disable entirely
 ```
 
 When disabled: no IPC processing for email events, no superpilot MCP calls, scheduled tasks (briefing, review) skip email sections. Discord and other channels continue normally.
@@ -554,14 +577,17 @@ Configured subset of servers/channels in CLAUDE.md:
 
 ```markdown
 ## Discord Monitoring
+
 Servers:
-  - WhoisXML API: #product, #engineering, #general (mentions + action items)
-  - Attaxion: #dev, #incidents (mentions only)
+
+- WhoisXML API: #product, #engineering, #general (mentions + action items)
+- Attaxion: #dev, #incidents (mentions only)
 
 Watch mode:
-  - mentions: alert when @Jonathan or keywords match
-  - action-items: detect tasks aimed at you even without @mention
-  - silent: include in daily digest only
+
+- mentions: alert when @Jonathan or keywords match
+- action-items: detect tasks aimed at you even without @mention
+- silent: include in daily digest only
 ```
 
 ---
@@ -570,12 +596,12 @@ Watch mode:
 
 Four Gmail accounts, routed via superpilot MCP:
 
-| Alias | Email | Context |
-|-------|-------|---------|
-| **personal** | topcoder1@gmail.com | Personal |
+| Alias        | Email                          | Context             |
+| ------------ | ------------------------------ | ------------------- |
+| **personal** | topcoder1@gmail.com            | Personal            |
 | **whoisxml** | jonathan.zhang@whoisxmlapi.com | Work — WhoisXML API |
-| **attaxion** | jonathan@attaxion.com | Work — Attaxion |
-| **dev** | dev@whoisxmlapi.com | Dev/engineering |
+| **attaxion** | jonathan@attaxion.com          | Work — Attaxion     |
+| **dev**      | dev@whoisxmlapi.com            | Dev/engineering     |
 
 Agent labels all outputs with `[personal]`, `[whoisxml]`, `[attaxion]`, or `[dev]`. Never cross-references between accounts unless explicitly asked.
 
@@ -587,6 +613,7 @@ Maps people and topics to `~/dev/*` repos. Lives in CLAUDE.md:
 
 ```markdown
 ## Known Projects
+
 - product-center: product KB, market research → ~/dev/product-center
   People: [relevant contacts]
 - attaxion_dev: ASM product roadmap → ~/dev/attaxion_dev
@@ -604,9 +631,11 @@ When the agent processes an email and recognizes a person/topic from this regist
 ## 11. Implementation Phases
 
 ### Phase 1: Foundation (Week 1-2)
+
 **Scope: Both NanoClaw and superpilot codebases.**
 
 NanoClaw side:
+
 - Add `processed_items` table to SQLite schema
 - Add IPC handler for email trigger files
 - Create main group CLAUDE.md with autonomy rules, contact profiles, notification settings
@@ -614,16 +643,19 @@ NanoClaw side:
 - Add `EMAIL_INTELLIGENCE_ENABLED` kill switch
 
 Superpilot side:
+
 - Build `GET /kb/search` endpoint (~50 lines)
 - Build `GET /api/triaged-emails?since=...&account=...` endpoint (~100 lines)
 - Add IPC writer: after triage → write JSON to NanoClaw IPC dir (~30 lines)
 - Add localhost service token auth (~20 lines)
 
 MCP server:
+
 - Build superpilot MCP server with initial 6 tools (~300 lines Python)
 - Configure container networking (`SUPERPILOT_MCP_URL` env var)
 
 ### Phase 2: Autonomy Engine (Week 3-4)
+
 - Implement trust tiers (AUTO/PROPOSE/ESCALATE) with graduation logic
 - Build approval flow on Telegram (natural language parsing)
 - Add storage discipline to agent instructions
@@ -631,12 +663,14 @@ MCP server:
 - Add remaining MCP tools (full 12-tool catalog)
 
 ### Phase 3: Value Features (Week 5-6)
+
 - Morning briefing scheduled task (unify with existing Discord digest)
 - Commitment tracking (detect + remind)
 - Meeting prep packets
 - Weekly review (including cost tracking)
 
 ### Phase 4: Deep Intelligence (Week 7-8)
+
 - Cross-channel correlation (entity-based matching across email + Discord + calendar)
 - Relationship pulse tracking
 - Smart scheduling
@@ -644,6 +678,7 @@ MCP server:
 - Notification intensity tuning
 
 ### Phase 5: Maturation (Ongoing)
+
 - Trust tier graduation based on real usage
 - Dial notification intensity from Verbose → Normal → Digest
 - KB quality improvements from retrieval tracking
@@ -654,16 +689,16 @@ MCP server:
 
 ## Appendix A: Resolved Design Questions
 
-| # | Question | Decision | Rationale |
-|---|----------|----------|-----------|
-| 1 | Superpilot MCP auth | Localhost service token via OneCLI vault | Both systems on same host; JWT is overkill for machine-to-machine |
-| 2 | Container → project repos | Mount project dirs into container | Same approach as existing group folder mounts |
-| 3 | Discord monitoring scope | Configured subset in CLAUDE.md | Not all servers/channels are relevant |
-| 4 | Quiet hours | 11pm-7am CST | Jonathan's timezone |
-| 5 | Push mechanism | IPC file-based (not HTTP) | NanoClaw has no HTTP server; IPC watcher already exists |
-| 6 | Source of truth for processed items | NanoClaw SQLite `processed_items` table | NanoClaw owns the orchestration state |
-| 7 | Session timeout | 15 min with priority ordering | 10 min too tight for research; graceful degradation at 12 min mark |
-| 8 | Morning briefing vs Discord digest | Unified — Discord digest becomes a section of morning briefing | One message, not two |
+| #   | Question                            | Decision                                                       | Rationale                                                          |
+| --- | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1   | Superpilot MCP auth                 | Localhost service token via OneCLI vault                       | Both systems on same host; JWT is overkill for machine-to-machine  |
+| 2   | Container → project repos           | Mount project dirs into container                              | Same approach as existing group folder mounts                      |
+| 3   | Discord monitoring scope            | Configured subset in CLAUDE.md                                 | Not all servers/channels are relevant                              |
+| 4   | Quiet hours                         | 11pm-7am CST                                                   | Jonathan's timezone                                                |
+| 5   | Push mechanism                      | IPC file-based (not HTTP)                                      | NanoClaw has no HTTP server; IPC watcher already exists            |
+| 6   | Source of truth for processed items | NanoClaw SQLite `processed_items` table                        | NanoClaw owns the orchestration state                              |
+| 7   | Session timeout                     | 15 min with priority ordering                                  | 10 min too tight for research; graceful degradation at 12 min mark |
+| 8   | Morning briefing vs Discord digest  | Unified — Discord digest becomes a section of morning briefing | One message, not two                                               |
 
 ## Appendix B: Open Items (non-blocking)
 

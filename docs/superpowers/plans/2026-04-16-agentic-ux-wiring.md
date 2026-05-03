@@ -14,27 +14,28 @@
 
 ### File Map
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `src/gmail-ops.ts` | Create | `GmailOps` interface + `GmailOpsRouter` class |
-| `src/__tests__/gmail-ops.test.ts` | Create | Unit tests for GmailOpsRouter |
-| `src/channels/gmail.ts` | Modify | Add 4 methods (`archiveThread`, `listRecentDrafts`, `updateDraft`, `getMessageBody`), make `extractTextBody` public |
-| `src/__tests__/gmail-channel-ops.test.ts` | Create | Unit tests for new GmailChannel methods |
-| `src/callback-router.ts` | Modify | Add async, expand with 6 new actions, add `gmailOps` + `draftWatcher` deps |
-| `src/__tests__/callback-router.test.ts` | Modify | Tests for new callback actions |
-| `src/router.ts` | Modify | Truncate email body + attach actions in `classifyAndFormat` |
-| `src/router.test.ts` | Modify | Test email truncation in pipeline |
-| `src/index.ts` | Modify | Wire `GmailOpsRouter`, draft watcher, archive event listener, "archive all" intercept |
-| `src/__tests__/archive-flow.test.ts` | Create | End-to-end archive flow tests |
-| `src/mini-app/server.ts` | Modify | Add `/email/:emailId`, `/draft-diff/:draftId`, `/api/draft/:draftId/revert` routes |
-| `src/mini-app/templates/draft-diff.ts` | Create | Dark-themed diff view template |
-| `src/__tests__/mini-app-routes.test.ts` | Create | Tests for new Mini App routes |
+| File                                      | Action | Purpose                                                                                                             |
+| ----------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| `src/gmail-ops.ts`                        | Create | `GmailOps` interface + `GmailOpsRouter` class                                                                       |
+| `src/__tests__/gmail-ops.test.ts`         | Create | Unit tests for GmailOpsRouter                                                                                       |
+| `src/channels/gmail.ts`                   | Modify | Add 4 methods (`archiveThread`, `listRecentDrafts`, `updateDraft`, `getMessageBody`), make `extractTextBody` public |
+| `src/__tests__/gmail-channel-ops.test.ts` | Create | Unit tests for new GmailChannel methods                                                                             |
+| `src/callback-router.ts`                  | Modify | Add async, expand with 6 new actions, add `gmailOps` + `draftWatcher` deps                                          |
+| `src/__tests__/callback-router.test.ts`   | Modify | Tests for new callback actions                                                                                      |
+| `src/router.ts`                           | Modify | Truncate email body + attach actions in `classifyAndFormat`                                                         |
+| `src/router.test.ts`                      | Modify | Test email truncation in pipeline                                                                                   |
+| `src/index.ts`                            | Modify | Wire `GmailOpsRouter`, draft watcher, archive event listener, "archive all" intercept                               |
+| `src/__tests__/archive-flow.test.ts`      | Create | End-to-end archive flow tests                                                                                       |
+| `src/mini-app/server.ts`                  | Modify | Add `/email/:emailId`, `/draft-diff/:draftId`, `/api/draft/:draftId/revert` routes                                  |
+| `src/mini-app/templates/draft-diff.ts`    | Create | Dark-themed diff view template                                                                                      |
+| `src/__tests__/mini-app-routes.test.ts`   | Create | Tests for new Mini App routes                                                                                       |
 
 ---
 
 ### Task 1: GmailOps Interface and Router
 
 **Files:**
+
 - Create: `src/gmail-ops.ts`
 - Create: `src/__tests__/gmail-ops.test.ts`
 
@@ -121,15 +122,8 @@ import type { DraftInfo } from './draft-enrichment.js';
 export interface GmailOps {
   archiveThread(account: string, threadId: string): Promise<void>;
   listRecentDrafts(account: string): Promise<DraftInfo[]>;
-  updateDraft(
-    account: string,
-    draftId: string,
-    newBody: string,
-  ): Promise<void>;
-  getMessageBody(
-    account: string,
-    messageId: string,
-  ): Promise<string | null>;
+  updateDraft(account: string, draftId: string, newBody: string): Promise<void>;
+  getMessageBody(account: string, messageId: string): Promise<string | null>;
 }
 
 /**
@@ -156,9 +150,7 @@ export class GmailOpsRouter implements GmailOps {
   private getChannel(account: string): GmailOpsProvider {
     const ch = this.channels.get(account);
     if (!ch)
-      throw new Error(
-        `No Gmail channel registered for account: ${account}`,
-      );
+      throw new Error(`No Gmail channel registered for account: ${account}`);
     return ch;
   }
 
@@ -204,6 +196,7 @@ git commit -m "feat(ux): add GmailOps interface and GmailOpsRouter"
 ### Task 2: GmailChannel — Add GmailOps Methods
 
 **Files:**
+
 - Modify: `src/channels/gmail.ts` (add 4 methods, make `extractTextBody` public)
 - Create: `src/__tests__/gmail-channel-ops.test.ts`
 
@@ -511,6 +504,7 @@ git commit -m "feat(ux): add GmailOps methods to GmailChannel"
 ### Task 3: Callback Router — Archive Two-Step and Email Expand/Collapse
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Modify: `src/__tests__/callback-router.test.ts`
 
@@ -821,7 +815,9 @@ export async function handleCallback(
             await channel.editMessageTextAndButtons(
               query.chatJid,
               query.messageId,
-              reverted ? '↩ Reverted to original' : '⚠️ Could not revert — original not found',
+              reverted
+                ? '↩ Reverted to original'
+                : '⚠️ Could not revert — original not found',
               [],
             );
           }
@@ -862,12 +858,14 @@ export async function handleCallback(
   } catch (err) {
     logger.error({ err, action, entityId }, 'Callback handler failed');
     if (channel?.editMessageTextAndButtons) {
-      await channel.editMessageTextAndButtons(
-        query.chatJid,
-        query.messageId,
-        `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        [],
-      ).catch(() => {});
+      await channel
+        .editMessageTextAndButtons(
+          query.chatJid,
+          query.messageId,
+          `⚠️ ${action} failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          [],
+        )
+        .catch(() => {});
     }
   }
 }
@@ -890,6 +888,7 @@ git commit -m "feat(ux): expand callback router with archive, expand/collapse, r
 ### Task 4: Router Pipeline — Email Truncation and Action Attachment
 
 **Files:**
+
 - Modify: `src/router.ts` (update `classifyAndFormat`)
 - Modify: `src/router.test.ts`
 
@@ -1028,6 +1027,7 @@ git commit -m "feat(ux): truncate email body and attach expand/archive actions i
 ### Task 5: Mini App — Email Route + Draft Diff + Revert API
 
 **Files:**
+
 - Modify: `src/mini-app/server.ts`
 - Create: `src/mini-app/templates/draft-diff.ts`
 - Create: `src/__tests__/mini-app-routes.test.ts`
@@ -1099,7 +1099,13 @@ describe('Mini App extended routes', () => {
     const { app, db } = setup();
     db.prepare(
       `INSERT INTO draft_originals (draft_id, account, original_body, enriched_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-    ).run('d1', 'personal', 'Original draft text', new Date().toISOString(), new Date(Date.now() + 86400000).toISOString());
+    ).run(
+      'd1',
+      'personal',
+      'Original draft text',
+      new Date().toISOString(),
+      new Date(Date.now() + 86400000).toISOString(),
+    );
 
     const res = await request(app).get('/draft-diff/d1');
     expect(res.status).toBe(200);
@@ -1146,10 +1152,7 @@ export interface DraftDiffData {
 
 export function renderDraftDiff(data: DraftDiffData): string {
   const escHtml = (s: string) =>
-    s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1320,7 +1323,10 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
         body = await opts.gmailOps.getMessageBody(account, emailId);
         if (body) cacheEmailBody(emailId, body);
       } catch (err) {
-        logger.warn({ emailId, err }, 'Failed to fetch email body for Mini App');
+        logger.warn(
+          { emailId, err },
+          'Failed to fetch email body for Mini App',
+        );
       }
     }
 
@@ -1368,7 +1374,9 @@ export function createMiniAppServer(opts: MiniAppServerOpts): express.Express {
   app.post('/api/draft/:draftId/revert', async (req, res) => {
     const { draftId } = req.params;
     if (!opts.draftWatcher) {
-      res.status(503).json({ success: false, error: 'Draft watcher not configured' });
+      res
+        .status(503)
+        .json({ success: false, error: 'Draft watcher not configured' });
       return;
     }
     try {
@@ -1411,6 +1419,7 @@ git commit -m "feat(ux): add email view, draft diff, and revert API to Mini App"
 ### Task 6: Wire GmailOpsRouter + DraftEnrichmentWatcher in index.ts
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add imports at top of index.ts**
@@ -1427,19 +1436,20 @@ import type { GmailOpsProvider } from './gmail-ops.js';
 In `src/index.ts`, after the channel connection loop (after line 1263 `if (channels.length === 0) { ... }`), before the `// --- Agentic UX initialization ---` comment at line 1269, add:
 
 ```typescript
-  // --- GmailOps router: expose Gmail API operations to UX modules ---
-  const gmailOpsRouter = new GmailOpsRouter();
-  for (const ch of channels) {
-    // Gmail channels have names like 'gmail', 'gmail-personal', 'gmail-dev'
-    if (ch.name.startsWith('gmail')) {
-      const alias = ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
-      // Only register if the channel implements GmailOps methods
-      if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
-        gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
-        logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
-      }
+// --- GmailOps router: expose Gmail API operations to UX modules ---
+const gmailOpsRouter = new GmailOpsRouter();
+for (const ch of channels) {
+  // Gmail channels have names like 'gmail', 'gmail-personal', 'gmail-dev'
+  if (ch.name.startsWith('gmail')) {
+    const alias =
+      ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
+    // Only register if the channel implements GmailOps methods
+    if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
+      gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
+      logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
     }
   }
+}
 ```
 
 - [ ] **Step 3: Wire DraftEnrichmentWatcher with real callbacks**
@@ -1447,34 +1457,44 @@ In `src/index.ts`, after the channel connection loop (after line 1263 `if (chann
 After the `archiveTracker` initialization (after line 1271), add:
 
 ```typescript
-  // --- Draft enrichment watcher ---
-  const enrichmentAccounts = channels
-    .filter((ch) => ch.name.startsWith('gmail') && 'listRecentDrafts' in ch)
-    .map((ch) => ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', ''));
+// --- Draft enrichment watcher ---
+const enrichmentAccounts = channels
+  .filter((ch) => ch.name.startsWith('gmail') && 'listRecentDrafts' in ch)
+  .map((ch) =>
+    ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', ''),
+  );
 
-  let draftWatcher: import('./draft-enrichment.js').DraftEnrichmentWatcher | undefined;
-  if (enrichmentAccounts.length > 0) {
-    const { DraftEnrichmentWatcher } = await import('./draft-enrichment.js');
-    draftWatcher = new DraftEnrichmentWatcher(eventBus, getDb(), {
-      accounts: enrichmentAccounts,
-      listRecentDrafts: (account) => gmailOpsRouter.listRecentDrafts(account),
-      updateDraft: (account, draftId, newBody) =>
-        gmailOpsRouter.updateDraft(account, draftId, newBody),
-      evaluateEnrichment: async (draft) => {
-        // Heuristic: only enrich short stubs (likely auto-replies)
-        if (draft.body.length > 200) return null;
-        // Skip old drafts (>30 min) — user may be editing
-        const ageMs = Date.now() - new Date(draft.createdAt).getTime();
-        if (ageMs > 30 * 60 * 1000) return null;
-        // For now, return null (no enrichment) until executor pool integration
-        // TODO: Submit to executor pool with enrichment prompt
-        logger.debug({ draftId: draft.draftId }, 'Draft eligible for enrichment (not yet wired to executor)');
-        return null;
-      },
-    });
-    draftWatcher.start();
-    logger.info({ accounts: enrichmentAccounts }, 'Draft enrichment watcher started');
-  }
+let draftWatcher:
+  | import('./draft-enrichment.js').DraftEnrichmentWatcher
+  | undefined;
+if (enrichmentAccounts.length > 0) {
+  const { DraftEnrichmentWatcher } = await import('./draft-enrichment.js');
+  draftWatcher = new DraftEnrichmentWatcher(eventBus, getDb(), {
+    accounts: enrichmentAccounts,
+    listRecentDrafts: (account) => gmailOpsRouter.listRecentDrafts(account),
+    updateDraft: (account, draftId, newBody) =>
+      gmailOpsRouter.updateDraft(account, draftId, newBody),
+    evaluateEnrichment: async (draft) => {
+      // Heuristic: only enrich short stubs (likely auto-replies)
+      if (draft.body.length > 200) return null;
+      // Skip old drafts (>30 min) — user may be editing
+      const ageMs = Date.now() - new Date(draft.createdAt).getTime();
+      if (ageMs > 30 * 60 * 1000) return null;
+      // For now, return null (no enrichment) until executor pool integration
+      // TODO: Submit to executor pool with enrichment prompt
+      logger.debug(
+        { draftId: draft.draftId },
+        'Draft eligible for enrichment (not yet wired to executor)',
+      );
+      return null;
+    },
+  });
+  draftWatcher.start();
+  logger.info(
+    { accounts: enrichmentAccounts },
+    'Draft enrichment watcher started',
+  );
+}
 ```
 
 - [ ] **Step 4: Wire email.action.completed listener**
@@ -1482,15 +1502,15 @@ After the `archiveTracker` initialization (after line 1271), add:
 After the draft watcher setup, add:
 
 ```typescript
-  // --- Archive flow: record email actions for later cleanup ---
-  eventBus.on('email.action.completed', (event) => {
-    archiveTracker.recordAction(
-      event.payload.emailId,
-      event.payload.threadId,
-      event.payload.account,
-      event.payload.action,
-    );
-  });
+// --- Archive flow: record email actions for later cleanup ---
+eventBus.on('email.action.completed', (event) => {
+  archiveTracker.recordAction(
+    event.payload.emailId,
+    event.payload.threadId,
+    event.payload.account,
+    event.payload.action,
+  );
+});
 ```
 
 - [ ] **Step 5: Wire gmailOps and draftWatcher into callback router deps**
@@ -1498,25 +1518,27 @@ After the draft watcher setup, add:
 Update the callback handler registration (around line 1328) to include the new deps:
 
 Replace:
+
 ```typescript
-      handleCallback(query, {
-        archiveTracker,
-        autoApproval,
-        statusBar,
-        findChannel: (jid) => findChannel(channels, jid),
-      });
+handleCallback(query, {
+  archiveTracker,
+  autoApproval,
+  statusBar,
+  findChannel: (jid) => findChannel(channels, jid),
+});
 ```
 
 With:
+
 ```typescript
-      handleCallback(query, {
-        archiveTracker,
-        autoApproval,
-        statusBar,
-        gmailOps: gmailOpsRouter,
-        draftWatcher,
-        findChannel: (jid) => findChannel(channels, jid),
-      });
+handleCallback(query, {
+  archiveTracker,
+  autoApproval,
+  statusBar,
+  gmailOps: gmailOpsRouter,
+  draftWatcher,
+  findChannel: (jid) => findChannel(channels, jid),
+});
 ```
 
 - [ ] **Step 6: Wire gmailOps and draftWatcher into Mini App server**
@@ -1524,21 +1546,23 @@ With:
 Update the `startMiniAppServer` call (around line 1338) to include new deps:
 
 Replace:
+
 ```typescript
-  startMiniAppServer({
-    port: Number(process.env.MINI_APP_PORT) || 3847,
-    db: getDb(),
-  });
+startMiniAppServer({
+  port: Number(process.env.MINI_APP_PORT) || 3847,
+  db: getDb(),
+});
 ```
 
 With:
+
 ```typescript
-  startMiniAppServer({
-    port: Number(process.env.MINI_APP_PORT) || 3847,
-    db: getDb(),
-    gmailOps: gmailOpsRouter,
-    draftWatcher,
-  });
+startMiniAppServer({
+  port: Number(process.env.MINI_APP_PORT) || 3847,
+  db: getDb(),
+  gmailOps: gmailOpsRouter,
+  draftWatcher,
+});
 ```
 
 - [ ] **Step 7: Add draft enrichment notification listener**
@@ -1546,18 +1570,26 @@ With:
 After the draft watcher start, add a listener for enriched drafts:
 
 ```typescript
-  // --- Notify on draft enrichment ---
-  eventBus.on('email.draft.enriched', (event) => {
-    if (!mainGroupEntry) return;
-    const [mainJid] = mainGroupEntry;
-    const channel = findChannel(channels, mainJid);
-    const text = `✏️ Draft enriched: "${event.payload.changes}"`;
-    const actions = [
-      { label: '↩ Revert', callbackData: `revert:${event.payload.draftId}`, style: 'secondary' as const },
-      { label: '✅ Keep', callbackData: `keep:${event.payload.draftId}`, style: 'primary' as const },
-    ];
-    channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
-  });
+// --- Notify on draft enrichment ---
+eventBus.on('email.draft.enriched', (event) => {
+  if (!mainGroupEntry) return;
+  const [mainJid] = mainGroupEntry;
+  const channel = findChannel(channels, mainJid);
+  const text = `✏️ Draft enriched: "${event.payload.changes}"`;
+  const actions = [
+    {
+      label: '↩ Revert',
+      callbackData: `revert:${event.payload.draftId}`,
+      style: 'secondary' as const,
+    },
+    {
+      label: '✅ Keep',
+      callbackData: `keep:${event.payload.draftId}`,
+      style: 'primary' as const,
+    },
+  ];
+  channel?.sendMessageWithActions?.(mainJid, text, actions).catch(() => {});
+});
 ```
 
 - [ ] **Step 8: Run build to verify no TypeScript errors**
@@ -1577,6 +1609,7 @@ git commit -m "feat(ux): wire GmailOpsRouter, draft enrichment, and archive even
 ### Task 7: "Archive All" Text Command Intercept
 
 **Files:**
+
 - Modify: `src/index.ts`
 - Create: `src/__tests__/archive-flow.test.ts`
 
@@ -1655,37 +1688,34 @@ Expected: PASS — validates archive tracker logic is correct
 Find the inbound message handler in `index.ts`. The message processing happens in the `onMessage` callback passed to channel opts. Look for where `channelOpts` is defined (search for `onMessage:` in the file). Inside the `onMessage` handler, before messages are queued for the agent, add:
 
 ```typescript
-    // "Archive all" command — intercept before agent dispatch
-    if (
-      msgs.length === 1 &&
-      msgs[0].content.trim().toLowerCase() === 'archive all'
-    ) {
-      const unarchived = archiveTracker.getUnarchived();
-      if (unarchived.length === 0) {
-        const channel = findChannel(channels, chatJid);
-        await channel?.sendMessage(chatJid, '✅ No emails to archive');
-        return;
-      }
-      let archived = 0;
-      for (const email of unarchived) {
-        try {
-          await gmailOpsRouter.archiveThread(email.account, email.thread_id);
-          archiveTracker.markArchived(email.email_id, email.action_taken);
-          archived++;
-        } catch (err) {
-          logger.error(
-            { err, emailId: email.email_id },
-            'Failed to archive email',
-          );
-        }
-      }
-      const channel = findChannel(channels, chatJid);
-      await channel?.sendMessage(
-        chatJid,
-        `✅ Archived ${archived}/${unarchived.length} threads`,
-      );
-      return;
+// "Archive all" command — intercept before agent dispatch
+if (
+  msgs.length === 1 &&
+  msgs[0].content.trim().toLowerCase() === 'archive all'
+) {
+  const unarchived = archiveTracker.getUnarchived();
+  if (unarchived.length === 0) {
+    const channel = findChannel(channels, chatJid);
+    await channel?.sendMessage(chatJid, '✅ No emails to archive');
+    return;
+  }
+  let archived = 0;
+  for (const email of unarchived) {
+    try {
+      await gmailOpsRouter.archiveThread(email.account, email.thread_id);
+      archiveTracker.markArchived(email.email_id, email.action_taken);
+      archived++;
+    } catch (err) {
+      logger.error({ err, emailId: email.email_id }, 'Failed to archive email');
     }
+  }
+  const channel = findChannel(channels, chatJid);
+  await channel?.sendMessage(
+    chatJid,
+    `✅ Archived ${archived}/${unarchived.length} threads`,
+  );
+  return;
+}
 ```
 
 Note: The exact insertion point depends on how the message handler is structured. The key is this check must happen BEFORE the agent is invoked. Look for the section where `onMessage` processes new messages and insert this right after the trigger check but before `queue.enqueue`.
@@ -1707,6 +1737,7 @@ git commit -m "feat(ux): add 'archive all' text command intercept for batch emai
 ### Task 8: Integration Test — End-to-End Wiring Verification
 
 **Files:**
+
 - Create: `src/__tests__/agentic-ux-wiring-integration.test.ts`
 
 - [ ] **Step 1: Write the integration test**
@@ -1840,13 +1871,13 @@ git commit -m "test(ux): add end-to-end integration tests for agentic UX wiring"
 
 ### Summary
 
-| Task | What it does |
-|------|-------------|
-| 1 | `GmailOps` interface + `GmailOpsRouter` — account-aware Gmail API routing |
-| 2 | `GmailChannel` gets 4 new methods — `archiveThread`, `listRecentDrafts`, `updateDraft`, `getMessageBody` |
-| 3 | Callback router expansion — archive 2-step, expand/collapse, revert/keep |
-| 4 | Router pipeline — email body truncation + action attachment |
-| 5 | Mini App — email view, draft diff, revert API |
-| 6 | `index.ts` wiring — GmailOpsRouter, draft watcher, archive events, enrichment notifications |
-| 7 | "Archive all" text command intercept |
-| 8 | Integration tests — end-to-end verification |
+| Task | What it does                                                                                             |
+| ---- | -------------------------------------------------------------------------------------------------------- |
+| 1    | `GmailOps` interface + `GmailOpsRouter` — account-aware Gmail API routing                                |
+| 2    | `GmailChannel` gets 4 new methods — `archiveThread`, `listRecentDrafts`, `updateDraft`, `getMessageBody` |
+| 3    | Callback router expansion — archive 2-step, expand/collapse, revert/keep                                 |
+| 4    | Router pipeline — email body truncation + action attachment                                              |
+| 5    | Mini App — email view, draft diff, revert API                                                            |
+| 6    | `index.ts` wiring — GmailOpsRouter, draft watcher, archive events, enrichment notifications              |
+| 7    | "Archive all" text command intercept                                                                     |
+| 8    | Integration tests — end-to-end verification                                                              |
