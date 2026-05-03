@@ -14,19 +14,20 @@
 
 ## File Structure
 
-| File | Responsibility |
-|------|---------------|
-| `src/channels/signal.ts` | SignalChannel class: WebSocket receive, REST send, self-registration |
-| `src/channels/signal.test.ts` | Unit tests with mocked WebSocket and fetch |
-| `src/channels/index.ts` | Add `import './signal.js'` to barrel file |
-| `.env.example` | Add `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER` entries |
-| `.claude/skills/add-signal/SKILL.md` | Skill file for `/add-signal` setup workflow |
+| File                                 | Responsibility                                                       |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `src/channels/signal.ts`             | SignalChannel class: WebSocket receive, REST send, self-registration |
+| `src/channels/signal.test.ts`        | Unit tests with mocked WebSocket and fetch                           |
+| `src/channels/index.ts`              | Add `import './signal.js'` to barrel file                            |
+| `.env.example`                       | Add `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER` entries               |
+| `.claude/skills/add-signal/SKILL.md` | Skill file for `/add-signal` setup workflow                          |
 
 ---
 
 ### Task 1: Signal Channel — Factory and Registration
 
 **Files:**
+
 - Create: `src/channels/signal.test.ts`
 - Create: `src/channels/signal.ts`
 
@@ -221,10 +222,7 @@ export class SignalChannel implements Channel {
 
   async connect(): Promise<void> {
     // WebSocket connection implemented in Task 2
-    logger.info(
-      { phone: this.phoneNumber },
-      'Signal channel connected',
-    );
+    logger.info({ phone: this.phoneNumber }, 'Signal channel connected');
   }
 
   async sendMessage(_jid: string, _text: string): Promise<void> {
@@ -259,8 +257,7 @@ export class SignalChannel implements Channel {
 
 registerChannel('signal', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['SIGNAL_API_URL', 'SIGNAL_PHONE_NUMBER']);
-  const apiUrl =
-    process.env.SIGNAL_API_URL || envVars.SIGNAL_API_URL || '';
+  const apiUrl = process.env.SIGNAL_API_URL || envVars.SIGNAL_API_URL || '';
   const phone =
     process.env.SIGNAL_PHONE_NUMBER || envVars.SIGNAL_PHONE_NUMBER || '';
 
@@ -294,6 +291,7 @@ git commit -m "feat(signal): add SignalChannel skeleton with factory and JID own
 ### Task 2: WebSocket Inbound Message Handling
 
 **Files:**
+
 - Modify: `src/channels/signal.test.ts`
 - Modify: `src/channels/signal.ts`
 
@@ -811,6 +809,7 @@ git commit -m "feat(signal): implement WebSocket inbound message handling with r
 ### Task 3: REST Outbound Message Sending
 
 **Files:**
+
 - Modify: `src/channels/signal.test.ts`
 - Modify: `src/channels/signal.ts`
 
@@ -918,9 +917,7 @@ describe('sendMessage', () => {
   });
 
   it('handles send failure gracefully', async () => {
-    (globalThis.fetch as any).mockRejectedValueOnce(
-      new Error('Network error'),
-    );
+    (globalThis.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
     const opts = createTestOpts();
     const channel = new SignalChannel(
@@ -1018,6 +1015,7 @@ git commit -m "feat(signal): implement REST outbound message sending with chunki
 ### Task 4: Typing Indicator
 
 **Files:**
+
 - Modify: `src/channels/signal.test.ts`
 - Modify: `src/channels/signal.ts`
 
@@ -1071,9 +1069,7 @@ describe('setTyping', () => {
   });
 
   it('handles typing failure gracefully', async () => {
-    (globalThis.fetch as any).mockRejectedValueOnce(
-      new Error('Network error'),
-    );
+    (globalThis.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
     const opts = createTestOpts();
     const channel = new SignalChannel(
@@ -1137,6 +1133,7 @@ git commit -m "feat(signal): add typing indicator support"
 ### Task 5: Barrel File and Env Example
 
 **Files:**
+
 - Modify: `src/channels/index.ts`
 - Modify: `.env.example` (if it exists; create if not)
 
@@ -1181,6 +1178,7 @@ git commit -m "feat(signal): register signal channel in barrel file and add env 
 ### Task 6: `/add-signal` Skill
 
 **Files:**
+
 - Create: `.claude/skills/add-signal/SKILL.md`
 
 - [ ] **Step 1: Write the skill file**
@@ -1233,6 +1231,7 @@ git merge signal/main || {
 ```
 
 This merges in:
+
 - `src/channels/signal.ts` (SignalChannel class with self-registration via `registerChannel`)
 - `src/channels/signal.test.ts` (unit tests with mocked WebSocket and fetch)
 - `import './signal.js'` appended to the channel barrel file `src/channels/index.ts`
@@ -1359,6 +1358,7 @@ npx tsx setup/index.ts --step register -- --jid "sig:<id>" --name "<chat-name>" 
 Tell the user:
 
 > Send a message from Signal:
+>
 > - For main chat: Any message works
 > - For non-main: Include `@Andy` (or your assistant's trigger) in the message
 >
@@ -1375,6 +1375,7 @@ tail -f logs/nanoclaw.log | grep -i signal
 ### Bot not responding
 
 Check:
+
 1. Docker container is running: `docker ps | grep signal-api`
 2. `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER` are set in `.env` AND synced to `data/env/env`
 3. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'sig:%'"`
@@ -1392,12 +1393,14 @@ If it fails, check Docker: `docker logs signal-api`
 ### Device linking expired
 
 Signal device links expire after ~60 seconds. If linking failed:
+
 1. Restart the container: `docker restart signal-api`
 2. Try the QR code link again
 
 ## After Setup
 
 If running `npm run dev` while the service is active:
+
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist

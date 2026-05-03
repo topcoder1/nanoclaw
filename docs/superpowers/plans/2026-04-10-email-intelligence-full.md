@@ -12,6 +12,7 @@
 **Phase 1 Plan:** [`2026-04-10-email-intelligence-phase1.md`](./2026-04-10-email-intelligence-phase1.md)
 
 **What's already built (Phase 1):**
+
 - NanoClaw: `EMAIL_INTELLIGENCE_ENABLED` kill switch, `processed_items` table, `email_trigger` IPC handler, CLAUDE.md with autonomy rules, `SUPERPILOT_MCP_URL` in container runner
 - Superpilot: service token auth, bridge API stubs, IPC writer module, MCP server (6 tools)
 
@@ -22,6 +23,7 @@
 ### Task 1: Wire `get_triaged_emails` to Real DB
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py`
 
 The stub currently returns empty. Wire it to query the `email_classifications` table.
@@ -100,11 +102,13 @@ git commit -m "feat: wire get_triaged_emails to real email_classifications table
 ### Task 2: Wire `kb/search` to Real ChromaDB Search
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py`
 
 - [ ] **Step 1: Read the RAG search service**
 
 Read `~/dev/inbox_superpilot/backend/app/services/rag.py` — the `search_kb()` function. Signature:
+
 ```python
 async def search_kb(user_id, query, db, top_k=5, min_score=0.3, use_hybrid=True) -> list[dict]
 ```
@@ -164,6 +168,7 @@ git commit -m "feat: wire kb/search to ChromaDB hybrid search"
 ### Task 3: Hook IPC Writer into Gmail Push Pipeline
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/celery_app/tasks.py`
 
 - [ ] **Step 1: Read the Gmail push processing flow**
@@ -202,6 +207,7 @@ except Exception as e:
 - [ ] **Step 3: Test by sending yourself an email**
 
 Send a test email to one of your Gmail accounts. Check:
+
 1. Superpilot receives the push notification
 2. Email gets classified
 3. IPC file appears in `~/dev/nanoclaw/data/ipc/main/tasks/`
@@ -256,6 +262,7 @@ Expected: 200 OK with JSON response (not 401).
 ### Task 5: Populate CLAUDE.md — VIP List + Project Registry
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 - [ ] **Step 1: Add VIP escalation contacts**
@@ -268,6 +275,7 @@ Append the Known Projects section with people → repo mappings:
 
 ```markdown
 ## Known Projects
+
 - product-center: product KB, market research → ~/dev/product-center
 - attaxion_dev: ASM product roadmap → ~/dev/attaxion_dev
 - inbox_superpilot: email AI product → ~/dev/inbox_superpilot
@@ -321,6 +329,7 @@ EOF
 - [ ] **Step 3: Verify the pipeline**
 
 Check NanoClaw logs for:
+
 - `Email trigger dispatched to main group`
 - Container agent spawns
 - Agent reads email intelligence instructions
@@ -342,6 +351,7 @@ Write the same trigger again. Agent should check `processed_items` and skip.
 ### Task 7: Trust Graduation Logic
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 - Modify: `~/dev/nanoclaw/src/db.ts`
 
@@ -363,21 +373,35 @@ CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_log(action_type, timest
 - [ ] **Step 2: Add CRUD functions**
 
 ```typescript
-export function logApproval(actionType: string, actionDetail: string, outcome: string): void {
+export function logApproval(
+  actionType: string,
+  actionDetail: string,
+  outcome: string,
+): void {
   db.prepare(
     'INSERT INTO approval_log (action_type, action_detail, outcome, timestamp) VALUES (?, ?, ?, ?)',
   ).run(actionType, actionDetail, outcome, new Date().toISOString());
 }
 
-export function getRecentApprovals(actionType: string, limit: number = 5): Array<{outcome: string; timestamp: string}> {
-  return db.prepare(
-    'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
-  ).all(actionType, limit) as Array<{outcome: string; timestamp: string}>;
+export function getRecentApprovals(
+  actionType: string,
+  limit: number = 5,
+): Array<{ outcome: string; timestamp: string }> {
+  return db
+    .prepare(
+      'SELECT outcome, timestamp FROM approval_log WHERE action_type = ? ORDER BY timestamp DESC LIMIT ?',
+    )
+    .all(actionType, limit) as Array<{ outcome: string; timestamp: string }>;
 }
 
-export function getGraduationCandidates(): Array<{action_type: string; consecutive_approvals: number}> {
+export function getGraduationCandidates(): Array<{
+  action_type: string;
+  consecutive_approvals: number;
+}> {
   // Returns action types with 5+ consecutive approvals without edits/rejections
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     WITH ranked AS (
       SELECT action_type, outcome,
         ROW_NUMBER() OVER (PARTITION BY action_type ORDER BY timestamp DESC) as rn
@@ -391,7 +415,9 @@ export function getGraduationCandidates(): Array<{action_type: string; consecuti
       HAVING COUNT(*) = 5
     )
     SELECT * FROM streaks
-  `).all() as Array<{action_type: string; consecutive_approvals: number}>;
+  `,
+    )
+    .all() as Array<{ action_type: string; consecutive_approvals: number }>;
 }
 ```
 
@@ -404,11 +430,13 @@ Append to the Email Intelligence section:
 
 After each approval/rejection, log it to the approval_log table via IPC.
 After 5 consecutive approvals of the same action type without edits:
+
 - Propose graduating that action type to AUTO
 - Example: "I've successfully auto-handled 5 meeting request replies. Graduate to AUTO?"
 - If approved, update the Autonomy Rules section above
 
 After 1 rejection or significant edit:
+
 - Demote that action type back to PROPOSE
 - Log the reason
 ```
@@ -422,6 +450,7 @@ After 1 rejection or significant edit:
 ### Task 8: Telegram Approval Flow
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 This is primarily an instruction change — the agent already has `send_message` capability. The approval flow is conversational: agent proposes, user replies, agent interprets.
@@ -432,8 +461,8 @@ This is primarily an instruction change — the agent already has `send_message`
 ### Approval Flow
 
 When proposing an action (PROPOSE tier), format it clearly on Telegram:
-
 ```
+
 [whoisxml] Reply to Mike re: Q2 pricing
 
 Draft:
@@ -441,6 +470,7 @@ Draft:
 and they look good. Let's proceed with Tier 2 for the enterprise plan."
 
 → approve | edit: [instructions] | skip | on it | details
+
 ```
 
 Parse the user's Telegram response:
@@ -466,6 +496,7 @@ git commit -m "feat: add approval flow + trust graduation instructions"
 ### Task 9: KB Read/Write Cycle
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 - [ ] **Step 1: Add KB usage instructions**
@@ -474,18 +505,21 @@ git commit -m "feat: add approval flow + trust graduation instructions"
 ### Using the Knowledge Base
 
 **When to read KB (search_kb):**
+
 - Before drafting any reply — search for context about the sender/company
 - When processing a new contact — check if we have history
 - When a project name is mentioned — search for related notes
 
 **When to write KB (upload_to_kb):**
+
 - After completing research — store findings with project tags
 - After important email threads conclude — store a summary
 - When learning new facts about a contact/company — store as a note
 
 **Tag conventions:**
+
 - `project:product-center` — project association
-- `contact:mike@example.com` — contact association  
+- `contact:mike@example.com` — contact association
 - `type:research` / `type:summary` / `type:decision` — content type
 - `account:whoisxml` — which Gmail account
 ```
@@ -497,6 +531,7 @@ git commit -m "feat: add approval flow + trust graduation instructions"
 ### Task 10: Expand MCP Tools to Full Catalog
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/mcp_server/server.py`
 
 Add 4 more tools beyond the initial 6:
@@ -570,6 +605,7 @@ git commit -m "feat: expand superpilot MCP to 10 tools"
 ### Task 11: Morning Briefing Scheduled Task
 
 **Files:**
+
 - Create: `~/dev/nanoclaw/container/skills/morning-briefing/SKILL.md`
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md` (add briefing task creation instructions)
 
@@ -595,6 +631,7 @@ Generate a comprehensive morning briefing and send to Telegram.
 ## Format
 
 Send via send_message to Telegram. Keep it scannable:
+
 - Section headers with counts
 - Bullet points, not paragraphs
 - Most urgent items first within each section
@@ -609,8 +646,9 @@ Add instructions for setting up the briefing task:
 ### Morning Briefing
 
 Schedule a daily briefing task:
+
 - schedule_type: cron
-- schedule_value: "30 7 * * *"  (7:30 AM CST)
+- schedule_value: "30 7 \* \* \*" (7:30 AM CST)
 - prompt: "Run the morning-briefing skill. Send results to Telegram."
 - context_mode: group (access to CLAUDE.md and KB tools)
 ```
@@ -618,20 +656,25 @@ Schedule a daily briefing task:
 - [ ] **Step 3: Migrate existing Discord digest into the briefing**
 
 The existing `scripts/discord-digest.py` runs standalone via launchd. Options:
+
 - Keep it as a data source the agent calls during briefing (simpler)
 - Rewrite as a container skill the agent executes inline
 
 Recommended: Keep the Python script, have the agent exec it during briefing and include its output.
 
 Add to the skill:
-```markdown
+
+````markdown
 ## Discord Digest
 
 Run the existing Discord digest script and include its output:
+
 ```bash
 python3 /workspace/project/scripts/discord-digest.py --output-only
 ```
-```
+````
+
+````
 
 - [ ] **Step 4: Commit**
 
@@ -639,13 +682,14 @@ python3 /workspace/project/scripts/discord-digest.py --output-only
 git add container/skills/morning-briefing/
 git add groups/main/CLAUDE.md
 git commit -m "feat: add morning briefing scheduled task skill"
-```
+````
 
 ---
 
 ### Task 12: Commitment Tracking
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/src/db.ts` (commitments table)
 - Modify: `~/dev/nanoclaw/src/types.ts`
 - Create: `~/dev/nanoclaw/container/skills/commitment-tracker/SKILL.md`
@@ -699,21 +743,25 @@ Detect and track commitments from emails and messages.
 ## Detection patterns
 
 **Your commitments (direction: mine):**
+
 - "I'll send that over by Friday"
 - "I will follow up on Monday"
 - "Let me get back to you on that"
 
 **Their commitments (direction: theirs):**
+
 - "Mike will have specs ready Monday"
 - "She'll send the contract by EOW"
 
 ## Actions
 
 When a commitment is detected:
+
 1. Create it in the commitments table via IPC
 2. If it has a due date, note it
 
 When checking overdue commitments:
+
 - Mine: remind me before the deadline
 - Theirs: if 1 day overdue, draft a gentle follow-up for approval
 ```
@@ -725,6 +773,7 @@ When checking overdue commitments:
 ### Task 13: Meeting Prep Packets
 
 **Files:**
+
 - Create: `~/dev/nanoclaw/container/skills/meeting-prep/SKILL.md`
 
 This runs as a scheduled task 15 minutes before each calendar event.
@@ -761,6 +810,7 @@ The agent should check the calendar at 7:30 AM (during morning briefing) and sch
 ### Meeting Prep
 
 During the morning briefing, check today's calendar. For each meeting with 2+ attendees:
+
 - Schedule a one-time task 15 minutes before the meeting
 - prompt: "Run meeting-prep skill for [event]. Attendees: [list]."
 ```
@@ -772,6 +822,7 @@ During the morning briefing, check today's calendar. For each meeting with 2+ at
 ### Task 14: Weekly Review
 
 **Files:**
+
 - Create: `~/dev/nanoclaw/container/skills/weekly-review/SKILL.md`
 
 - [ ] **Step 1: Create the weekly review skill**
@@ -798,10 +849,12 @@ Send via send_message to Telegram.
 - [ ] **Step 2: Schedule the task**
 
 Add to CLAUDE.md:
+
 ```markdown
 ### Weekly Review
+
 - schedule_type: cron
-- schedule_value: "0 17 * * 5"  (Friday 5 PM CST)
+- schedule_value: "0 17 \* \* 5" (Friday 5 PM CST)
 - prompt: "Run weekly-review skill."
 ```
 
@@ -814,6 +867,7 @@ Add to CLAUDE.md:
 ### Task 15: Cross-Channel Correlation
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 - Modify: `~/dev/nanoclaw/container/skills/morning-briefing/SKILL.md`
 
@@ -825,6 +879,7 @@ This is instruction-driven — the agent uses existing tools (superpilot MCP + D
 ### Cross-Channel Correlation
 
 When processing emails or Discord messages, look for connections:
+
 - Same person mentioned across email + Discord + calendar
 - Same topic/project discussed in multiple channels
 - Email thread + Discord thread + calendar event about the same thing
@@ -845,6 +900,7 @@ Match against the Known Projects registry for project detection.
 ### Task 16: Relationship Pulse
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/src/db.ts` (contact_activity table)
 - Create: `~/dev/nanoclaw/container/skills/relationship-pulse/SKILL.md`
 
@@ -866,6 +922,7 @@ CREATE TABLE IF NOT EXISTS contact_activity (
 - [ ] **Step 2: Create relationship pulse skill**
 
 Weekly task that checks contact_activity for:
+
 - Contacts with `last_inbound` significantly past `typical_cadence_days`
 - Contacts you owe a reply to
 - New frequent contacts not yet in the registry
@@ -879,6 +936,7 @@ Weekly task that checks contact_activity for:
 ### Task 17: Smart Scheduling
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 Instruction-driven — agent uses GCal MCP tools already available.
@@ -889,12 +947,14 @@ Instruction-driven — agent uses GCal MCP tools already available.
 ### Smart Scheduling
 
 When an email contains a meeting request:
+
 1. Extract the requested duration and topic
 2. Use GCal tools to check your availability this week
 3. Draft a reply with 3 available time slots
 4. Send as a PROPOSE action for approval
 
 When proposing times, prefer:
+
 - Afternoons for external meetings
 - Mornings for internal sync
 - Avoid back-to-back with existing meetings (15 min buffer)
@@ -907,6 +967,7 @@ When proposing times, prefer:
 ### Task 18: Knowledge Housekeeping Task
 
 **Files:**
+
 - Create: `~/dev/nanoclaw/container/skills/kb-housekeeping/SKILL.md`
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py` (add TTL metadata)
 
@@ -940,6 +1001,7 @@ Weekly maintenance of the knowledge base. Runs Sunday 10 AM.
 ### Task 19: Notification Intensity Controls
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 - Modify: `~/dev/nanoclaw/src/db.ts` (notification_config table, optional)
 
@@ -951,6 +1013,7 @@ The notification intensity config is already in CLAUDE.md from Phase 1. Now add 
 ### Notification Behavior
 
 Before sending any message, check the intensity level for that feature:
+
 - **silent**: do not send, log only, include in weekly review
 - **digest**: batch into morning briefing or daily summary, do not send individually
 - **normal**: send as part of batched summary per cycle
@@ -972,6 +1035,7 @@ As trust grows and more actions graduate to AUTO, propose reducing intensity:
 ### Task 20: Cost Tracking
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/src/db.ts` (session_costs table)
 
 - [ ] **Step 1: Add session_costs table**
@@ -991,12 +1055,14 @@ CREATE INDEX IF NOT EXISTS idx_session_costs_date ON session_costs(started_at);
 - [ ] **Step 2: Add cost logging in container-runner.ts**
 
 After a container agent completes, log the session:
+
 - Estimate cost from duration + model (rough: $0.10/min as baseline)
 - Store in session_costs table
 
 - [ ] **Step 3: Add daily budget check**
 
 In the IPC handler / scheduled task runner, before spawning a container:
+
 - Sum today's estimated costs from session_costs
 - If over $50 (configurable), skip non-escalation sessions and log warning
 - Alert on Telegram: "Daily budget exceeded — switching to essential-only mode"
@@ -1012,12 +1078,14 @@ The weekly review skill should query session_costs and include a cost section.
 ### Task 21: Superpilot-Down Fallback
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/src/db.ts` (system_state table)
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 - [ ] **Step 1: Track superpilot connectivity in system_state**
 
 Add a `system_state` table:
+
 ```sql
 CREATE TABLE IF NOT EXISTS system_state (
   key TEXT PRIMARY KEY,
@@ -1034,6 +1102,7 @@ Track `superpilot_last_ok` and `superpilot_alerted` timestamps.
 ### Superpilot Fallback
 
 If superpilot MCP tools fail (connection refused, timeout, 5xx):
+
 - Skip email intelligence phases entirely (no crash, no retry)
 - Continue Discord, calendar, and other features normally
 - Log "superpilot unreachable" to system_state
@@ -1049,6 +1118,7 @@ If superpilot MCP tools fail (connection refused, timeout, 5xx):
 ### Task 22: Add NanoClaw to Work-Life-Wiki
 
 **Files:**
+
 - Modify: `~/dev/work-life-wiki/map/project-index.md`
 - Modify: `~/dev/work-life-wiki/map/system-architecture.md`
 - Modify: `~/dev/work-life-wiki/domains/ai-products.md`
@@ -1058,6 +1128,7 @@ If superpilot MCP tools fail (connection refused, timeout, 5xx):
 - [ ] **Step 2: Add NanoClaw to system architecture diagram**
 
 In the AI Products section, add NanoClaw alongside trustclawd:
+
 ```
 nanoclaw ←── personal assistant (WhatsApp, Telegram, Discord)
     │
@@ -1073,6 +1144,7 @@ nanoclaw ←── personal assistant (WhatsApp, Telegram, Discord)
 ### Task 23: Cleanup Stale Branches
 
 **Files:**
+
 - NanoClaw git branches
 
 - [ ] **Step 1: Delete stale local branches**
@@ -1093,13 +1165,13 @@ The Gmail channel in `src/channels/gmail.ts` is disabled and will never be re-en
 
 ### Per-Phase Verification
 
-| Phase | Verification |
-|-------|-------------|
-| **1b** | Manual curl test of triaged-emails + kb/search with real data. IPC trigger from Gmail push creates NanoClaw agent session. |
-| **2** | Send test email → agent proposes on Telegram → reply "approve" → agent sends reply. Reply "skip" → no action. Check approval_log table. |
-| **3** | Morning briefing arrives at 7:30 AM with calendar + emails + Discord. Weekly review arrives Friday with stats. Commitment reminder fires before deadline. |
-| **4** | Cross-channel correlation shown in briefing. Relationship pulse identifies stale contacts. Smart scheduling proposes 3 time slots. KB housekeeping prunes stale entries. |
-| **5** | Cost tracking in weekly review. Budget ceiling works (blocks non-essential after $50). Superpilot-down alert after 2 hours. NanoClaw in work-life-wiki. |
+| Phase  | Verification                                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1b** | Manual curl test of triaged-emails + kb/search with real data. IPC trigger from Gmail push creates NanoClaw agent session.                                               |
+| **2**  | Send test email → agent proposes on Telegram → reply "approve" → agent sends reply. Reply "skip" → no action. Check approval_log table.                                  |
+| **3**  | Morning briefing arrives at 7:30 AM with calendar + emails + Discord. Weekly review arrives Friday with stats. Commitment reminder fires before deadline.                |
+| **4**  | Cross-channel correlation shown in briefing. Relationship pulse identifies stale contacts. Smart scheduling proposes 3 time slots. KB housekeeping prunes stale entries. |
+| **5**  | Cost tracking in weekly review. Budget ceiling works (blocks non-essential after $50). Superpilot-down alert after 2 hours. NanoClaw in work-life-wiki.                  |
 
 ### End-to-End Golden Path Test
 
@@ -1121,11 +1193,11 @@ After all phases:
 
 ## Summary
 
-| Phase | Tasks | What it delivers |
-|-------|-------|-----------------|
-| **1b** | 1-6 | Real data flowing through stubs, service token, IPC from Gmail push |
-| **2** | 7-10 | Trust graduation, Telegram approval flow, KB read/write, 10 MCP tools |
-| **3** | 11-14 | Morning briefing, commitment tracking, meeting prep, weekly review |
-| **4** | 15-19 | Cross-channel correlation, relationship pulse, smart scheduling, KB housekeeping, notification tuning |
-| **5** | 20-23 | Cost tracking, budget ceiling, superpilot fallback, wiki update, branch cleanup |
-| **Total** | 23 tasks | Full email intelligence system as spec'd |
+| Phase     | Tasks    | What it delivers                                                                                      |
+| --------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| **1b**    | 1-6      | Real data flowing through stubs, service token, IPC from Gmail push                                   |
+| **2**     | 7-10     | Trust graduation, Telegram approval flow, KB read/write, 10 MCP tools                                 |
+| **3**     | 11-14    | Morning briefing, commitment tracking, meeting prep, weekly review                                    |
+| **4**     | 15-19    | Cross-channel correlation, relationship pulse, smart scheduling, KB housekeeping, notification tuning |
+| **5**     | 20-23    | Cost tracking, budget ceiling, superpilot fallback, wiki update, branch cleanup                       |
+| **Total** | 23 tasks | Full email intelligence system as spec'd                                                              |

@@ -15,6 +15,7 @@
 Create the core debouncer class with add/has/flush/destroy API, thread_id dedup, debounce timer, and max-hold safety cap.
 
 **Files:**
+
 - Create: `src/email-trigger-debouncer.ts`
 - Test: `src/__tests__/email-trigger-debouncer.test.ts`
 
@@ -82,12 +83,22 @@ describe('EmailTriggerDebouncer', () => {
       vi.advanceTimersByTime(60_000);
       expect(flushed).toHaveLength(1);
       expect(flushed[0].emails).toHaveLength(3);
-      expect(flushed[0].emails.map((e) => e.thread_id)).toEqual(['t1', 't2', 't3']);
+      expect(flushed[0].emails.map((e) => e.thread_id)).toEqual([
+        't1',
+        't2',
+        't3',
+      ]);
     });
 
     it('should deduplicate by thread_id within buffer', () => {
-      debouncer.add([{ thread_id: 't1', account: 'personal', subject: 'first' }], 'conn1');
-      debouncer.add([{ thread_id: 't1', account: 'personal', subject: 'resend' }], 'conn1');
+      debouncer.add(
+        [{ thread_id: 't1', account: 'personal', subject: 'first' }],
+        'conn1',
+      );
+      debouncer.add(
+        [{ thread_id: 't1', account: 'personal', subject: 'resend' }],
+        'conn1',
+      );
 
       vi.advanceTimersByTime(60_000);
       expect(flushed[0].emails).toHaveLength(1);
@@ -354,6 +365,7 @@ git commit -m "feat(ux): add EmailTriggerDebouncer with thread dedup and max-hol
 Add `trigger.debounceMs` and `trigger.maxHoldMs` to the UxConfig defaults array.
 
 **Files:**
+
 - Modify: `src/ux-config.ts`
 - Modify: `src/__tests__/ux-config.test.ts`
 
@@ -362,11 +374,15 @@ Add `trigger.debounceMs` and `trigger.maxHoldMs` to the UxConfig defaults array.
 Add to `src/__tests__/ux-config.test.ts`, inside the `seedDefaults` describe block, after the existing tests:
 
 ```typescript
-    it('should seed trigger debounce keys', () => {
-      const items = config.list();
-      expect(items.find((i) => i.key === 'trigger.debounceMs')?.value).toBe('60000');
-      expect(items.find((i) => i.key === 'trigger.maxHoldMs')?.value).toBe('300000');
-    });
+it('should seed trigger debounce keys', () => {
+  const items = config.list();
+  expect(items.find((i) => i.key === 'trigger.debounceMs')?.value).toBe(
+    '60000',
+  );
+  expect(items.find((i) => i.key === 'trigger.maxHoldMs')?.value).toBe(
+    '300000',
+  );
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -402,6 +418,7 @@ git commit -m "feat(ux): add trigger.debounceMs and trigger.maxHoldMs config key
 Extract the IPC-write logic from `handleTriagedEmails` into a standalone `writeIpcTrigger` function (used as the debouncer's `onFlush` callback). Change `handleTriagedEmails` to add emails to the debouncer instead of writing IPC files directly. The `email.received` event emission stays immediate.
 
 **Files:**
+
 - Modify: `src/email-sse.ts`
 
 - [ ] **Step 1: Refactor email-sse.ts**
@@ -439,7 +456,12 @@ export function getEmailTriggerDebouncer(): EmailTriggerDebouncer | null {
 
 ```typescript
 export function writeIpcTrigger(
-  emails: Array<{ thread_id: string; account: string; subject?: string; sender?: string }>,
+  emails: Array<{
+    thread_id: string;
+    account: string;
+    subject?: string;
+    sender?: string;
+  }>,
   label: string,
 ): void {
   const ipcDir = path.join(DATA_DIR, 'ipc', 'whatsapp_main', 'tasks');
@@ -473,28 +495,28 @@ export function writeIpcTrigger(
 **c)** In `handleTriagedEmails`, replace the IPC-write block (lines 230-264, from `// Write IPC trigger file` through the `logger.info` for "SSE email trigger written") with:
 
 ```typescript
-    // Buffer emails in debouncer (merges rapid-fire triggers into one IPC file)
-    // or write IPC directly if no debouncer is configured
-    if (debouncer) {
-      debouncer.add(
-        emails.map(
-          (e: {
-            thread_id: string;
-            account: string;
-            subject?: string;
-            sender?: string;
-          }) => ({
-            thread_id: e.thread_id,
-            account: e.account || 'unknown',
-            subject: e.subject || '',
-            sender: e.sender || '',
-          }),
-        ),
-        label,
-      );
-    } else {
-      writeIpcTrigger(emails, label);
-    }
+// Buffer emails in debouncer (merges rapid-fire triggers into one IPC file)
+// or write IPC directly if no debouncer is configured
+if (debouncer) {
+  debouncer.add(
+    emails.map(
+      (e: {
+        thread_id: string;
+        account: string;
+        subject?: string;
+        sender?: string;
+      }) => ({
+        thread_id: e.thread_id,
+        account: e.account || 'unknown',
+        subject: e.subject || '',
+        sender: e.sender || '',
+      }),
+    ),
+    label,
+  );
+} else {
+  writeIpcTrigger(emails, label);
+}
 ```
 
 The `email.received` event emission block that follows stays exactly as-is.
@@ -523,6 +545,7 @@ git commit -m "refactor(sse): extract writeIpcTrigger and add debouncer support 
 Initialize the debouncer in `main()`, pass it to the SSE module, and add the `debouncer.has()` check in the `email.received` handler to suppress push notifications for buffered emails.
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add imports**
@@ -531,7 +554,11 @@ In `src/index.ts`, add these imports after the existing import block:
 
 ```typescript
 import { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
-import { setEmailTriggerDebouncer, getEmailTriggerDebouncer, writeIpcTrigger } from './email-sse.js';
+import {
+  setEmailTriggerDebouncer,
+  getEmailTriggerDebouncer,
+  writeIpcTrigger,
+} from './email-sse.js';
 ```
 
 - [ ] **Step 2: Initialize debouncer before startEmailSSE()**
@@ -539,14 +566,14 @@ import { setEmailTriggerDebouncer, getEmailTriggerDebouncer, writeIpcTrigger } f
 Find the line `startEmailSSE();` (line ~1862). Add before it:
 
 ```typescript
-  // Initialize email trigger debouncer — buffers rapid-fire SSE triggers
-  // into a single merged IPC file to prevent duplicate agent runs
-  const triggerDebouncer = new EmailTriggerDebouncer({
-    debounceMs: uxConfig.getNumber('trigger.debounceMs'),
-    maxHoldMs: uxConfig.getNumber('trigger.maxHoldMs'),
-    onFlush: (emails, label) => writeIpcTrigger(emails, label),
-  });
-  setEmailTriggerDebouncer(triggerDebouncer);
+// Initialize email trigger debouncer — buffers rapid-fire SSE triggers
+// into a single merged IPC file to prevent duplicate agent runs
+const triggerDebouncer = new EmailTriggerDebouncer({
+  debounceMs: uxConfig.getNumber('trigger.debounceMs'),
+  maxHoldMs: uxConfig.getNumber('trigger.maxHoldMs'),
+  onFlush: (emails, label) => writeIpcTrigger(emails, label),
+});
+setEmailTriggerDebouncer(triggerDebouncer);
 ```
 
 - [ ] **Step 3: Add push suppression in email.received handler**
@@ -554,49 +581,49 @@ Find the line `startEmailSSE();` (line ~1862). Add before it:
 Find the `email.received` handler (line ~2056). In the push notification loop, add a `debouncer.has()` check. Replace the block:
 
 ```typescript
-            for (const item of pushItems) {
-              const message = formatPushMessage({
-                source: 'gmail',
-                title: item.subject,
-                sender: item.sender,
-                summary: null,
-              });
-              channel.sendMessage(notifyJid, message).catch((err) => {
-                logger.warn(
-                  { err: String(err), itemId: item.itemId },
-                  'Failed to send push',
-                );
-              });
-            }
+for (const item of pushItems) {
+  const message = formatPushMessage({
+    source: 'gmail',
+    title: item.subject,
+    sender: item.sender,
+    summary: null,
+  });
+  channel.sendMessage(notifyJid, message).catch((err) => {
+    logger.warn(
+      { err: String(err), itemId: item.itemId },
+      'Failed to send push',
+    );
+  });
+}
 ```
 
 With:
 
 ```typescript
-            const currentDebouncer = getEmailTriggerDebouncer();
-            for (const item of pushItems) {
-              // Suppress push if email is in debounce buffer —
-              // agent will handle it when the buffer flushes
-              if (currentDebouncer?.has(item.threadId)) {
-                logger.debug(
-                  { threadId: item.threadId, itemId: item.itemId },
-                  'Push suppressed — email in debounce buffer',
-                );
-                continue;
-              }
-              const message = formatPushMessage({
-                source: 'gmail',
-                title: item.subject,
-                sender: item.sender,
-                summary: null,
-              });
-              channel.sendMessage(notifyJid, message).catch((err) => {
-                logger.warn(
-                  { err: String(err), itemId: item.itemId },
-                  'Failed to send push',
-                );
-              });
-            }
+const currentDebouncer = getEmailTriggerDebouncer();
+for (const item of pushItems) {
+  // Suppress push if email is in debounce buffer —
+  // agent will handle it when the buffer flushes
+  if (currentDebouncer?.has(item.threadId)) {
+    logger.debug(
+      { threadId: item.threadId, itemId: item.itemId },
+      'Push suppressed — email in debounce buffer',
+    );
+    continue;
+  }
+  const message = formatPushMessage({
+    source: 'gmail',
+    title: item.subject,
+    sender: item.sender,
+    summary: null,
+  });
+  channel.sendMessage(notifyJid, message).catch((err) => {
+    logger.warn(
+      { err: String(err), itemId: item.itemId },
+      'Failed to send push',
+    );
+  });
+}
 ```
 
 - [ ] **Step 4: Run typecheck**
@@ -623,6 +650,7 @@ git commit -m "feat(ux): wire trigger debouncer into startup and add push suppre
 Extend `SmokeTestDeps` and `handleSmokeTest` to include a "Trigger debouncer" health check.
 
 **Files:**
+
 - Modify: `src/chat-commands.ts`
 - Modify: `src/__tests__/chat-commands.test.ts`
 - Modify: `src/index.ts` (smoketest deps wiring)
@@ -648,20 +676,24 @@ In the second test ("should report failed checks without stopping"), add the sam
 Add a new test after the existing smoketest tests:
 
 ```typescript
-  it('should report debouncer buffer size', async () => {
-    const deps: SmokeTestDeps = {
-      classifyAndFormat,
-      gmailOpsRouter: { listRecentDrafts: async () => [], accounts: [] },
-      archiveTracker: { getUnarchived: () => [] },
-      draftWatcherRunning: true,
-      uxConfig: { list: () => [{ key: 'test', value: '1', defaultValue: '1', updatedAt: '' }] },
-      miniAppPort: 0,
-      triggerDebouncer: { getBufferSize: () => 3 },
-    };
-    const result = await handleSmokeTest(deps);
-    expect(result).toContain('Trigger debouncer');
-    expect(result).toContain('3 email(s) buffered');
-  });
+it('should report debouncer buffer size', async () => {
+  const deps: SmokeTestDeps = {
+    classifyAndFormat,
+    gmailOpsRouter: { listRecentDrafts: async () => [], accounts: [] },
+    archiveTracker: { getUnarchived: () => [] },
+    draftWatcherRunning: true,
+    uxConfig: {
+      list: () => [
+        { key: 'test', value: '1', defaultValue: '1', updatedAt: '' },
+      ],
+    },
+    miniAppPort: 0,
+    triggerDebouncer: { getBufferSize: () => 3 },
+  };
+  const result = await handleSmokeTest(deps);
+  expect(result).toContain('Trigger debouncer');
+  expect(result).toContain('3 email(s) buffered');
+});
 ```
 
 - [ ] **Step 2: Update SmokeTestDeps and handleSmokeTest**
@@ -677,21 +709,24 @@ In `src/chat-commands.ts`, add `triggerDebouncer` to the `SmokeTestDeps` interfa
 In `handleSmokeTest`, add this check after the "Mini App" check (before the `// Format output` comment):
 
 ```typescript
-  // 7. Trigger debouncer
-  if (deps.triggerDebouncer) {
-    const bufferSize = deps.triggerDebouncer.getBufferSize();
-    results.push({
-      name: 'Trigger debouncer',
-      ok: true,
-      detail: bufferSize > 0 ? `active, ${bufferSize} email(s) buffered` : 'idle, 0 email(s) buffered',
-    });
-  } else {
-    results.push({
-      name: 'Trigger debouncer',
-      ok: false,
-      detail: 'not initialized',
-    });
-  }
+// 7. Trigger debouncer
+if (deps.triggerDebouncer) {
+  const bufferSize = deps.triggerDebouncer.getBufferSize();
+  results.push({
+    name: 'Trigger debouncer',
+    ok: true,
+    detail:
+      bufferSize > 0
+        ? `active, ${bufferSize} email(s) buffered`
+        : 'idle, 0 email(s) buffered',
+  });
+} else {
+  results.push({
+    name: 'Trigger debouncer',
+    ok: false,
+    detail: 'not initialized',
+  });
+}
 ```
 
 - [ ] **Step 3: Update smoketest wiring in index.ts**
@@ -732,6 +767,7 @@ git commit -m "feat(ux): add trigger debouncer check to smoketest"
 End-to-end test verifying the full debounce + push suppression flow.
 
 **Files:**
+
 - Create: `src/__tests__/email-trigger-debounce-integration.test.ts`
 
 - [ ] **Step 1: Write integration test**
@@ -765,21 +801,42 @@ describe('Email trigger debounce integration', () => {
   it('should coalesce 3 wire transfers into 1 flush', () => {
     // Simulate the actual wire scenario: 3 emails, 45s and 90s apart
     debouncer.add(
-      [{ thread_id: '19d9759c', account: 'personal', subject: 'Wire sent ····7958', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d9759c',
+          account: 'personal',
+          subject: 'Wire sent ····7958',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
     expect(debouncer.has('19d9759c')).toBe(true);
 
     vi.advanceTimersByTime(45_000);
     debouncer.add(
-      [{ thread_id: '19d975a8', account: 'personal', subject: 'Wire sent ····1269', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d975a8',
+          account: 'personal',
+          subject: 'Wire sent ····1269',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
     expect(debouncer.has('19d975a8')).toBe(true);
 
     vi.advanceTimersByTime(90_000);
     debouncer.add(
-      [{ thread_id: '19d975bf', account: 'personal', subject: 'Wire sent ····7958', sender: 'chase@chase.com' }],
+      [
+        {
+          thread_id: '19d975bf',
+          account: 'personal',
+          subject: 'Wire sent ····7958',
+          sender: 'chase@chase.com',
+        },
+      ],
       'conn1',
     );
 
@@ -804,10 +861,7 @@ describe('Email trigger debounce integration', () => {
   });
 
   it('push suppression: has() returns true while buffered, false after flush', () => {
-    debouncer.add(
-      [{ thread_id: 'wire1', account: 'personal' }],
-      'conn1',
-    );
+    debouncer.add([{ thread_id: 'wire1', account: 'personal' }], 'conn1');
 
     // Simulate Consumer B checking — should suppress
     expect(debouncer.has('wire1')).toBe(true);
@@ -852,14 +906,8 @@ describe('Email trigger debounce integration', () => {
   });
 
   it('graceful shutdown flushes pending buffer', () => {
-    debouncer.add(
-      [{ thread_id: 't1', account: 'personal' }],
-      'conn1',
-    );
-    debouncer.add(
-      [{ thread_id: 't2', account: 'personal' }],
-      'conn1',
-    );
+    debouncer.add([{ thread_id: 't1', account: 'personal' }], 'conn1');
+    debouncer.add([{ thread_id: 't2', account: 'personal' }], 'conn1');
 
     // Simulate shutdown
     debouncer.flush();

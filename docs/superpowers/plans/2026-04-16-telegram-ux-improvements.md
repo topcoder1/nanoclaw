@@ -13,6 +13,7 @@
 ### Task 1: GmailOpsRouter Account Alias Resolution
 
 **Files:**
+
 - Modify: `src/gmail-ops.ts`
 - Modify: `src/__tests__/gmail-ops.test.ts`
 
@@ -49,7 +50,9 @@ it('still throws for completely unknown account', async () => {
   router.register('personal', channel as any);
   await expect(
     router.archiveThread('nobody@example.com', 'thread1'),
-  ).rejects.toThrow('No Gmail channel registered for account: nobody@example.com');
+  ).rejects.toThrow(
+    'No Gmail channel registered for account: nobody@example.com',
+  );
 });
 
 it('handles channel without emailAddress gracefully', async () => {
@@ -160,7 +163,9 @@ export class GmailOpsRouter implements GmailOps {
   ): Promise<void> {
     const ch = this.getChannel(account);
     if (!ch.forwardThread) {
-      throw new Error(`Gmail channel for ${account} does not support forwarding`);
+      throw new Error(
+        `Gmail channel for ${account} does not support forwarding`,
+      );
     }
     return ch.forwardThread(threadId, recipient);
   }
@@ -184,6 +189,7 @@ git commit -m "feat(ux): add email→alias resolution and forwardThread to Gmail
 ### Task 2: Gmail Channel — Expose emailAddress and Implement forwardThread
 
 **Files:**
+
 - Modify: `src/channels/gmail.ts`
 - Modify: `src/__tests__/gmail-channel-ops.test.ts` (if exists, otherwise create)
 
@@ -192,11 +198,13 @@ git commit -m "feat(ux): add email→alias resolution and forwardThread to Gmail
 In `src/channels/gmail.ts`, the `userEmail` field is already set from OAuth profile during `connect()`. Make it publicly accessible by adding a getter after the existing private field declaration:
 
 Find:
+
 ```typescript
   private userEmail = '';
 ```
 
 Add after the constructor or as a getter:
+
 ```typescript
   get emailAddress(): string {
     return this.userEmail;
@@ -286,6 +294,7 @@ git commit -m "feat(gmail): expose emailAddress getter and implement forwardThre
 ### Task 3: Archive Error Recovery in Callback Router
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Modify: `src/__tests__/callback-router.test.ts`
 
@@ -429,6 +438,7 @@ git commit -m "fix(ux): add archive error recovery with retry button"
 ### Task 4: Wire emailAddress into GmailOpsRouter Registration
 
 **Files:**
+
 - Modify: `src/index.ts:1365-1376`
 
 - [ ] **Step 1: Update the registration loop**
@@ -436,16 +446,16 @@ git commit -m "fix(ux): add archive error recovery with retry button"
 In `src/index.ts`, find the GmailOps registration loop (around line 1365):
 
 ```typescript
-  for (const ch of channels) {
-    if (ch.name.startsWith('gmail')) {
-      const alias =
-        ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
-      if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
-        gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
-        logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
-      }
+for (const ch of channels) {
+  if (ch.name.startsWith('gmail')) {
+    const alias =
+      ch.name === 'gmail' ? 'default' : ch.name.replace('gmail-', '');
+    if ('archiveThread' in ch && 'listRecentDrafts' in ch) {
+      gmailOpsRouter.register(alias, ch as unknown as GmailOpsProvider);
+      logger.info({ alias }, 'Registered Gmail channel with GmailOpsRouter');
     }
   }
+}
 ```
 
 No code change needed — the `register()` method now reads `channel.emailAddress` automatically via the updated `GmailOpsRouter.register()`. The `GmailChannel` already has the `emailAddress` getter from Task 2. This wiring happens transparently.
@@ -467,6 +477,7 @@ git commit -m "chore(ux): verify email alias wiring in GmailOpsRouter registrati
 ### Task 5: Message Consolidation — Edit-in-Place
 
 **Files:**
+
 - Modify: `src/index.ts:1712-1775`
 
 - [ ] **Step 1: Add lastMessageId tracking to the email-trigger onData callback**
@@ -474,87 +485,85 @@ git commit -m "chore(ux): verify email alias wiring in GmailOpsRouter registrati
 In `src/index.ts`, find the email-trigger container runner section (around line 1695). Add a `lastMessageId` variable before the `runAgent` call and modify the `onData` callback to use edit-in-place:
 
 Before the `const result = await runAgent(` line, add:
+
 ```typescript
-        let lastMessageId: number | null = null;
+let lastMessageId: number | null = null;
 ```
 
 Then modify the output result handling (the block starting `if (output.result) {`). Replace the send logic:
 
 ```typescript
-            if (output.result) {
-              if (progressHandle) {
-                await progressHandle.clear();
-                progressHandle = null;
-              }
-              const clean = formatOutbound(output.result);
-              if (clean) {
-                const { text: formatted, meta } = classifyAndFormat(clean);
+if (output.result) {
+  if (progressHandle) {
+    await progressHandle.clear();
+    progressHandle = null;
+  }
+  const clean = formatOutbound(output.result);
+  if (clean) {
+    const { text: formatted, meta } = classifyAndFormat(clean);
 
-                // Force-attach archive buttons from trigger metadata
-                for (const email of triggerEmails ?? []) {
-                  const emailId = email.thread_id;
-                  archiveTracker.recordAction(
-                    emailId,
-                    email.thread_id,
-                    email.account,
-                    'replied',
-                  );
+    // Force-attach archive buttons from trigger metadata
+    for (const email of triggerEmails ?? []) {
+      const emailId = email.thread_id;
+      archiveTracker.recordAction(
+        emailId,
+        email.thread_id,
+        email.account,
+        'replied',
+      );
 
-                  if (
-                    !meta.actions.some((a) =>
-                      a.callbackData?.startsWith('archive:'),
-                    )
-                  ) {
-                    meta.actions.push({
-                      label: '🗄 Archive',
-                      callbackData: `archive:${emailId}`,
-                      style: 'secondary' as const,
-                    });
-                  }
-                }
+      if (!meta.actions.some((a) => a.callbackData?.startsWith('archive:'))) {
+        meta.actions.push({
+          label: '🗄 Archive',
+          callbackData: `archive:${emailId}`,
+          style: 'secondary' as const,
+        });
+      }
+    }
 
-                const outChannel = findChannel(channels, chatJid);
-                if (
-                  outChannel &&
-                  meta.actions.length > 0 &&
-                  'sendMessageWithActions' in outChannel
-                ) {
-                  if (
-                    lastMessageId !== null &&
-                    'editMessageTextAndButtons' in outChannel
-                  ) {
-                    // Edit-in-place: append to existing message
-                    try {
-                      await (outChannel as any).editMessageTextAndButtons(
-                        chatJid,
-                        lastMessageId,
-                        formatted,
-                        meta.actions,
-                      );
-                    } catch (editErr) {
-                      // Edit failed — fall back to new message
-                      logger.debug(
-                        { err: String(editErr), lastMessageId },
-                        'Edit-in-place failed, sending new message',
-                      );
-                      const msgId = await (
-                        outChannel as any
-                      ).sendMessageWithActions(chatJid, formatted, meta.actions);
-                      lastMessageId = msgId;
-                    }
-                  } else {
-                    // First chunk — send new message, save ID
-                    const msgId = await (
-                      outChannel as any
-                    ).sendMessageWithActions(chatJid, formatted, meta.actions);
-                    lastMessageId = msgId;
-                  }
-                } else {
-                  await onResult(formatted, triggerEmails ?? []);
-                }
-              }
-              scheduleClose();
-            }
+    const outChannel = findChannel(channels, chatJid);
+    if (
+      outChannel &&
+      meta.actions.length > 0 &&
+      'sendMessageWithActions' in outChannel
+    ) {
+      if (lastMessageId !== null && 'editMessageTextAndButtons' in outChannel) {
+        // Edit-in-place: append to existing message
+        try {
+          await (outChannel as any).editMessageTextAndButtons(
+            chatJid,
+            lastMessageId,
+            formatted,
+            meta.actions,
+          );
+        } catch (editErr) {
+          // Edit failed — fall back to new message
+          logger.debug(
+            { err: String(editErr), lastMessageId },
+            'Edit-in-place failed, sending new message',
+          );
+          const msgId = await (outChannel as any).sendMessageWithActions(
+            chatJid,
+            formatted,
+            meta.actions,
+          );
+          lastMessageId = msgId;
+        }
+      } else {
+        // First chunk — send new message, save ID
+        const msgId = await (outChannel as any).sendMessageWithActions(
+          chatJid,
+          formatted,
+          meta.actions,
+        );
+        lastMessageId = msgId;
+      }
+    } else {
+      await onResult(formatted, triggerEmails ?? []);
+    }
+  }
+  scheduleClose();
+}
 ```
 
 - [ ] **Step 2: Run the full test suite to verify no regressions**
@@ -574,6 +583,7 @@ git commit -m "feat(ux): consolidate agent output via edit-in-place"
 ### Task 6: Action Detector
 
 **Files:**
+
 - Create: `src/action-detector.ts`
 - Create: `src/__tests__/action-detector.test.ts`
 
@@ -841,6 +851,7 @@ git commit -m "feat(ux): add action detector for forward/RSVP/open-URL"
 ### Task 7: Wire Action Detection into classifyAndFormat
 
 **Files:**
+
 - Modify: `src/router.ts`
 
 - [ ] **Step 1: Import detectActions and wire into classifyAndFormat**
@@ -854,32 +865,32 @@ import { detectActions } from './action-detector.js';
 Then modify `classifyAndFormat` — insert action detection between question detection and email preview. Find the question detection block:
 
 ```typescript
-  // Detect questions and attach buttons
+// Detect questions and attach buttons
+const question = detectQuestion(text);
+if (question) {
+  meta.questionType = question.type;
+  meta.questionId = question.questionId;
+  meta.actions = [...meta.actions, ...question.actions];
+}
+```
+
+Replace with:
+
+```typescript
+// Detect actionable items (forward, RSVP, open URL) — takes priority over generic questions
+const detectedActions = detectActions(text, meta);
+if (detectedActions.length > 0) {
+  const actionButtons = detectedActions.flatMap((a) => a.actions);
+  meta.actions = [...meta.actions, ...actionButtons];
+} else {
+  // Fall back to generic question detection only if no specific actions found
   const question = detectQuestion(text);
   if (question) {
     meta.questionType = question.type;
     meta.questionId = question.questionId;
     meta.actions = [...meta.actions, ...question.actions];
   }
-```
-
-Replace with:
-
-```typescript
-  // Detect actionable items (forward, RSVP, open URL) — takes priority over generic questions
-  const detectedActions = detectActions(text, meta);
-  if (detectedActions.length > 0) {
-    const actionButtons = detectedActions.flatMap((a) => a.actions);
-    meta.actions = [...meta.actions, ...actionButtons];
-  } else {
-    // Fall back to generic question detection only if no specific actions found
-    const question = detectQuestion(text);
-    if (question) {
-      meta.questionType = question.type;
-      meta.questionId = question.questionId;
-      meta.actions = [...meta.actions, ...question.actions];
-    }
-  }
+}
 ```
 
 - [ ] **Step 2: Run existing router tests to verify no regressions**
@@ -899,6 +910,7 @@ git commit -m "feat(ux): wire action detection into classifyAndFormat pipeline"
 ### Task 8: Forward and Open URL Callback Handlers
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Modify: `src/__tests__/callback-router.test.ts`
 
@@ -921,7 +933,9 @@ it('forward shows confirmation buttons', async () => {
       expect.objectContaining({
         callbackData: 'confirm_forward:thread1:alice@example.com:personal',
       }),
-      expect.objectContaining({ callbackData: expect.stringContaining('cancel_forward') }),
+      expect.objectContaining({
+        callbackData: expect.stringContaining('cancel_forward'),
+      }),
     ]),
   );
 });
@@ -996,20 +1010,22 @@ Add these cases to the `switch` in `handleCallback`, before the `default` case. 
 The callback data format for forward is `forward:threadId:recipient:account` (4 parts). Update the parts extraction at the top of `handleCallback`:
 
 Find:
+
 ```typescript
-  const parts = query.data.split(':');
-  const action = parts[0];
-  const entityId = parts[1] || '';
-  const extra = parts[2] || '';
+const parts = query.data.split(':');
+const action = parts[0];
+const entityId = parts[1] || '';
+const extra = parts[2] || '';
 ```
 
 Replace with:
+
 ```typescript
-  const parts = query.data.split(':');
-  const action = parts[0];
-  const entityId = parts[1] || '';
-  const extra = parts[2] || '';
-  const extra2 = parts[3] || '';
+const parts = query.data.split(':');
+const action = parts[0];
+const entityId = parts[1] || '';
+const extra = parts[2] || '';
+const extra2 = parts[3] || '';
 ```
 
 Then add the new cases:
@@ -1130,6 +1146,7 @@ git commit -m "feat(ux): add forward and open-URL callback handlers"
 ### Task 9: RSVP Callback Handler
 
 **Files:**
+
 - Create: `src/calendar-ops.ts`
 - Create: `src/__tests__/calendar-ops.test.ts`
 - Modify: `src/callback-router.ts`
@@ -1156,9 +1173,9 @@ describe('CalendarOpsRouter', () => {
 
   it('throws for unknown account', async () => {
     const router = new CalendarOpsRouter();
-    await expect(
-      router.rsvp('unknown', 'event1', 'accepted'),
-    ).rejects.toThrow('No calendar provider registered for account: unknown');
+    await expect(router.rsvp('unknown', 'event1', 'accepted')).rejects.toThrow(
+      'No calendar provider registered for account: unknown',
+    );
   });
 
   it('routes declined response', async () => {
@@ -1264,7 +1281,9 @@ export interface CallbackRouterDeps {
   autoApproval: AutoApprovalTimer;
   statusBar: StatusBarManager;
   gmailOps?: GmailOps;
-  calendarOps?: { rsvp(account: string, eventId: string, response: string): Promise<void> };
+  calendarOps?: {
+    rsvp(account: string, eventId: string, response: string): Promise<void>;
+  };
   draftWatcher?: DraftEnrichmentWatcher;
   findChannel: (jid: string) => (Channel & Record<string, any>) | undefined;
 }
@@ -1323,6 +1342,7 @@ git commit -m "feat(ux): add RSVP callback handler and CalendarOps router"
 ### Task 10: Mini App Menu Button
 
 **Files:**
+
 - Modify: `src/channels/telegram.ts`
 
 - [ ] **Step 1: Add setChatMenuButton call in connect()**
@@ -1330,21 +1350,21 @@ git commit -m "feat(ux): add RSVP callback handler and CalendarOps router"
 In `src/channels/telegram.ts`, find the end of the `connect()` method (after bot starts polling). Add the menu button setup. Find a spot after `this.bot.start()` or at the end of `connect()`:
 
 ```typescript
-    // Set Web App menu button if MINI_APP_URL is configured
-    if (MINI_APP_URL) {
-      try {
-        await this.bot.api.setChatMenuButton({
-          menu_button: {
-            type: 'web_app',
-            text: '📱 App',
-            web_app: { url: MINI_APP_URL },
-          },
-        });
-        logger.info({ url: MINI_APP_URL }, 'Telegram menu button set');
-      } catch (err) {
-        logger.debug({ err }, 'Failed to set menu button (non-fatal)');
-      }
-    }
+// Set Web App menu button if MINI_APP_URL is configured
+if (MINI_APP_URL) {
+  try {
+    await this.bot.api.setChatMenuButton({
+      menu_button: {
+        type: 'web_app',
+        text: '📱 App',
+        web_app: { url: MINI_APP_URL },
+      },
+    });
+    logger.info({ url: MINI_APP_URL }, 'Telegram menu button set');
+  } catch (err) {
+    logger.debug({ err }, 'Failed to set menu button (non-fatal)');
+  }
+}
 ```
 
 Add the import at the top of the file:
@@ -1370,6 +1390,7 @@ git commit -m "feat(ux): set Telegram menu button for mini app access"
 ### Task 11: Promote Full Email Button to First-Level Messages
 
 **Files:**
+
 - Modify: `src/router.ts`
 
 - [ ] **Step 1: Always attach Full Email button for email-category messages**
@@ -1379,44 +1400,44 @@ In `src/router.ts`, find the email preview section in `classifyAndFormat`. Curre
 Find the email preview block and restructure it:
 
 ```typescript
-  // Email: attach action buttons (Full Email always, Expand only for long bodies)
-  if (meta.category === 'email') {
-    const accountMatch = text.match(/\[Email(?:\s*\[(\w+)\])?\s+from\s/);
-    const account = accountMatch?.[1] || '';
+// Email: attach action buttons (Full Email always, Expand only for long bodies)
+if (meta.category === 'email') {
+  const accountMatch = text.match(/\[Email(?:\s*\[(\w+)\])?\s+from\s/);
+  const account = accountMatch?.[1] || '';
 
-    const bodyStart = text.indexOf('\n\n');
-    if (bodyStart !== -1 && text.length - bodyStart > 302) {
-      const header = text.slice(0, bodyStart + 2);
-      const body = text.slice(bodyStart + 2);
-      displayText = header + truncatePreview(body, 300);
+  const bodyStart = text.indexOf('\n\n');
+  if (bodyStart !== -1 && text.length - bodyStart > 302) {
+    const header = text.slice(0, bodyStart + 2);
+    const body = text.slice(bodyStart + 2);
+    displayText = header + truncatePreview(body, 300);
 
-      if (meta.emailId) {
-        meta.actions.push({
-          label: '📧 Expand',
-          callbackData: `expand:${meta.emailId}:${account}`,
-          style: 'secondary' as const,
-        });
-      }
-    }
-
-    // Always attach Full Email + Archive when we have an emailId
     if (meta.emailId) {
-      if (MINI_APP_URL) {
-        const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
-        meta.actions.push({
-          label: '🌐 Full Email',
-          callbackData: `noop:${meta.emailId}`,
-          style: 'secondary' as const,
-          webAppUrl: fullUrl,
-        });
-      }
       meta.actions.push({
-        label: '🗄 Archive',
-        callbackData: `archive:${meta.emailId}`,
+        label: '📧 Expand',
+        callbackData: `expand:${meta.emailId}:${account}`,
         style: 'secondary' as const,
       });
     }
   }
+
+  // Always attach Full Email + Archive when we have an emailId
+  if (meta.emailId) {
+    if (MINI_APP_URL) {
+      const fullUrl = `${MINI_APP_URL}/email/${meta.emailId}${account ? `?account=${account}` : ''}`;
+      meta.actions.push({
+        label: '🌐 Full Email',
+        callbackData: `noop:${meta.emailId}`,
+        style: 'secondary' as const,
+        webAppUrl: fullUrl,
+      });
+    }
+    meta.actions.push({
+      label: '🗄 Archive',
+      callbackData: `archive:${meta.emailId}`,
+      style: 'secondary' as const,
+    });
+  }
+}
 ```
 
 - [ ] **Step 2: Run tests to verify no regressions**
@@ -1436,6 +1457,7 @@ git commit -m "feat(ux): promote Full Email button to first-level on all email m
 ### Task 12: Integration Test
 
 **Files:**
+
 - Create: `src/__tests__/telegram-ux-improvements-integration.test.ts`
 
 - [ ] **Step 1: Write integration test covering the full flow**
@@ -1489,10 +1511,17 @@ describe('Telegram UX Improvements Integration', () => {
 
       // 2. User taps confirm_forward button
       const forwardAction = actions[0].actions[0];
-      const callbackData = forwardAction.callbackData.replace('forward:', 'confirm_forward:');
+      const callbackData = forwardAction.callbackData.replace(
+        'forward:',
+        'confirm_forward:',
+      );
 
       const deps: CallbackRouterDeps = {
-        archiveTracker: { markArchived: vi.fn(), getUnarchived: vi.fn().mockReturnValue([]), recordAction: vi.fn() } as any,
+        archiveTracker: {
+          markArchived: vi.fn(),
+          getUnarchived: vi.fn().mockReturnValue([]),
+          recordAction: vi.fn(),
+        } as any,
         autoApproval: { cancel: vi.fn() } as any,
         statusBar: { removePendingItem: vi.fn() } as any,
         gmailOps: {
@@ -1509,7 +1538,13 @@ describe('Telegram UX Improvements Integration', () => {
       };
 
       await handleCallback(
-        { id: 'q1', chatJid: 'tg:123', messageId: 42, data: callbackData, senderName: 'User' },
+        {
+          id: 'q1',
+          chatJid: 'tg:123',
+          messageId: 42,
+          data: callbackData,
+          senderName: 'User',
+        },
         deps,
       );
 
@@ -1529,8 +1564,8 @@ describe('Telegram UX Improvements Integration', () => {
       const hasForward = result.meta.actions.some((a) =>
         a.callbackData?.startsWith('forward:'),
       );
-      const hasGenericYes = result.meta.actions.some(
-        (a) => a.callbackData?.includes(':yes'),
+      const hasGenericYes = result.meta.actions.some((a) =>
+        a.callbackData?.includes(':yes'),
       );
       // Note: forward detection requires threadId on meta, which classifyAndFormat
       // may not set for arbitrary text. This tests the priority logic when both could match.

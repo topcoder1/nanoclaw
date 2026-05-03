@@ -17,13 +17,13 @@ cd ~/dev/nanoclaw
 
 This dumps the OAuth token state and runs a probe. Possible outcomes:
 
-| Output | Cause | Fix |
-|---|---|---|
-| `(directory missing inside container)` | Container started without the Gmail mount. Almost certainly a bug — check `src/container-runner.ts` mount logic. | Restart the host service. |
-| `minutes_until_expiry: -X.X` (negative) | Access token expired and the in-container refresh failed. | Run `python3 scripts/refresh-gmail-tokens.py` on the host (rewrites the credentials.json that's bind-mounted into the container). |
-| `(probe failed — see error above)` with "ECONNREFUSED" or "fetch failed" | Container has no outbound network OR the npx fetch for the gmail-mcp package failed. | Check `docker logs <container>` for npm errors. May need to pre-bake the gmail-mcp into the container image (separate task). |
-| `(credentials.json missing)` | Account was never authorized OR credentials file was deleted. | Re-authorize manually (see section 2 below). |
-| Tool list returns successfully but the agent still says "unavailable" | The MCP is healthy but the agent's model context lost the tool registration. | Send the agent a new message — the next container spawn will re-register tools. |
+| Output                                                                   | Cause                                                                                                            | Fix                                                                                                                               |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `(directory missing inside container)`                                   | Container started without the Gmail mount. Almost certainly a bug — check `src/container-runner.ts` mount logic. | Restart the host service.                                                                                                         |
+| `minutes_until_expiry: -X.X` (negative)                                  | Access token expired and the in-container refresh failed.                                                        | Run `python3 scripts/refresh-gmail-tokens.py` on the host (rewrites the credentials.json that's bind-mounted into the container). |
+| `(probe failed — see error above)` with "ECONNREFUSED" or "fetch failed" | Container has no outbound network OR the npx fetch for the gmail-mcp package failed.                             | Check `docker logs <container>` for npm errors. May need to pre-bake the gmail-mcp into the container image (separate task).      |
+| `(credentials.json missing)`                                             | Account was never authorized OR credentials file was deleted.                                                    | Re-authorize manually (see section 2 below).                                                                                      |
+| Tool list returns successfully but the agent still says "unavailable"    | The MCP is healthy but the agent's model context lost the tool registration.                                     | Send the agent a new message — the next container spawn will re-register tools.                                                   |
 
 ## 1. Pre-emptively refresh tokens (no downtime)
 
@@ -36,11 +36,12 @@ python3 ~/dev/nanoclaw/scripts/refresh-gmail-tokens.py
 ```
 
 Exit codes:
+
 - 0: All accounts checked, all good
 - 2: At least one account is missing credentials.json (expected for
-     accounts you haven't authorized yet — attaxion, dev)
+  accounts you haven't authorized yet — attaxion, dev)
 - 3: At least one refresh failed (refresh_token revoked, network, etc.)
-     — see section 2 to manually re-auth that account
+  — see section 2 to manually re-auth that account
 
 ## 2. Manually re-authorize a Gmail account
 
@@ -123,5 +124,5 @@ After this runbook's commits ship, the morning briefing should:
 - The host log should show `gmail-token-refresh: all accounts ok` (debug
   level) before each email-trigger spawn
 - The host log should show `Gmail account directory present but no
-  credentials.json — skipping mount` at info level (once per process)
+credentials.json — skipping mount` at info level (once per process)
   for each unauthorized account

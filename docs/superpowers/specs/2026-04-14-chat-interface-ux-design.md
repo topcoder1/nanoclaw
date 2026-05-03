@@ -9,6 +9,7 @@
 NanoClaw's Telegram chat is noisy. The morning briefing surfaces items you already handled. "What did I miss?" gives shallow counts without content. There's no way to dismiss, acknowledge, or prioritize items. FYI updates arrive with the same weight as action-required items. The result: you stop trusting the briefing and go check email directly, which defeats the entire point.
 
 **Core pain points:**
+
 1. No awareness of user actions (replied emails, accepted invites still show as pending)
 2. No urgency separation (ESCALATE items look the same as FYI)
 3. No dismissal mechanism (items persist until they age out or get re-processed)
@@ -77,6 +78,7 @@ Other channels →  (direct)           →  NanoClaw decision  →  push/digest/
 **SuperPilot's role:** Classify emails (needs-attention, FYI, newsletter, transactional). This classification is an input signal, not the final decision.
 
 **NanoClaw's role:** Make the final push/digest/resolved decision by combining:
+
 - SuperPilot classification (for emails)
 - Trust tier (ESCALATE/PROPOSE/AUTO)
 - Cross-source context (already replied? already RSVPed? thread resolved?)
@@ -85,18 +87,18 @@ Other channels →  (direct)           →  NanoClaw decision  →  push/digest/
 
 **Decision matrix:**
 
-| SuperPilot | Trust Tier | User Acted? | Decision |
-|-----------|-----------|------------|----------|
-| needs-attention | ESCALATE | No | **PUSH** immediately |
-| needs-attention | PROPOSE | No | **PUSH** with approve/dismiss |
-| needs-attention | AUTO | No | **PUSH** (trust override: needs attention) |
-| needs-attention | any | Yes (replied) | **RESOLVED** (show in digest) |
-| FYI | any | — | **DIGEST** batch |
-| newsletter | any | — | **DIGEST** batch (or suppress) |
-| — (calendar) | — | conflict in <30min | **PUSH** |
-| — (calendar) | — | conflict in >30min | **DIGEST** |
-| — (Discord) | — | @mention from VIP | **PUSH** |
-| — (Discord) | — | other | **DIGEST** |
+| SuperPilot      | Trust Tier | User Acted?        | Decision                                   |
+| --------------- | ---------- | ------------------ | ------------------------------------------ |
+| needs-attention | ESCALATE   | No                 | **PUSH** immediately                       |
+| needs-attention | PROPOSE    | No                 | **PUSH** with approve/dismiss              |
+| needs-attention | AUTO       | No                 | **PUSH** (trust override: needs attention) |
+| needs-attention | any        | Yes (replied)      | **RESOLVED** (show in digest)              |
+| FYI             | any        | —                  | **DIGEST** batch                           |
+| newsletter      | any        | —                  | **DIGEST** batch (or suppress)             |
+| — (calendar)    | —          | conflict in <30min | **PUSH**                                   |
+| — (calendar)    | —          | conflict in >30min | **DIGEST**                                 |
+| — (Discord)     | —          | @mention from VIP  | **PUSH**                                   |
+| — (Discord)     | —          | other              | **DIGEST**                                 |
 
 ### Item Lifecycle
 
@@ -135,6 +137,7 @@ Every tracked item follows this lifecycle:
 ```
 
 **State transitions:**
+
 - DETECTED → CLASSIFY: Immediate, on event bus emission
 - CLASSIFY → PUSHED: Item classified as push-worthy
 - CLASSIFY → QUEUED: Item classified as digest-worthy
@@ -173,6 +176,7 @@ Reply with a number to act, or just start your day.
 ```
 
 **Data sources:**
+
 - `processed_items` table for tracked items and their states
 - SuperPilot API for email classifications
 - Gmail MCP for action detection (`from:me`, `in:inbox`)
@@ -180,6 +184,7 @@ Reply with a number to act, or just start your day.
 - Discord channel history (last 12h)
 
 **Behavioral rules:**
+
 - Always runs, even on quiet days (shows "Nothing urgent. Clean slate today.")
 - Filters out items where user already acted (Gmail reply sent, calendar accepted)
 - Filters out items no longer in inbox (archived = resolved)
@@ -191,6 +196,7 @@ Reply with a number to act, or just start your day.
 **Trigger:** Real-time, via event bus subscription.
 
 **Push criteria (any of these = immediate push):**
+
 - Trust tier ESCALATE (NanoClaw cannot handle autonomously)
 - SuperPilot "needs-attention" AND user has NOT already acted
 - Calendar conflict within 30 minutes
@@ -210,6 +216,7 @@ Can you review the attached and approve?"
 ```
 
 **Behavioral rules:**
+
 - Each push is a standalone message (not edited into a thread)
 - Include enough context to act without opening the source app (sender, subject, key excerpt)
 - Inline buttons map to trust actions (approve → AUTO-handle, dismiss → mark resolved, snooze → re-push in 2h)
@@ -243,6 +250,7 @@ Next digest when 5+ items accumulate.
 ```
 
 **Behavioral rules:**
+
 - "Resolved" section shows auto-detected resolutions with evidence ("you replied at X")
 - "FYI" section batches low-priority items with counts, not full details
 - "Did you handle?" section shows the fallback ask for unconfirmed items (4h+ since push)
@@ -256,16 +264,17 @@ Next digest when 5+ items accumulate.
 
 **Detection methods by source:**
 
-| Source | Detection Method | Check Frequency |
-|--------|-----------------|-----------------|
-| Gmail | `from:me` in thread (user replied) | Every email-poll cycle |
-| Gmail | NOT `in:inbox` (user archived) | Every email-poll cycle |
-| Gmail | Label changes (user categorized) | Every email-poll cycle |
-| Calendar | RSVP status changed (accepted/declined) | Every 15 min |
-| Discord | Thread marked resolved or user replied | Every 15 min |
-| Push buttons | User tapped Approve/Dismiss in Telegram | Immediate (callback) |
+| Source       | Detection Method                        | Check Frequency        |
+| ------------ | --------------------------------------- | ---------------------- |
+| Gmail        | `from:me` in thread (user replied)      | Every email-poll cycle |
+| Gmail        | NOT `in:inbox` (user archived)          | Every email-poll cycle |
+| Gmail        | Label changes (user categorized)        | Every email-poll cycle |
+| Calendar     | RSVP status changed (accepted/declined) | Every 15 min           |
+| Discord      | Thread marked resolved or user replied  | Every 15 min           |
+| Push buttons | User tapped Approve/Dismiss in Telegram | Immediate (callback)   |
 
 **Resolution confidence:**
+
 - Gmail `from:me` in thread → HIGH confidence (definitely replied)
 - Gmail archived → HIGH confidence (intentionally moved out of inbox)
 - Calendar RSVP → HIGH confidence (explicit action)
@@ -277,6 +286,7 @@ Next digest when 5+ items accumulate.
 **Design decision (CEO review + outside voice):** No active "Did you handle?" fallback asks. Asking creates meta-notifications that double interaction cost. Instead, unconfirmed items appear passively in the digest's "still pending" section. If you saw it and didn't act, that IS your answer.
 
 **Lifecycle:**
+
 1. Item pushed, enters PENDING state
 2. Auto-detection checks run every cycle (Gmail from:me, archived, RSVP)
 3. If resolved → mark resolved, show in digest's "resolved" section
@@ -284,6 +294,7 @@ Next digest when 5+ items accumulate.
 5. If still pending after 2 digest cycles → transitions to STALE (auto-archived)
 
 **Auto-archive behavior:**
+
 - STALE items are logged but removed from active tracking
 - They appear in the next digest's resolved section as "auto-archived (stale)"
 - They do NOT generate new pushes
@@ -316,6 +327,7 @@ User: what did I miss?
 ```
 
 **Behavioral rules:**
+
 - Scoped to time since last interaction (last message from user in chat)
 - Uses the same classification pipeline as smart digest
 - Resets the smart digest accumulator (prevents double-reporting)
@@ -393,13 +405,13 @@ CREATE TABLE digest_state (
 
 ### Existing Systems Modified
 
-| System | Change |
-|--------|--------|
-| `email-poll` | Add resolution detection (check `from:me`, `in:inbox`) before processing |
-| `morning-briefing` | Replace with morning dashboard format, query `tracked_items` |
-| `trust-commands.ts` ("what did I miss?") | Replace count-based response with on-demand digest |
-| `processed_items` table | Add `tracked_items` table alongside (don't break existing) |
-| Task scheduler | Add smart digest check on interval (every 15 min) |
+| System                                   | Change                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| `email-poll`                             | Add resolution detection (check `from:me`, `in:inbox`) before processing |
+| `morning-briefing`                       | Replace with morning dashboard format, query `tracked_items`             |
+| `trust-commands.ts` ("what did I miss?") | Replace count-based response with on-demand digest                       |
+| `processed_items` table                  | Add `tracked_items` table alongside (don't break existing)               |
+| Task scheduler                           | Add smart digest check on interval (every 15 min)                        |
 
 ### Process Boundary (CEO review + outside voice decision)
 
@@ -421,8 +433,8 @@ interface Channel {
   sendMessageWithKeyboard?(
     jid: string,
     text: string,
-    keyboard: InlineKeyboard
-  ): Promise<number>;  // returns message ID for callback tracking
+    keyboard: InlineKeyboard,
+  ): Promise<number>; // returns message ID for callback tracking
   onCallbackQuery?(handler: (query: CallbackQuery) => void): void;
 }
 ```
@@ -440,15 +452,15 @@ Optional methods so non-Telegram channels aren't affected. The push manager chec
 
 ```typescript
 interface ChatInterfaceConfig {
-  morningDashboardTime: string;    // Default: '07:30' (PT)
-  digestThreshold: number;         // Default: 5 (items before digest fires)
-  digestMinInterval: number;       // Default: 7200 (seconds, 2h minimum between digests)
-  fallbackAskWindow: number;       // Default: 14400 (seconds, 4h before asking)
-  staleAfterDigestCycles: number;  // Default: 2
-  pushRateLimit: number;           // Default: 3 (max pushes per 30 min)
-  pushRateWindow: number;          // Default: 1800 (seconds)
-  vipList: string[];               // Discord/email VIP senders that always push
-  urgencyKeywords: string[];       // Default: ['urgent', 'deadline', 'asap', 'blocking']
+  morningDashboardTime: string; // Default: '07:30' (PT)
+  digestThreshold: number; // Default: 5 (items before digest fires)
+  digestMinInterval: number; // Default: 7200 (seconds, 2h minimum between digests)
+  fallbackAskWindow: number; // Default: 14400 (seconds, 4h before asking)
+  staleAfterDigestCycles: number; // Default: 2
+  pushRateLimit: number; // Default: 3 (max pushes per 30 min)
+  pushRateWindow: number; // Default: 1800 (seconds)
+  vipList: string[]; // Discord/email VIP senders that always push
+  urgencyKeywords: string[]; // Default: ['urgent', 'deadline', 'asap', 'blocking']
 }
 ```
 
@@ -457,28 +469,33 @@ interface ChatInterfaceConfig {
 This design builds on existing infrastructure. No breaking changes.
 
 **Phase 1: Item Tracking + Resolution Detection**
+
 - Create `tracked_items` and `digest_state` tables
 - Add resolution detection to email-poll (Gmail `from:me`, `in:inbox` checks)
 - Emit `item.classified` and `item.resolved` events on event bus
 
 **Phase 2: Morning Dashboard**
+
 - Replace morning briefing output format with dashboard layout
 - Query `tracked_items` for state-aware display
 - Filter resolved items before display
 
 **Phase 3: Push Notifications**
+
 - Add classification pipeline (SuperPilot signal + trust tier + context)
 - Send push messages with inline buttons
 - Handle button callbacks (approve/dismiss/snooze)
 - Implement push rate limiting
 
 **Phase 4: Smart Digest**
+
 - Add digest state tracking
 - Implement threshold-based digest trigger (check every 15 min)
 - Build digest message format with resolved/FYI/fallback sections
 - Implement "what did I miss?" as on-demand digest
 
 **Phase 5: Fallback + Staleness**
+
 - Add fallback ask logic (4h window, include in digest)
 - Add stale detection (2 digest cycles)
 - Auto-archive stale items
@@ -514,6 +531,7 @@ CREATE INDEX idx_tracked_thread ON tracked_items(thread_id);
 **Phase 1 (ship with):** Same Gmail thread ID = same thread. Zero false-positive risk. Gmail provides thread IDs natively.
 
 **Phase 6 (deferred):** Cross-source correlation:
+
 - Calendar event with attendees matching email senders = same thread
 - Discord thread mentioning email subject or contact name = LLM-assisted matching
 - Manual override: user can group items via reply command
@@ -521,6 +539,7 @@ CREATE INDEX idx_tracked_thread ON tracked_items(thread_id);
 Cross-source correlation is deferred because bad grouping damages trust. Ship simple, prove value, then add complexity.
 
 **Dashboard display:**
+
 ```
 ━━ ACTION REQUIRED (2 threads) ━━
 1. 🔴 Acme Corp deal (3 items: email, calendar, contract)
@@ -543,6 +562,7 @@ NanoClaw checks your calendar before pushing. During calendar events, non-ESCALA
 ```
 
 **Implementation:**
+
 - Before each push, check Calendar MCP for current events
 - If in a meeting: buffer the push in `tracked_items` with state `held`
 - Schedule a check for calendar event end time
@@ -550,9 +570,10 @@ NanoClaw checks your calendar before pushing. During calendar events, non-ESCALA
 - ESCALATE items bypass the buffer (that's the whole point of ESCALATE)
 
 **Config addition:**
+
 ```typescript
-holdPushDuringMeetings: boolean;  // Default: true
-microBriefingDelay: number;       // Default: 60 (seconds after meeting ends)
+holdPushDuringMeetings: boolean; // Default: true
+microBriefingDelay: number; // Default: 60 (seconds after meeting ends)
 ```
 
 ### 9. "Handle It" Delegation Button
@@ -560,6 +581,7 @@ microBriefingDelay: number;       // Default: 60 (seconds after meeting ends)
 Push messages get a fourth button: "Handle it." When tapped, NanoClaw autonomously resolves the item.
 
 **First-time behavior (PROPOSE tier):**
+
 1. User taps "Handle it" on an email push
 2. NanoClaw drafts a reply and sends it back in Telegram: "Here's my draft reply. Send it?"
 3. User approves or edits
@@ -567,6 +589,7 @@ Push messages get a fourth button: "Handle it." When tapped, NanoClaw autonomous
 5. Trust engine records: this sender/topic was delegated and approved
 
 **Graduated behavior (AUTO tier, after trust graduation):**
+
 1. User taps "Handle it"
 2. NanoClaw immediately handles it (sends reply, accepts invite, etc.)
 3. Shows confirmation: "Done. Replied to Sarah re: budget approval."
@@ -582,6 +605,7 @@ Push messages get a fourth button: "Handle it." When tapped, NanoClaw autonomous
 | Discord @mention | Draft and post a reply |
 
 **Guardrails:**
+
 - First 10 delegations for any action class always go through PROPOSE (draft approval)
 - Email replies are never sent without the user seeing the draft at least once for that sender
 - Financial, legal, or HR-tagged emails are permanently ESCALATE (never auto-handle)
@@ -593,27 +617,30 @@ Static rules serve as defaults. After accumulating user behavior data, NanoClaw 
 
 **Data collection:**
 Every user action on a tracked item is recorded:
+
 - Push → immediate action (within 5 min) = high priority signal
-- Push → snooze = "not now but later" signal  
+- Push → snooze = "not now but later" signal
 - Push → dismiss = "not important" signal
 - Push → no action for 4h = low priority signal
 - Digest item → user asked for details = higher priority than expected
 
 **Learning model:**
+
 ```typescript
 interface ClassificationAdjustment {
-  source: string;           // 'gmail', 'discord', etc.
-  sender_pattern: string;   // email domain, Discord user, etc.
+  source: string; // 'gmail', 'discord', etc.
+  sender_pattern: string; // email domain, Discord user, etc.
   subject_pattern?: string; // keyword patterns
   original_classification: 'push' | 'digest';
   observed_behavior: 'immediate_action' | 'snooze' | 'dismiss' | 'ignore';
-  count: number;            // how many times this pattern occurred
+  count: number; // how many times this pattern occurred
   adjustment: 'promote' | 'demote' | 'none';
-  confidence: number;       // 0-1, increases with count
+  confidence: number; // 0-1, increases with count
 }
 ```
 
 **Adjustment rules:**
+
 - 3+ dismissals from same sender pattern → demote to digest
 - 3+ immediate actions on digest items from same pattern → promote to push
 - 5+ snoozes at same time-of-day → adjust delivery time
@@ -625,17 +652,19 @@ interface ClassificationAdjustment {
 ### 11. Weekend Mode + Quiet Hours
 
 **Config additions:**
+
 ```typescript
 quietHours: {
-  enabled: boolean;           // Default: true
-  start: string;              // Default: '22:00' (PT)
-  end: string;                // Default: '07:00' (PT)
-  weekendMode: boolean;       // Default: true (suppress Sat/Sun)
-  escalateOverride: boolean;  // Default: true (ESCALATE always pushes)
-};
+  enabled: boolean; // Default: true
+  start: string; // Default: '22:00' (PT)
+  end: string; // Default: '07:00' (PT)
+  weekendMode: boolean; // Default: true (suppress Sat/Sun)
+  escalateOverride: boolean; // Default: true (ESCALATE always pushes)
+}
 ```
 
 During quiet hours and weekends:
+
 - Non-ESCALATE pushes are buffered (same mechanism as context-aware delivery)
 - Morning dashboard at configured time delivers everything
 - ESCALATE items always push through
@@ -646,6 +675,7 @@ During quiet hours and weekends:
 For emails that are part of an ongoing conversation, the push message includes the user's last reply.
 
 **Enhanced push format:**
+
 ```
 🔴 ACTION: Email from Sarah Chen
 Re: Q2 Budget Approval
@@ -666,30 +696,35 @@ Can you review the attached and approve?"
 Track snooze patterns and feed them into the learning loop.
 
 **Pattern tracking:**
+
 - Record snooze time, snooze duration chosen, item source, sender pattern
 - After 3+ snoozes of same sender/topic to same time window → suggest reclassification
 - In digest: "You've snoozed vendor emails to afternoon 5 times. Want me to auto-digest them and include in the 1pm batch?"
 
 **Integration with learning loop (Expansion #4):**
 Snooze data feeds `classification_adjustments`:
+
 - Repeated snooze to afternoon → `adjustment: 'demote'` for that sender pattern
 - Repeated snooze to "2h later" → delivery time shift, not classification change
 
 ## Updated Migration Path
 
 **Phase 1: Foundation (Item Tracking + Resolution Detection)**
+
 - Create `tracked_items`, `threads`, `digest_state`, and `classification_adjustments` tables
 - Add resolution detection to email-poll (Gmail `from:me`, `in:inbox` checks)
 - Emit `item.classified` and `item.resolved` events on event bus
 - Basic thread grouping (same Gmail thread ID)
 
 **Phase 2: Morning Dashboard**
+
 - Replace morning briefing output format with dashboard layout
 - Query `tracked_items` with thread grouping for display
 - Filter resolved items/threads before display
 - Add quiet hours / weekend mode config
 
 **Phase 3: Push Notifications + Context-Aware Delivery**
+
 - **Prerequisite:** Extend Channel interface with sendMessageWithKeyboard() and onCallbackQuery()
 - Add callback_query handler to TelegramChannel
 - Add orchestrator-side classification overlay (trust tier + calendar check)
@@ -700,6 +735,7 @@ Snooze data feeds `classification_adjustments`:
 - Push rate limiting + quiet hours / weekend mode
 
 **Phase 4: Smart Digest + On-Demand**
+
 - Add digest state tracking
 - Implement threshold-based digest trigger
 - Build digest message format with resolved/FYI/still-pending sections
@@ -707,6 +743,7 @@ Snooze data feeds `classification_adjustments`:
 - Snooze pattern tracking
 
 **Phase 5: Learning Loop + Staleness**
+
 - Classification adjustment storage and application
 - Snooze intelligence feeding learning loop
 - Stale detection (2 digest cycles, passive)
@@ -714,6 +751,7 @@ Snooze data feeds `classification_adjustments`:
 - Learning system feedback (stale rates, classification accuracy)
 
 **Phase 6: Cross-Source Thread Correlation (deferred)**
+
 - Calendar attendee → email sender matching
 - Discord thread → email subject LLM-assisted correlation
 - Manual thread grouping via reply command
@@ -729,13 +767,13 @@ Snooze data feeds `classification_adjustments`:
 
 ## GSTACK REVIEW REPORT
 
-| Review | Trigger | Why | Runs | Status | Findings |
-|--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR | 7 proposals, 7 accepted, 0 deferred |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 12 issues, 0 critical gaps |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+| Review        | Trigger               | Why                             | Runs | Status | Findings                            |
+| ------------- | --------------------- | ------------------------------- | ---- | ------ | ----------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 1    | CLEAR  | 7 proposals, 7 accepted, 0 deferred |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —      | —                                   |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 1    | CLEAR  | 12 issues, 0 critical gaps          |
+| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —      | —                                   |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | —      | —                                   |
 
 **UNRESOLVED:** 0 decisions pending
 **VERDICT:** CEO + ENG CLEARED. Ready to implement.

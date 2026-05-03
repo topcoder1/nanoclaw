@@ -6,7 +6,7 @@
 
 ## Goal
 
-Make the mini-app the single surface where email triage happens on mobile — no Gmail jumping for routine actions. The agent already drafts replies when it decides one is warranted; this spec adds the *other* cases: short human replies that don't need AI, triage decisions (snooze, silence, unsubscribe), and user-initiated AI drafting.
+Make the mini-app the single surface where email triage happens on mobile — no Gmail jumping for routine actions. The agent already drafts replies when it decides one is warranted; this spec adds the _other_ cases: short human replies that don't need AI, triage decisions (snooze, silence, unsubscribe), and user-initiated AI drafting.
 
 ## Non-goals
 
@@ -18,25 +18,25 @@ Make the mini-app the single surface where email triage happens on mobile — no
 
 ## Clarifying-question answers (recap)
 
-| # | Question | Answer |
-|---|---|---|
-| Q1 | Canned reply model | Option 3 — chips for trivial replies AND a `Draft with AI` path for substantive ones |
-| Q2 | Triage actions in scope | Archive (existing), Snooze, Unsubscribe, Mute thread |
-| Q3 | Draft-with-AI trigger | Option 4 — two buttons: `Quick draft` (no prompt) and `Draft with prompt` (intent input) |
-| Q4 | Button layout | Option C (classification-driven primary row) + Option A fallback (`⋯ More` always reveals full set) |
+| #   | Question                | Answer                                                                                              |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------- |
+| Q1  | Canned reply model      | Option 3 — chips for trivial replies AND a `Draft with AI` path for substantive ones                |
+| Q2  | Triage actions in scope | Archive (existing), Snooze, Unsubscribe, Mute thread                                                |
+| Q3  | Draft-with-AI trigger   | Option 4 — two buttons: `Quick draft` (no prompt) and `Draft with prompt` (intent input)            |
+| Q4  | Button layout           | Option C (classification-driven primary row) + Option A fallback (`⋯ More` always reveals full set) |
 
 ## UX rule — classification → button set
 
 Primary button row is driven by `tracked_items.classification` + a new `subtype` column. Mapping:
 
-| Classification | Subtype | Primary row | Canned chips above |
-|---|---|---|---|
-| `push` | sender-is-human | `Quick draft` · `Draft with prompt` · `Archive` | ✅ `[Thanks] [Got it] [Will do]` |
-| `push` | sender-is-bot | `Archive` · `Snooze` · `Open in Gmail` | — |
-| `digest` | header has `List-Unsubscribe` | `Unsubscribe` · `Archive` · `Snooze` · `Mute` | — |
-| `digest` | no `List-Unsubscribe` | `Archive` · `Snooze` · `Mute` · `Open in Gmail` | — |
-| `transactional` | (any) | `Archive` · `Open in Gmail` | — |
-| `ignore` / missing | (any) | `Archive` · `Open in Gmail` · `⋯ More` | — |
+| Classification     | Subtype                       | Primary row                                     | Canned chips above               |
+| ------------------ | ----------------------------- | ----------------------------------------------- | -------------------------------- |
+| `push`             | sender-is-human               | `Quick draft` · `Draft with prompt` · `Archive` | ✅ `[Thanks] [Got it] [Will do]` |
+| `push`             | sender-is-bot                 | `Archive` · `Snooze` · `Open in Gmail`          | —                                |
+| `digest`           | header has `List-Unsubscribe` | `Unsubscribe` · `Archive` · `Snooze` · `Mute`   | —                                |
+| `digest`           | no `List-Unsubscribe`         | `Archive` · `Snooze` · `Mute` · `Open in Gmail` | —                                |
+| `transactional`    | (any)                         | `Archive` · `Open in Gmail`                     | —                                |
+| `ignore` / missing | (any)                         | `Archive` · `Open in Gmail` · `⋯ More`          | —                                |
 
 `⋯ More` is always rendered, always reveals the superset: every action available in any row plus `Open in Gmail`. This is the classifier-wrong escape hatch. One row is compact; two rows when expanded.
 
@@ -89,6 +89,7 @@ Schema change: add `'snoozed'` to the `tracked_items.state` CHECK constraint all
 **Wake-up mechanism — `src/triage/snooze-scheduler.ts` (new):**
 
 `setInterval` tick every 60s:
+
 1. `SELECT item_id, original_state, original_queue FROM snoozed_items WHERE wake_at <= ?`
 2. For each: UPDATE tracked_items SET state=original_state, queue=original_queue; DELETE from snoozed_items
 3. Emit `email.snooze.waked` → push-manager posts Telegram alert: `⏰ Reminder: <subject>`
@@ -100,6 +101,7 @@ Survives process restart (DB-backed state, not in-memory timers). 1-minute granu
 Banner button → DELETE `/api/email/:id/snooze` → revert state immediately. No UI for snoozed items outside the originating session in v1.
 
 **Edge cases:**
+
 - Archive during snooze → `ON DELETE CASCADE` removes the snooze row; wake tick no-ops
 - Re-snooze already snoozed → INSERT OR REPLACE; effectively extends
 - Invalid duration → 400 `INVALID_DURATION`
@@ -117,6 +119,7 @@ Banner button → DELETE `/api/email/:id/snooze` → revert state immediately. N
 4. **Fallback:** no header → UI shows `No unsubscribe link — [Open in Gmail]`, returns `{ ok: false, code: 'NO_UNSUBSCRIBE_HEADER' }`
 
 **Safety rules:**
+
 - Only `https://` and `mailto:` schemes; reject anything else
 - Don't follow redirects to non-HTTPS
 - Don't include the user's email in any POST body (some sites echo in responses)
@@ -140,6 +143,7 @@ CREATE INDEX idx_unsub_item ON unsubscribe_log(item_id);
 ```
 
 **UI:**
+
 - Optimistic banner on tap: `📭 Unsubscribing…`
 - Success → `✅ Unsubscribed and archived`
 - Remote 4xx/5xx → amber banner: `⚠️ Unsubscribe may have failed — [Open in Gmail]`. Thread still archived (doesn't resurface).
@@ -171,11 +175,16 @@ CREATE TABLE muted_threads (
 Hook into the SSE-to-tracked_items insert path in `src/email-sse.ts`. Before writing a new tracked_item:
 
 ```ts
-const muted = db.prepare('SELECT 1 FROM muted_threads WHERE thread_id = ?').get(threadId);
+const muted = db
+  .prepare('SELECT 1 FROM muted_threads WHERE thread_id = ?')
+  .get(threadId);
 if (muted) {
-  logger.info({ thread_id: threadId, component: 'triage', event: 'muted_skip' }, 'Muted thread skipped');
+  logger.info(
+    { thread_id: threadId, component: 'triage', event: 'muted_skip' },
+    'Muted thread skipped',
+  );
   await gmailOps.archiveThread(account, threadId);
-  return;  // don't insert, don't notify
+  return; // don't insert, don't notify
 }
 ```
 
@@ -193,10 +202,10 @@ One indexed SELECT per incoming email — negligible cost.
 
 **Chip text:**
 
-| Chip | Sent body |
-|---|---|
-| Thanks | `Thanks!\n\n{firstName}` |
-| Got it | `Got it — thanks.\n\n{firstName}` |
+| Chip    | Sent body                         |
+| ------- | --------------------------------- |
+| Thanks  | `Thanks!\n\n{firstName}`          |
+| Got it  | `Got it — thanks.\n\n{firstName}` |
 | Will do | `Will do. Thanks,\n\n{firstName}` |
 
 `{firstName}` resolved from `gmail.users.settings.sendAs.list().primarySendAs.displayName` split on space [0], cached per account in-memory at startup.
@@ -283,32 +292,32 @@ Reuses the full reply-send machinery already landed in commit `0829804`. No new 
 
 ### New files
 
-| File | Purpose |
-|---|---|
-| `src/triage/mute-filter.ts` | SSE intake filter + cascade-resolve helper |
-| `src/triage/snooze-scheduler.ts` | 60s ticker, wake-up, event emission |
-| `src/triage/unsubscribe-executor.ts` | Header parse + method picker + HTTP/mailto exec |
-| `src/triage/sender-kind.ts` | Human/bot heuristics + transactional detection |
-| `src/mini-app/actions.ts` | All new route handlers (mount in server.ts) |
-| `src/mini-app/templates/action-row.ts` | Context-aware primary-row + More-row renderer |
-| `migrations/2026-04-19-ux-expansion.sql` | New tables + columns + CHECK updates |
-| `src/__tests__/mini-app-actions.test.ts` | Route handler tests |
-| `src/triage/__tests__/snooze-scheduler.test.ts` | Wake-tick tests |
-| `src/triage/__tests__/mute-filter.test.ts` | Intake filter tests |
-| `src/triage/__tests__/unsubscribe-executor.test.ts` | Method picker + exec tests |
+| File                                                | Purpose                                         |
+| --------------------------------------------------- | ----------------------------------------------- |
+| `src/triage/mute-filter.ts`                         | SSE intake filter + cascade-resolve helper      |
+| `src/triage/snooze-scheduler.ts`                    | 60s ticker, wake-up, event emission             |
+| `src/triage/unsubscribe-executor.ts`                | Header parse + method picker + HTTP/mailto exec |
+| `src/triage/sender-kind.ts`                         | Human/bot heuristics + transactional detection  |
+| `src/mini-app/actions.ts`                           | All new route handlers (mount in server.ts)     |
+| `src/mini-app/templates/action-row.ts`              | Context-aware primary-row + More-row renderer   |
+| `migrations/2026-04-19-ux-expansion.sql`            | New tables + columns + CHECK updates            |
+| `src/__tests__/mini-app-actions.test.ts`            | Route handler tests                             |
+| `src/triage/__tests__/snooze-scheduler.test.ts`     | Wake-tick tests                                 |
+| `src/triage/__tests__/mute-filter.test.ts`          | Intake filter tests                             |
+| `src/triage/__tests__/unsubscribe-executor.test.ts` | Method picker + exec tests                      |
 
 ### Modified files
 
-| File | Change |
-|---|---|
-| `src/mini-app/server.ts` | Wire actions.ts routes; pass dependencies |
-| `src/mini-app/templates/email-full.ts` | Replace static button row with `renderActionRow(classification, subtype, sender_kind)` |
-| `src/email-sse.ts` | Call `muteFilter()` before tracked_items insert; also populate `sender_kind` + `subtype` |
-| `src/tracked-items.ts` | Add `sender_kind` + `subtype` columns |
-| `src/index.ts` | Start `snooze-scheduler` alongside existing reconcilers |
-| `src/gmail-ops.ts` | Add `sendEmail(account, to, subject, body)` for mailto unsubscribe |
-| `src/channels/gmail.ts` | Implement `sendEmail` via `gmail.users.messages.send` |
-| `scripts/qa/invariants.ts` | Add `muted-threads-never-visible` predicate |
+| File                                   | Change                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `src/mini-app/server.ts`               | Wire actions.ts routes; pass dependencies                                                |
+| `src/mini-app/templates/email-full.ts` | Replace static button row with `renderActionRow(classification, subtype, sender_kind)`   |
+| `src/email-sse.ts`                     | Call `muteFilter()` before tracked_items insert; also populate `sender_kind` + `subtype` |
+| `src/tracked-items.ts`                 | Add `sender_kind` + `subtype` columns                                                    |
+| `src/index.ts`                         | Start `snooze-scheduler` alongside existing reconcilers                                  |
+| `src/gmail-ops.ts`                     | Add `sendEmail(account, to, subject, body)` for mailto unsubscribe                       |
+| `src/channels/gmail.ts`                | Implement `sendEmail` via `gmail.users.messages.send`                                    |
+| `scripts/qa/invariants.ts`             | Add `muted-threads-never-visible` predicate                                              |
 
 ## Data flow — annotated examples
 
@@ -391,29 +400,29 @@ All new routes follow ISSUE-010's shape:
 
 ### Codes
 
-| Code | HTTP | Meaning |
-|---|---|---|
-| `ITEM_NOT_FOUND` | 404 | tracked_items row missing |
-| `INVALID_DURATION` | 400 | Snooze duration parse failed or > 90 days |
-| `INVALID_INTENT` | 400 | Draft-with-AI intent exceeded char cap |
-| `NO_UNSUBSCRIBE_HEADER` | 422 | No List-Unsubscribe present |
-| `UNSUBSCRIBE_REMOTE_FAILED` | 502 | Remote returned 5xx or timeout |
-| `TASK_ALREADY_RUNNING` | 409 | Concurrent Draft-with-AI for same item |
-| `TASK_TIMEOUT` | 504 | Draft-with-AI exceeded 45s |
-| `GMAIL_API_ERROR` | 500 | Gmail API call failed |
-| `ACCOUNT_NOT_REGISTERED` | 404 | account not in GmailOpsRouter |
-| `INTERNAL` | 500 | Unknown server error |
+| Code                        | HTTP | Meaning                                   |
+| --------------------------- | ---- | ----------------------------------------- |
+| `ITEM_NOT_FOUND`            | 404  | tracked_items row missing                 |
+| `INVALID_DURATION`          | 400  | Snooze duration parse failed or > 90 days |
+| `INVALID_INTENT`            | 400  | Draft-with-AI intent exceeded char cap    |
+| `NO_UNSUBSCRIBE_HEADER`     | 422  | No List-Unsubscribe present               |
+| `UNSUBSCRIBE_REMOTE_FAILED` | 502  | Remote returned 5xx or timeout            |
+| `TASK_ALREADY_RUNNING`      | 409  | Concurrent Draft-with-AI for same item    |
+| `TASK_TIMEOUT`              | 504  | Draft-with-AI exceeded 45s                |
+| `GMAIL_API_ERROR`           | 500  | Gmail API call failed                     |
+| `ACCOUNT_NOT_REGISTERED`    | 404  | account not in GmailOpsRouter             |
+| `INTERNAL`                  | 500  | Unknown server error                      |
 
 ### Optimistic vs pessimistic UI
 
-| Action | Pattern | Reason |
-|---|---|---|
-| Snooze | Optimistic (banner immediately) | Reversible, fast |
-| Mute | Optimistic | Reversible via Unmute |
-| Archive | Optimistic (existing) | Reversible in Gmail |
-| Unsubscribe | Pessimistic (show "sending" spinner) | External side effects |
-| Canned reply | Pessimistic (10s undo banner) | Reuses reply-send UX |
-| Draft-with-AI | Pessimistic (task spinner) | Long-running, observable |
+| Action        | Pattern                              | Reason                   |
+| ------------- | ------------------------------------ | ------------------------ |
+| Snooze        | Optimistic (banner immediately)      | Reversible, fast         |
+| Mute          | Optimistic                           | Reversible via Unmute    |
+| Archive       | Optimistic (existing)                | Reversible in Gmail      |
+| Unsubscribe   | Pessimistic (show "sending" spinner) | External side effects    |
+| Canned reply  | Pessimistic (10s undo banner)        | Reuses reply-send UX     |
+| Draft-with-AI | Pessimistic (task spinner)           | Long-running, observable |
 
 ### Out-of-UI failures
 
@@ -424,6 +433,7 @@ All actions that might fail asynchronously (unsubscribe remote, snooze wake, dra
 ### Unit tests
 
 **`src/triage/__tests__/snooze-scheduler.test.ts`:**
+
 - Tick with no ready rows → no-op
 - Tick with one ready row → restores state, deletes snooze row, emits event
 - `wake_at` in future → skipped
@@ -431,11 +441,13 @@ All actions that might fail asynchronously (unsubscribe remote, snooze wake, dra
 - Restart mid-tick simulated via `scheduler.stop()` → state consistent
 
 **`src/triage/__tests__/mute-filter.test.ts`:**
+
 - `thread_id` in `muted_threads` → returns `true`, archives thread, skips insert
 - Not muted → returns `false`, allows insert to proceed
 - DB error on filter check → fail-open (log error, allow insert) so muting never breaks intake
 
 **`src/triage/__tests__/unsubscribe-executor.test.ts`:**
+
 - Headers with `One-Click` → picks RFC 8058 path, POSTs empty body
 - Headers with mailto only → picks mailto path, calls `sendEmail`
 - Headers with legacy HTTPS URL → GETs
@@ -444,6 +456,7 @@ All actions that might fail asynchronously (unsubscribe remote, snooze wake, dra
 - Network timeout → `UNSUBSCRIBE_REMOTE_FAILED` but still archives
 
 **`src/triage/__tests__/sender-kind.test.ts`:**
+
 - Bot heuristics: each header + regex triggers bot classification
 - Ambiguous → `human` (default)
 - Transactional subtype: each signal combination tested
@@ -451,6 +464,7 @@ All actions that might fail asynchronously (unsubscribe remote, snooze wake, dra
 ### Route tests (`src/__tests__/mini-app-actions.test.ts`)
 
 One happy path + one primary failure path per route. Covers:
+
 - `POST /api/email/:id/snooze` + dropdown durations
 - `DELETE /api/email/:id/snooze` unsnooze
 - `POST /api/email/:id/unsubscribe` each method
@@ -463,6 +477,7 @@ One happy path + one primary failure path per route. Covers:
 ### Integration test (`src/__tests__/miniapp-ux-expansion-integration.test.ts`)
 
 End-to-end: fake Gmail + in-memory DB + mock container runner. Exercise:
+
 - Snooze → 60s later wake fires → Telegram notification path
 - Mute → next SSE intake for same thread is skipped
 - Unsubscribe → remote endpoint hit once + archive landed

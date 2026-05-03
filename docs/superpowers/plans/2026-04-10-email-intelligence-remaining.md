@@ -9,10 +9,11 @@
 **Tech Stack:** Node.js/TypeScript (NanoClaw), Python/FastAPI (superpilot), SQLite, Docker containers, SSE
 
 **Dependency Graph:**
+
 ```
 Task 1 (agent processing) ← foundation for everything
 Task 2 (subject/sender)   ← independent, superpilot-side
-Task 3 (SSE keepalive)    ← independent, superpilot-side  
+Task 3 (SSE keepalive)    ← independent, superpilot-side
 Task 4 (Discord token)    ← independent, NanoClaw-side
 Task 5 (Gmail Push)       ← depends on Task 2
 Task 6 (superpilot CI)    ← independent, superpilot-side
@@ -30,25 +31,25 @@ Task 10 (budget ceiling)  ← depends on Task 9
 
 ### NanoClaw (this repo)
 
-| File | Change | Purpose |
-|------|--------|---------|
-| `src/ipc.ts` | Modify (lines 472-525) | Replace `sendMessage` with agent invocation via queue |
-| `src/email-sse.ts` | Modify (lines 157-201) | Pass subject/sender from SSE events |
-| `src/container-runner.ts` | Modify (lines 64-199) | Verify DISCORD_BOT_TOKEN env var injection |
-| `src/index.ts` | Modify (lines 715-749) | Add `runAgent` / `enqueueTask` to IPC deps |
-| `src/config.ts` | Modify | Add DAILY_BUDGET_USD config |
-| `src/db.ts` | Modify | Add cost tracking query helpers |
-| `groups/main/CLAUDE.md` | Modify | Add VIP contacts section |
-| `src/ipc.ts` | Modify | Add approval message parsing |
+| File                      | Change                 | Purpose                                               |
+| ------------------------- | ---------------------- | ----------------------------------------------------- |
+| `src/ipc.ts`              | Modify (lines 472-525) | Replace `sendMessage` with agent invocation via queue |
+| `src/email-sse.ts`        | Modify (lines 157-201) | Pass subject/sender from SSE events                   |
+| `src/container-runner.ts` | Modify (lines 64-199)  | Verify DISCORD_BOT_TOKEN env var injection            |
+| `src/index.ts`            | Modify (lines 715-749) | Add `runAgent` / `enqueueTask` to IPC deps            |
+| `src/config.ts`           | Modify                 | Add DAILY_BUDGET_USD config                           |
+| `src/db.ts`               | Modify                 | Add cost tracking query helpers                       |
+| `groups/main/CLAUDE.md`   | Modify                 | Add VIP contacts section                              |
+| `src/ipc.ts`              | Modify                 | Add approval message parsing                          |
 
 ### Superpilot (`~/dev/inbox_superpilot`)
 
-| File | Change | Purpose |
-|------|--------|---------|
-| `app/api/nanoclaw/triaged-emails/route.ts` | Modify | Join email_threads to get subject/sender |
-| `app/api/nanoclaw/events/route.ts` | Modify | Include subject/sender in SSE events, add keepalive |
-| `app/api/nanoclaw/ipc-writer/route.ts` | Create or modify | Gmail Push webhook → IPC trigger |
-| `tests/AuthGate.test.tsx` | Fix | Unblock CI |
+| File                                       | Change           | Purpose                                             |
+| ------------------------------------------ | ---------------- | --------------------------------------------------- |
+| `app/api/nanoclaw/triaged-emails/route.ts` | Modify           | Join email_threads to get subject/sender            |
+| `app/api/nanoclaw/events/route.ts`         | Modify           | Include subject/sender in SSE events, add keepalive |
+| `app/api/nanoclaw/ipc-writer/route.ts`     | Create or modify | Gmail Push webhook → IPC trigger                    |
+| `tests/AuthGate.test.tsx`                  | Fix              | Unblock CI                                          |
 
 ---
 
@@ -59,6 +60,7 @@ Task 10 (budget ceiling)  ← depends on Task 9
 **Fix:** Instead of sending a message, enqueue a task via the group queue that spawns a container agent with the prompt. The agent processes the emails inside the container and sends clean proposals back to Telegram.
 
 **Files:**
+
 - Modify: `src/ipc.ts:472-525`
 - Modify: `src/index.ts:715-749` (add `enqueueTask` to IPC deps)
 
@@ -165,74 +167,68 @@ Replace lines 493-523 in `src/ipc.ts`:
 In `src/index.ts`, add the `enqueueEmailTrigger` implementation to the IPC deps (around line 715):
 
 ```typescript
-  startIpcWatcher({
-    sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
-    syncGroups: async (force: boolean) => {
-      await Promise.all(
-        channels
-          .filter((ch) => ch.syncGroups)
-          .map((ch) => ch.syncGroups!(force)),
-      );
-    },
-    getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
-    onTasksChanged: () => {
-      const tasks = getAllTasks();
-      const taskRows = tasks.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        script: t.script || undefined,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      }));
-      for (const group of Object.values(registeredGroups)) {
-        writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+startIpcWatcher({
+  sendMessage: (jid, text) => {
+    const channel = findChannel(channels, jid);
+    if (!channel) throw new Error(`No channel for JID: ${jid}`);
+    return channel.sendMessage(jid, text);
+  },
+  registeredGroups: () => registeredGroups,
+  registerGroup,
+  syncGroups: async (force: boolean) => {
+    await Promise.all(
+      channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
+    );
+  },
+  getAvailableGroups,
+  writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+  onTasksChanged: () => {
+    const tasks = getAllTasks();
+    const taskRows = tasks.map((t) => ({
+      id: t.id,
+      groupFolder: t.group_folder,
+      prompt: t.prompt,
+      script: t.script || undefined,
+      schedule_type: t.schedule_type,
+      schedule_value: t.schedule_value,
+      status: t.status,
+      next_run: t.next_run,
+    }));
+    for (const group of Object.values(registeredGroups)) {
+      writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+    }
+  },
+  enqueueEmailTrigger: (chatJid, prompt, onResult) => {
+    const taskId = `email-trigger-${Date.now()}`;
+    queue.enqueueTask(chatJid, taskId, async () => {
+      const group = registeredGroups[chatJid];
+      if (!group) {
+        logger.warn({ chatJid }, 'No group for email trigger');
+        return;
       }
-    },
-    enqueueEmailTrigger: (chatJid, prompt, onResult) => {
-      const taskId = `email-trigger-${Date.now()}`;
-      queue.enqueueTask(chatJid, taskId, async () => {
-        const group = registeredGroups[chatJid];
-        if (!group) {
-          logger.warn({ chatJid }, 'No group for email trigger');
-          return;
-        }
 
-        const result = await runAgent(group, prompt, chatJid, async (output) => {
-          if (output.result) {
-            await onResult(output.result);
-          }
-        });
-
-        if (result === 'error') {
-          const channel = findChannel(channels, chatJid);
-          const telegramJid = Object.keys(registeredGroups).find((jid) =>
-            jid.startsWith('tg:'),
-          );
-          const notifyChannel = findChannel(
-            channels,
-            telegramJid || chatJid,
-          );
-          if (notifyChannel) {
-            await notifyChannel.sendMessage(
-              telegramJid || chatJid,
-              '⚠️ Email intelligence trigger failed. Check logs.',
-            );
-          }
+      const result = await runAgent(group, prompt, chatJid, async (output) => {
+        if (output.result) {
+          await onResult(output.result);
         }
       });
-    },
-  });
+
+      if (result === 'error') {
+        const channel = findChannel(channels, chatJid);
+        const telegramJid = Object.keys(registeredGroups).find((jid) =>
+          jid.startsWith('tg:'),
+        );
+        const notifyChannel = findChannel(channels, telegramJid || chatJid);
+        if (notifyChannel) {
+          await notifyChannel.sendMessage(
+            telegramJid || chatJid,
+            '⚠️ Email intelligence trigger failed. Check logs.',
+          );
+        }
+      }
+    });
+  },
+});
 ```
 
 - [ ] **Step 4: Build and verify compilation**
@@ -263,6 +259,7 @@ proposals back to Telegram."
 **Problem:** The superpilot SSE event and bridge API return `subject: ''` and `sender: ''` because the triaged-emails query doesn't join the `email_threads` table.
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/app/api/nanoclaw/triaged-emails/route.ts`
 - Modify: `~/dev/inbox_superpilot/app/api/nanoclaw/events/route.ts`
 - Modify: `src/email-sse.ts:170-180` (NanoClaw — pass through subject/sender from SSE)
@@ -281,7 +278,7 @@ Read the model/schema to find the `subject` and `sender` columns.
 In the superpilot `triaged-emails` route, add a SQL join:
 
 ```sql
-SELECT t.thread_id, t.account, t.classified_at, 
+SELECT t.thread_id, t.account, t.classified_at,
        et.subject, et.sender_email as sender
 FROM triage_results t
 LEFT JOIN email_threads et ON t.thread_id = et.thread_id
@@ -330,12 +327,14 @@ npm run build
 - [ ] **Step 6: Commit both repos**
 
 NanoClaw:
+
 ```bash
 git add src/email-sse.ts
 git commit -m "fix: pass subject/sender from SSE email events"
 ```
 
 Superpilot (in that repo):
+
 ```bash
 git add app/api/nanoclaw/
 git commit -m "fix: join email_threads to include subject/sender in triaged-emails and SSE"
@@ -350,6 +349,7 @@ git commit -m "fix: join email_threads to include subject/sender in triaged-emai
 **Fix:** Add server-side keepalive comments (`:keepalive\n\n`) every 15 seconds in the superpilot SSE endpoint. This keeps the connection alive through Cloudflare's proxy.
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/app/api/nanoclaw/events/route.ts`
 
 - [ ] **Step 1: Add keepalive to SSE endpoint**
@@ -384,6 +384,7 @@ git push
 ```
 
 After deploy, monitor NanoClaw logs:
+
 ```bash
 journalctl --user -u nanoclaw -f | grep SSE
 ```
@@ -397,6 +398,7 @@ Expected: No "SSE connection closed by server" within 5 minutes. Keepalive comme
 **Problem:** `DISCORD_BOT_TOKEN` was added to container-runner env vars but NanoClaw was running old code. After restart, need to verify the token actually reaches containers.
 
 **Files:**
+
 - Modify: `src/container-runner.ts` (if token isn't already passed)
 
 - [ ] **Step 1: Check if DISCORD_BOT_TOKEN is in container env vars**
@@ -415,11 +417,13 @@ grep -n "ONECLI\|onecli\|credential" src/container-runner.ts | head -20
 ```
 
 If OneCLI handles it, verify the credential is registered:
+
 ```bash
 onecli list | grep -i discord
 ```
 
 If not registered:
+
 ```bash
 cd ~/dev/wxa-secrets
 uv run python -m wxa_secrets get DISCORD_BOT_TOKEN
@@ -437,6 +441,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
 Check logs for Discord-related errors:
+
 ```bash
 journalctl --user -u nanoclaw | grep -i discord | tail -20
 ```
@@ -457,6 +462,7 @@ git commit -m "fix: ensure DISCORD_BOT_TOKEN reaches agent containers"
 **Depends on:** Task 2 (subject/sender must be available).
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot` (find the Gmail Push handler and the triage completion point)
 
 - [ ] **Step 1: Find the triage completion point in superpilot**
@@ -509,6 +515,7 @@ git commit -m "feat: emit SSE event on triage completion for real-time NanoClaw 
 **Problem:** `AuthGate.test.tsx` fails, blocking full CI green status.
 
 **Files:**
+
 - Fix: `~/dev/inbox_superpilot/tests/AuthGate.test.tsx` (or similar path)
 
 - [ ] **Step 1: Find and read the failing test**
@@ -550,6 +557,7 @@ Check GitHub Actions for green CI.
 **Depends on:** Task 1 (agent must actually process triggers first).
 
 **Files:**
+
 - Modify: `src/ipc.ts` or `groups/main/CLAUDE.md` (if approval parsing needs fixes)
 
 - [ ] **Step 1: Trigger an email that generates a PROPOSE action**
@@ -559,6 +567,7 @@ Send a real email that requires a reply (not a newsletter). Wait for the agent t
 - [ ] **Step 2: Verify the proposal appears on Telegram**
 
 The agent should send a clean proposal like:
+
 ```
 📧 Reply proposal for [sender]:
 Subject: [subject]
@@ -572,6 +581,7 @@ Reply with: approve / edit: [changes] / skip
 - [ ] **Step 3: Test approval parsing**
 
 Reply "approve" on Telegram. The agent should:
+
 1. Receive the approval message via the normal message loop
 2. Execute the proposed action (send the email reply)
 3. Log to `approval_log` table
@@ -590,6 +600,7 @@ sqlite3 store/messages.db "SELECT * FROM approval_log ORDER BY timestamp DESC LI
 - [ ] **Step 6: Document any fixes needed and commit**
 
 If the approval flow required code changes, commit them:
+
 ```bash
 git add src/ groups/
 git commit -m "fix: approval flow parsing and execution"
@@ -602,11 +613,13 @@ git commit -m "fix: approval flow parsing and execution"
 **Problem:** The VIP contacts section in `groups/main/CLAUDE.md` is empty. VIP contacts trigger ESCALATE tier (immediate human notification).
 
 **Files:**
+
 - Modify: `groups/main/CLAUDE.md`
 
 - [ ] **Step 1: Ask the user for their VIP contact list**
 
 This is a config-only change. The user needs to provide:
+
 - Email addresses or domains that should always escalate
 - Names/roles for context
 
@@ -616,6 +629,7 @@ In the Email Intelligence section of `groups/main/CLAUDE.md`, populate the VIP c
 
 ```markdown
 ### VIP Contacts (always ESCALATE)
+
 - CEO / executives at current company
 - Key clients (list specific emails/domains)
 - Legal counsel
@@ -636,6 +650,7 @@ git commit -m "feat: populate VIP contacts for email escalation rules"
 **Problem:** `session_costs` table exists but nothing writes to it. Need to log estimated costs after each container agent session.
 
 **Files:**
+
 - Modify: `src/index.ts` (in `runAgent` function, after container completes)
 - Modify: `src/task-scheduler.ts` (after task container completes)
 - Modify: `src/db.ts` (add `logSessionCost` helper)
@@ -708,14 +723,14 @@ async function runAgent(
 In `src/task-scheduler.ts`, the `runTask` function already tracks `startTime` and `durationMs`. Add cost logging after `logTaskRun`:
 
 ```typescript
-  // After logTaskRun (line 232):
-  logSessionCost({
-    session_type: 'task',
-    group_folder: task.group_folder,
-    started_at: new Date(startTime).toISOString(),
-    duration_ms: durationMs,
-    estimated_cost_usd: (durationMs / 10_000) * 0.01,
-  });
+// After logTaskRun (line 232):
+logSessionCost({
+  session_type: 'task',
+  group_folder: task.group_folder,
+  started_at: new Date(startTime).toISOString(),
+  duration_ms: durationMs,
+  estimated_cost_usd: (durationMs / 10_000) * 0.01,
+});
 ```
 
 - [ ] **Step 4: Build and verify**
@@ -740,6 +755,7 @@ git commit -m "feat: log estimated session costs to session_costs table"
 **Depends on:** Task 9 (cost tracking must be in place).
 
 **Files:**
+
 - Modify: `src/config.ts` (add `DAILY_BUDGET_USD`)
 - Modify: `src/index.ts` (check budget before running agent)
 - Modify: `src/task-scheduler.ts` (check budget before running tasks)
@@ -835,17 +851,20 @@ so they resume the following day."
 ## Execution Order
 
 **Wave 1 (parallel, no dependencies):**
+
 - Task 1: Fix agent processing (NanoClaw)
 - Task 2: Wire subject/sender (superpilot)
 - Task 3: Fix SSE keepalive (superpilot)
 - Task 4: Fix Discord token (NanoClaw)
 
 **Wave 2 (after Wave 1):**
+
 - Task 5: Wire Gmail Push (superpilot, needs Task 2)
 - Task 6: Fix AuthGate test (superpilot, independent but same repo)
 - Task 7: Test approval flow (needs Task 1)
 
 **Wave 3 (independent lower priority):**
+
 - Task 8: VIP contacts (config only)
 - Task 9: Cost tracking (NanoClaw)
 - Task 10: Budget ceiling (needs Task 9)

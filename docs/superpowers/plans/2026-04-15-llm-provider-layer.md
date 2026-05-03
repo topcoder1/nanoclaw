@@ -16,35 +16,36 @@
 
 ### New files
 
-| File | Purpose |
-|------|---------|
-| `src/llm/provider.ts` | `resolveModel()` — resolves provider/model from group config + overrides |
-| `src/llm/escalation.ts` | `scoreComplexity()` — keyword heuristics for auto-escalation |
-| `src/llm/utility.ts` | `classify()`, `generateShort()`, `embedText()` — in-process utility LLM |
-| `src/llm/provider.test.ts` | Tests for provider resolution |
-| `src/llm/escalation.test.ts` | Tests for complexity scoring |
-| `src/llm/utility.test.ts` | Tests for utility LLM functions |
-| `container/agent-runner/src/vercel-runner.ts` | Vercel AI SDK agent loop with `generateText()` |
-| `container/agent-runner/src/tool-bridge.ts` | IPC tools as Zod-schema `tool()` definitions |
-| `container/agent-runner/src/session-store.ts` | `CoreMessage[]` JSON session persistence |
+| File                                          | Purpose                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| `src/llm/provider.ts`                         | `resolveModel()` — resolves provider/model from group config + overrides |
+| `src/llm/escalation.ts`                       | `scoreComplexity()` — keyword heuristics for auto-escalation             |
+| `src/llm/utility.ts`                          | `classify()`, `generateShort()`, `embedText()` — in-process utility LLM  |
+| `src/llm/provider.test.ts`                    | Tests for provider resolution                                            |
+| `src/llm/escalation.test.ts`                  | Tests for complexity scoring                                             |
+| `src/llm/utility.test.ts`                     | Tests for utility LLM functions                                          |
+| `container/agent-runner/src/vercel-runner.ts` | Vercel AI SDK agent loop with `generateText()`                           |
+| `container/agent-runner/src/tool-bridge.ts`   | IPC tools as Zod-schema `tool()` definitions                             |
+| `container/agent-runner/src/session-store.ts` | `CoreMessage[]` JSON session persistence                                 |
 
 ### Modified files
 
-| File | Changes |
-|------|---------|
-| `src/container-runner.ts:49-59` | Add `provider`, `model`, `providerBaseUrl` to `ContainerInput` |
-| `src/container-runner.ts:518-684` | Pass provider env vars in `buildContainerArgs()` |
-| `src/index.ts:584-601` | Call `resolveModel()` + `scoreComplexity()`, pass provider/model to container |
-| `src/types.ts:30-33` | Add `llm?` field to `ContainerConfig` |
-| `container/agent-runner/src/index.ts:623-773` | Branch on provider: Claude path stays, non-Claude calls `runVercelQuery()` |
-| `container/agent-runner/package.json` | Add `ai`, `@ai-sdk/openai`, `@ai-sdk/google` |
-| `package.json` | Add `ai`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/anthropic` |
+| File                                          | Changes                                                                       |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/container-runner.ts:49-59`               | Add `provider`, `model`, `providerBaseUrl` to `ContainerInput`                |
+| `src/container-runner.ts:518-684`             | Pass provider env vars in `buildContainerArgs()`                              |
+| `src/index.ts:584-601`                        | Call `resolveModel()` + `scoreComplexity()`, pass provider/model to container |
+| `src/types.ts:30-33`                          | Add `llm?` field to `ContainerConfig`                                         |
+| `container/agent-runner/src/index.ts:623-773` | Branch on provider: Claude path stays, non-Claude calls `runVercelQuery()`    |
+| `container/agent-runner/package.json`         | Add `ai`, `@ai-sdk/openai`, `@ai-sdk/google`                                  |
+| `package.json`                                | Add `ai`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/anthropic`             |
 
 ---
 
 ### Task 1: Host-Side Provider Resolution
 
 **Files:**
+
 - Create: `src/llm/provider.ts`
 - Create: `src/llm/provider.test.ts`
 - Modify: `src/types.ts:30-33`
@@ -84,7 +85,10 @@ describe('resolveModel', () => {
       provider: 'openai',
       model: 'gpt-4o-mini',
     };
-    const result = resolveModel({ llm }, { provider: 'google', model: 'gemini-2.0-flash' });
+    const result = resolveModel(
+      { llm },
+      { provider: 'google', model: 'gemini-2.0-flash' },
+    );
     expect(result).toEqual({
       provider: 'google',
       model: 'gemini-2.0-flash',
@@ -217,12 +221,13 @@ git commit -m "feat(llm): add provider resolution with LlmConfig type"
 ### Task 2: Auto-Escalation Scoring
 
 **Files:**
+
 - Create: `src/llm/escalation.ts`
 - Create: `src/llm/escalation.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
 
-```typescript
+````typescript
 // src/llm/escalation.test.ts
 import { describe, it, expect } from 'vitest';
 import { scoreComplexity } from './escalation.js';
@@ -273,7 +278,8 @@ It should return a string but it returns undefined. Fix the security vulnerabili
   });
 
   it('escalates messages with multiple file references and code keywords', () => {
-    const msg = 'Refactor src/index.ts, src/config.ts, src/types.ts to use the new import pattern';
+    const msg =
+      'Refactor src/index.ts, src/config.ts, src/types.ts to use the new import pattern';
     const result = scoreComplexity(msg);
     expect(result.shouldEscalate).toBe(true);
   });
@@ -288,7 +294,7 @@ Can you debug this? And fix the security issue? Also analyze the trade-off?`;
     expect(result.reason).toContain('code block');
   });
 });
-```
+````
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -297,7 +303,7 @@ Expected: FAIL — module `./escalation.js` does not exist
 
 - [ ] **Step 3: Implement `scoreComplexity`**
 
-```typescript
+````typescript
 // src/llm/escalation.ts
 export interface EscalationResult {
   shouldEscalate: boolean;
@@ -359,7 +365,7 @@ export function scoreComplexity(message: string): EscalationResult {
     score,
   };
 }
-```
+````
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -378,6 +384,7 @@ git commit -m "feat(llm): add auto-escalation complexity scoring"
 ### Task 3: Session Store for Vercel AI SDK Path
 
 **Files:**
+
 - Create: `container/agent-runner/src/session-store.ts`
 - Create: `container/agent-runner/src/session-store.test.ts`
 
@@ -405,9 +412,8 @@ describe('session-store', () => {
 
   it('saveSession creates session file and returns sessionId', async () => {
     // Dynamically import to avoid module resolution issues
-    const { saveSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = [
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi there' },
@@ -425,17 +431,15 @@ describe('session-store', () => {
   });
 
   it('loadSession returns empty array for missing session', async () => {
-    const { loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = loadSession(tempDir, 'nonexistent-id');
     expect(messages).toEqual([]);
   });
 
   it('loadSession returns saved messages', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const original = [
       { role: 'user', content: 'test message' },
       { role: 'assistant', content: 'test response' },
@@ -446,9 +450,8 @@ describe('session-store', () => {
   });
 
   it('saveSession trims to last 100 messages', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const messages = Array.from({ length: 120 }, (_, i) => ({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `message ${i}`,
@@ -460,9 +463,8 @@ describe('session-store', () => {
   });
 
   it('saveSession reuses existing sessionId', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
     const id = saveSession(tempDir, null, [{ role: 'user', content: 'first' }]);
     saveSession(tempDir, id, [
       { role: 'user', content: 'first' },
@@ -540,6 +542,7 @@ git commit -m "feat(llm): add Vercel AI SDK session store"
 ### Task 4: IPC Tool Bridge for Vercel AI SDK
 
 **Files:**
+
 - Create: `container/agent-runner/src/tool-bridge.ts`
 - Create: `src/llm/tool-bridge.test.ts`
 
@@ -568,9 +571,8 @@ describe('tool-bridge', () => {
   });
 
   it('buildIpcTools returns tool definitions with correct names', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'test-jid', 'test-group');
     expect(Object.keys(tools)).toContain('send_message');
     expect(Object.keys(tools)).toContain('schedule');
@@ -579,9 +581,8 @@ describe('tool-bridge', () => {
   });
 
   it('send_message tool writes JSON file to messages dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.send_message.execute(
       { text: 'hello world' },
@@ -600,9 +601,8 @@ describe('tool-bridge', () => {
   });
 
   it('schedule tool writes JSON file to tasks dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.schedule.execute(
       { when: '0 8 * * *', prompt: 'daily check', label: 'Morning check' },
@@ -620,9 +620,8 @@ describe('tool-bridge', () => {
   });
 
   it('learn_feedback tool writes to messages dir', async () => {
-    const { buildIpcTools } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { buildIpcTools } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
     const tools = buildIpcTools(tempDir, 'chat@jid', 'test-group');
     const result = await tools.learn_feedback.execute(
       { rule: 'Always check auth first', source: 'user_feedback' },
@@ -740,19 +739,9 @@ export function buildIpcTools(
       description: 'Record a learned rule from this interaction',
       parameters: z.object({
         rule: z.string().describe('The rule or pattern learned'),
-        source: z.enum([
-          'user_feedback',
-          'outcome_pattern',
-          'agent_reported',
-        ]),
+        source: z.enum(['user_feedback', 'outcome_pattern', 'agent_reported']),
       }),
-      execute: async ({
-        rule,
-        source,
-      }: {
-        rule: string;
-        source: string;
-      }) => {
+      execute: async ({ rule, source }: { rule: string; source: string }) => {
         writeIpcFile(messagesDir, {
           type: 'learn_feedback',
           chatJid,
@@ -784,6 +773,7 @@ git commit -m "feat(llm): add IPC tool bridge for Vercel AI SDK path"
 ### Task 5: Vercel AI SDK Agent Runner
 
 **Files:**
+
 - Create: `container/agent-runner/src/vercel-runner.ts`
 - Modify: `container/agent-runner/package.json`
 
@@ -1010,9 +1000,7 @@ export async function runVercelQuery(
       ...result.response.messages.map((m) => ({
         role: m.role,
         content:
-          typeof m.content === 'string'
-            ? m.content
-            : JSON.stringify(m.content),
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
       })),
     ];
     const newSessionId = saveSession(sessionDir, input.sessionId, allMessages);
@@ -1056,6 +1044,7 @@ git commit -m "feat(llm): add Vercel AI SDK agent runner with tool bridge"
 ### Task 6: Wire Dual-Runtime Into Agent Runner Entry Point
 
 **Files:**
+
 - Modify: `container/agent-runner/src/index.ts:67-77` (ContainerInput)
 - Modify: `container/agent-runner/src/index.ts:623-773` (main query dispatch)
 
@@ -1093,7 +1082,9 @@ const provider = containerInput.provider ?? 'anthropic';
 
 if (provider !== 'anthropic') {
   // Non-Claude path: use Vercel AI SDK
-  log(`Using Vercel AI SDK (provider: ${provider}, model: ${containerInput.model ?? 'default'})`);
+  log(
+    `Using Vercel AI SDK (provider: ${provider}, model: ${containerInput.model ?? 'default'})`,
+  );
   const result = await runVercelQuery(containerInput.prompt, containerInput);
   writeOutput(result);
   process.exit(0);
@@ -1119,6 +1110,7 @@ git commit -m "feat(llm): wire dual-runtime dispatch in agent runner"
 ### Task 7: Pass Provider Config From Host to Container
 
 **Files:**
+
 - Modify: `src/container-runner.ts:49-59` (ContainerInput)
 - Modify: `src/container-runner.ts:518-684` (buildContainerArgs)
 - Modify: `src/index.ts:584-601` (runAgent call site)
@@ -1149,23 +1141,23 @@ export interface ContainerInput {
 In `src/container-runner.ts`, inside `buildContainerArgs()`, after the existing env var block (after the `NOTION_TOKEN` block around line 578), add:
 
 ```typescript
-  // Non-Anthropic LLM provider keys — only passed when using non-Claude providers
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
-  }
-  const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (googleKey) {
-    args.push('-e', `GOOGLE_GENERATIVE_AI_API_KEY=${googleKey}`);
-  }
-  const groqKey = process.env.GROQ_API_KEY;
-  if (groqKey) {
-    args.push('-e', `GROQ_API_KEY=${groqKey}`);
-  }
-  const togetherKey = process.env.TOGETHER_AI_API_KEY;
-  if (togetherKey) {
-    args.push('-e', `TOGETHER_AI_API_KEY=${togetherKey}`);
-  }
+// Non-Anthropic LLM provider keys — only passed when using non-Claude providers
+const openaiKey = process.env.OPENAI_API_KEY;
+if (openaiKey) {
+  args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
+}
+const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+if (googleKey) {
+  args.push('-e', `GOOGLE_GENERATIVE_AI_API_KEY=${googleKey}`);
+}
+const groqKey = process.env.GROQ_API_KEY;
+if (groqKey) {
+  args.push('-e', `GROQ_API_KEY=${groqKey}`);
+}
+const togetherKey = process.env.TOGETHER_AI_API_KEY;
+if (togetherKey) {
+  args.push('-e', `TOGETHER_AI_API_KEY=${togetherKey}`);
+}
 ```
 
 Also add these keys to the `SECRET_KEY_PREFIXES` array (around line 641):
@@ -1201,46 +1193,49 @@ import { scoreComplexity } from './llm/escalation.js';
 Then modify the `runContainerAgent` call site (around line 587-601). Before the call, add provider resolution:
 
 ```typescript
-    // Resolve LLM provider/model for this group
-    const resolved = resolveModel(
-      { llm: group.containerConfig?.llm },
-    );
+// Resolve LLM provider/model for this group
+const resolved = resolveModel({ llm: group.containerConfig?.llm });
 
-    // Auto-escalate if message is complex and escalation model is configured
-    let finalModel = resolved.model;
-    if (resolved.provider !== 'anthropic') {
-      const complexity = scoreComplexity(prompt);
-      if (complexity.shouldEscalate) {
-        const llmConfig = group.containerConfig?.llm;
-        const escalationModel = llmConfig?.escalationModel;
-        if (escalationModel) {
-          finalModel = escalationModel;
-          logger.info(
-            { group: group.name, score: complexity.score, reason: complexity.reason, model: escalationModel },
-            'Auto-escalated model',
-          );
-        }
-      }
+// Auto-escalate if message is complex and escalation model is configured
+let finalModel = resolved.model;
+if (resolved.provider !== 'anthropic') {
+  const complexity = scoreComplexity(prompt);
+  if (complexity.shouldEscalate) {
+    const llmConfig = group.containerConfig?.llm;
+    const escalationModel = llmConfig?.escalationModel;
+    if (escalationModel) {
+      finalModel = escalationModel;
+      logger.info(
+        {
+          group: group.name,
+          score: complexity.score,
+          reason: complexity.reason,
+          model: escalationModel,
+        },
+        'Auto-escalated model',
+      );
     }
+  }
+}
 
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt: enrichedPrompt,
-        sessionId,
-        groupFolder: group.folder,
-        chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-        verbose: group.verbose,
-        provider: resolved.provider as any,
-        model: finalModel ?? undefined,
-        providerBaseUrl: resolved.providerBaseUrl ?? undefined,
-      },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
-    );
+const output = await runContainerAgent(
+  group,
+  {
+    prompt: enrichedPrompt,
+    sessionId,
+    groupFolder: group.folder,
+    chatJid,
+    isMain,
+    assistantName: ASSISTANT_NAME,
+    verbose: group.verbose,
+    provider: resolved.provider as any,
+    model: finalModel ?? undefined,
+    providerBaseUrl: resolved.providerBaseUrl ?? undefined,
+  },
+  (proc, containerName) =>
+    queue.registerProcess(chatJid, proc, containerName, group.folder),
+  wrappedOnOutput,
+);
 ```
 
 - [ ] **Step 4: Update existing container-runner tests**
@@ -1267,6 +1262,7 @@ git commit -m "feat(llm): wire provider resolution and auto-escalation into host
 ### Task 8: Add Vercel AI SDK Dependencies to Root
 
 **Files:**
+
 - Modify: `package.json`
 
 - [ ] **Step 1: Install host-side Vercel AI SDK packages**
@@ -1292,6 +1288,7 @@ git commit -m "feat(llm): add Vercel AI SDK dependencies to host"
 ### Task 9: Utility LLM Service
 
 **Files:**
+
 - Create: `src/llm/utility.ts`
 - Create: `src/llm/utility.test.ts`
 
@@ -1523,6 +1520,7 @@ git commit -m "feat(llm): add utility LLM service (classify, generateShort, embe
 ### Task 10: Update Existing Test Mocks and Run Full Suite
 
 **Files:**
+
 - Modify: `src/index.test.ts` (add mocks for new imports)
 - Modify: `src/container-runner.test.ts` (if needed)
 
@@ -1569,6 +1567,7 @@ git commit -m "test: add mocks for LLM provider imports in index test"
 ### Task 11: Rebuild Container Image
 
 **Files:**
+
 - No new files (uses existing `container/build.sh`)
 
 - [ ] **Step 1: Rebuild container**

@@ -9,6 +9,7 @@ When related emails arrive in rapid succession (e.g., 3 Chase wire transfer noti
 3. Both Consumer A (IPC → agent) and Consumer B (event bus → push notification) fire on the same emails
 
 Evidence from production (2026-04-16):
+
 - 3 tracked items with thread IDs `19d9759c...`, `19d975a8...`, `19d975bf...` arrived 45s and 90s apart (135s total window)
 - 5 container runs spawned: 3 initial + 2 escalation follow-ups
 - All 5 share session ID `f97dc7ad`, so each agent run re-analyzes prior output and escalates
@@ -22,6 +23,7 @@ Two changes:
 A new `EmailTriggerDebouncer` class buffers incoming emails instead of writing IPC files immediately. When the first email arrives, a 60-second timer starts. Subsequent emails reset the timer. When the timer fires (60s of quiet), all buffered emails are flushed as a single merged IPC file, producing one agent container run.
 
 **Parameters:**
+
 - `trigger.debounceMs`: 60000 (60s). Time to wait for more emails after most recent arrival. Tunable via `config set`.
 - `trigger.maxHoldMs`: 300000 (5 min). Safety cap — force-flush regardless of new arrivals, preventing indefinite buffering from a continuous email trickle.
 
@@ -38,9 +40,10 @@ Consumer B (the `email.received` handler in `index.ts`) currently sends an immed
 - `debouncer.has(threadId)` → skip push (agent will handle)
 - `!debouncer.has(threadId)` → send push as before (fallback for non-debounced paths)
 
-**Ordering guarantee:** `handleTriagedEmails` adds emails to the debouncer buffer *before* emitting `email.received`. Both operations are synchronous in the same function call, so the debouncer always knows about the email by the time Consumer B checks.
+**Ordering guarantee:** `handleTriagedEmails` adds emails to the debouncer buffer _before_ emitting `email.received`. Both operations are synchronous in the same function call, so the debouncer always knows about the email by the time Consumer B checks.
 
 **What stays unchanged:**
+
 - `digest`-tier emails: never get push notifications, unaffected
 - `tracked_items` dedup in `classifyFromSSE`: remains in place, still prevents re-notifying on subsequent SSE pushes for the same thread
 - If the debouncer is disabled or not initialized, `has()` returns false and push notifications fire as before — safe fallback
@@ -61,6 +64,7 @@ SSE event (1 email) ─┬─► debouncer.add(emails)     [buffer, don't write 
 ```
 
 **Result for wire scenario:**
+
 - 3 SSE events arrive over 135s
 - Debouncer buffers all 3 (first resets timer twice)
 - After 60s of quiet, flushes 1 merged IPC file with 3 wire emails
@@ -73,16 +77,16 @@ SSE event (1 email) ─┬─► debouncer.add(emails)     [buffer, don't write 
 ```typescript
 class EmailTriggerDebouncer {
   constructor(opts: {
-    debounceMs: number;      // from UxConfig trigger.debounceMs
-    maxHoldMs: number;        // from UxConfig trigger.maxHoldMs
+    debounceMs: number; // from UxConfig trigger.debounceMs
+    maxHoldMs: number; // from UxConfig trigger.maxHoldMs
     onFlush: (emails: SSEEmail[], label: string) => void;
-  })
+  });
 
-  add(emails: SSEEmail[], label: string): void
-  has(threadId: string): boolean
-  flush(): void              // force-flush (for graceful shutdown)
-  getBufferSize(): number    // for smoketest
-  destroy(): void            // cleanup timers
+  add(emails: SSEEmail[], label: string): void;
+  has(threadId: string): boolean;
+  flush(): void; // force-flush (for graceful shutdown)
+  getBufferSize(): number; // for smoketest
+  destroy(): void; // cleanup timers
 }
 ```
 
@@ -94,16 +98,17 @@ class EmailTriggerDebouncer {
 
 Two new keys added to `UxConfig` defaults:
 
-| Key | Default | Type | Description |
-|-----|---------|------|-------------|
-| `trigger.debounceMs` | `60000` | number | Quiet period before flushing buffered emails |
-| `trigger.maxHoldMs` | `300000` | number | Maximum time to hold emails before force-flush |
+| Key                  | Default  | Type   | Description                                    |
+| -------------------- | -------- | ------ | ---------------------------------------------- |
+| `trigger.debounceMs` | `60000`  | number | Quiet period before flushing buffered emails   |
+| `trigger.maxHoldMs`  | `300000` | number | Maximum time to hold emails before force-flush |
 
 Tunable at runtime via `config set trigger.debounceMs 30000`.
 
 ## Observability
 
 **Logging:**
+
 - `info` on first email entering empty buffer (thread_id, starts timer)
 - `info` on merge into existing buffer (current count, time since first)
 - `info` on flush (final count, total hold time, thread_ids)
@@ -113,15 +118,15 @@ Tunable at runtime via `config set trigger.debounceMs 30000`.
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `src/email-trigger-debouncer.ts` | New — EmailTriggerDebouncer class |
-| `src/__tests__/email-trigger-debouncer.test.ts` | New — unit tests |
-| `src/email-sse.ts` | `handleTriagedEmails` adds to debouncer instead of writing IPC directly. IPC-write logic extracted to `writeIpcTrigger` (used as `onFlush` callback) |
-| `src/index.ts` | Initialize debouncer with UxConfig values, pass to `startEmailSSE`. `email.received` handler checks `debouncer.has()` before sending push. Smoketest deps updated |
-| `src/ux-config.ts` | Add `trigger.debounceMs` and `trigger.maxHoldMs` defaults |
-| `src/chat-commands.ts` | `SmokeTestDeps` gains `triggerDebouncer` field |
-| `src/__tests__/email-trigger-debounce-integration.test.ts` | New — integration test for debounce + suppression flow |
+| File                                                       | Change                                                                                                                                                            |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/email-trigger-debouncer.ts`                           | New — EmailTriggerDebouncer class                                                                                                                                 |
+| `src/__tests__/email-trigger-debouncer.test.ts`            | New — unit tests                                                                                                                                                  |
+| `src/email-sse.ts`                                         | `handleTriagedEmails` adds to debouncer instead of writing IPC directly. IPC-write logic extracted to `writeIpcTrigger` (used as `onFlush` callback)              |
+| `src/index.ts`                                             | Initialize debouncer with UxConfig values, pass to `startEmailSSE`. `email.received` handler checks `debouncer.has()` before sending push. Smoketest deps updated |
+| `src/ux-config.ts`                                         | Add `trigger.debounceMs` and `trigger.maxHoldMs` defaults                                                                                                         |
+| `src/chat-commands.ts`                                     | `SmokeTestDeps` gains `triggerDebouncer` field                                                                                                                    |
+| `src/__tests__/email-trigger-debounce-integration.test.ts` | New — integration test for debounce + suppression flow                                                                                                            |
 
 ## Edge Cases
 

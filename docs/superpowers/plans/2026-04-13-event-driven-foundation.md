@@ -14,15 +14,15 @@
 
 ## File Structure
 
-| File | Responsibility | Action |
-|------|---------------|--------|
-| `src/event-bus.ts` | Typed EventEmitter wrapper with error boundary | Create |
-| `src/event-bus.test.ts` | Unit tests for event bus | Create |
-| `src/events.ts` | Event type definitions and constants | Create |
-| `src/group-queue.ts` | Container concurrency + task queue | Modify (add event emission) |
-| `src/group-queue.test.ts` | Existing tests | Modify (add event emission tests) |
-| `src/index.ts` | Orchestrator | Modify (replace polling with events) |
-| `src/index.test.ts` | Characterization tests for current behavior | Create |
+| File                      | Responsibility                                 | Action                               |
+| ------------------------- | ---------------------------------------------- | ------------------------------------ |
+| `src/event-bus.ts`        | Typed EventEmitter wrapper with error boundary | Create                               |
+| `src/event-bus.test.ts`   | Unit tests for event bus                       | Create                               |
+| `src/events.ts`           | Event type definitions and constants           | Create                               |
+| `src/group-queue.ts`      | Container concurrency + task queue             | Modify (add event emission)          |
+| `src/group-queue.test.ts` | Existing tests                                 | Modify (add event emission tests)    |
+| `src/index.ts`            | Orchestrator                                   | Modify (replace polling with events) |
+| `src/index.test.ts`       | Characterization tests for current behavior    | Create                               |
 
 ---
 
@@ -31,6 +31,7 @@
 Before touching the orchestrator, capture its current behavior in tests. These are the safety net for the rewrite.
 
 **Files:**
+
 - Create: `src/index.test.ts`
 - Read: `src/index.ts`, `src/group-queue.ts`, `src/db.ts`
 
@@ -135,7 +136,12 @@ vi.mock('@onecli-sh/sdk', () => ({
 
 ```typescript
 // Append to src/index.test.ts
-import { getRouterState, getAllSessions, getAllRegisteredGroups, getPendingCursors } from './db.js';
+import {
+  getRouterState,
+  getAllSessions,
+  getAllRegisteredGroups,
+  getPendingCursors,
+} from './db.js';
 
 describe('State Management', () => {
   beforeEach(() => {
@@ -144,13 +150,19 @@ describe('State Management', () => {
 
   it('loads state from database on startup', async () => {
     const mockGroups = {
-      'group1@jid': { name: 'Test', folder: 'test', trigger: '@Andy', added_at: '2026-01-01' },
+      'group1@jid': {
+        name: 'Test',
+        folder: 'test',
+        trigger: '@Andy',
+        added_at: '2026-01-01',
+      },
     };
     vi.mocked(getAllRegisteredGroups).mockReturnValue(mockGroups);
     vi.mocked(getAllSessions).mockReturnValue({ test: 'session-1' });
     vi.mocked(getRouterState).mockImplementation((key: string) => {
       if (key === 'last_timestamp') return '2026-01-01T00:00:00Z';
-      if (key === 'last_agent_timestamp') return JSON.stringify({ 'group1@jid': '2026-01-01' });
+      if (key === 'last_agent_timestamp')
+        return JSON.stringify({ 'group1@jid': '2026-01-01' });
       return null;
     });
     vi.mocked(getPendingCursors).mockReturnValue(new Map());
@@ -172,9 +184,9 @@ describe('State Management', () => {
 
     await import('./index.js');
     // Should roll back the cursor
-    expect(vi.mocked(require('./db.js').deleteRouterState)).toHaveBeenCalledWith(
-      'pending_cursor:group1@jid',
-    );
+    expect(
+      vi.mocked(require('./db.js').deleteRouterState),
+    ).toHaveBeenCalledWith('pending_cursor:group1@jid');
   });
 });
 ```
@@ -276,6 +288,7 @@ git commit -m "test: add characterization tests for index.ts before event-driven
 Define all event types the system will use. This is the contract between layers.
 
 **Files:**
+
 - Create: `src/events.ts`
 
 - [ ] **Step 1: Write the event type definitions**
@@ -431,6 +444,7 @@ git commit -m "feat: add event type definitions for event-driven architecture"
 ### Task 3: Event Bus Implementation
 
 **Files:**
+
 - Create: `src/event-bus.ts`
 - Create: `src/event-bus.test.ts`
 - Read: `src/events.ts`
@@ -506,7 +520,12 @@ describe('EventBus', () => {
       type: 'task.complete',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: '1', groupJid: 'g1', status: 'success', durationMs: 100 },
+      payload: {
+        taskId: '1',
+        groupJid: 'g1',
+        status: 'success',
+        durationMs: 100,
+      },
     });
 
     expect(handler1).toHaveBeenCalled();
@@ -537,7 +556,12 @@ describe('EventBus', () => {
       type: 'task.started',
       source: 'executor',
       timestamp: Date.now(),
-      payload: { taskId: '1', groupJid: 'g1', containerName: 'c1', slotIndex: 0 },
+      payload: {
+        taskId: '1',
+        groupJid: 'g1',
+        containerName: 'c1',
+        slotIndex: 0,
+      },
     });
 
     expect(allHandler).toHaveBeenCalled();
@@ -557,7 +581,12 @@ Expected: FAIL with "Cannot find module './event-bus.js'"
 import { EventEmitter } from 'events';
 
 import { logger } from './logger.js';
-import type { EventMap, EventType, NanoClawEvent, SystemErrorEvent } from './events.js';
+import type {
+  EventMap,
+  EventType,
+  NanoClawEvent,
+  SystemErrorEvent,
+} from './events.js';
 
 type EventHandler<T extends NanoClawEvent> = (event: T) => void;
 
@@ -573,14 +602,21 @@ export class EventBus {
   /**
    * Subscribe to a typed event. Returns an unsubscribe function.
    */
-  on<K extends EventType>(type: K, handler: EventHandler<EventMap[K]>): () => void {
+  on<K extends EventType>(
+    type: K,
+    handler: EventHandler<EventMap[K]>,
+  ): () => void {
     const wrappedHandler = (event: EventMap[K]) => {
       try {
         handler(event);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error(
-          { eventType: type, handler: handler.name || 'anonymous', error: errorMsg },
+          {
+            eventType: type,
+            handler: handler.name || 'anonymous',
+            error: errorMsg,
+          },
           'Event handler threw — caught by error boundary',
         );
 
@@ -609,7 +645,10 @@ export class EventBus {
    * Emit a typed event to all subscribers.
    */
   emit<K extends EventType>(type: K, event: EventMap[K]): void {
-    logger.debug({ eventType: type, source: event.source, groupId: event.groupId }, 'Event emitted');
+    logger.debug(
+      { eventType: type, source: event.source, groupId: event.groupId },
+      'Event emitted',
+    );
 
     // Notify any-handlers first (for logging/observability)
     for (const handler of this.anyHandlers) {
@@ -666,6 +705,7 @@ git commit -m "feat: implement EventBus with typed events and error boundary"
 Add event emission to the existing GroupQueue without changing its behavior. This is additive — existing tests must continue to pass.
 
 **Files:**
+
 - Modify: `src/group-queue.ts`
 - Modify: `src/group-queue.test.ts`
 - Read: `src/event-bus.ts`, `src/events.ts`
@@ -675,7 +715,11 @@ Add event emission to the existing GroupQueue without changing its behavior. Thi
 ```typescript
 // Append to src/group-queue.test.ts
 import { eventBus } from './event-bus.js';
-import type { TaskQueuedEvent, TaskStartedEvent, TaskCompleteEvent } from './events.js';
+import type {
+  TaskQueuedEvent,
+  TaskStartedEvent,
+  TaskCompleteEvent,
+} from './events.js';
 
 describe('GroupQueue event emission', () => {
   beforeEach(() => {
@@ -717,7 +761,11 @@ Add imports at the top of `src/group-queue.ts`:
 
 ```typescript
 import { eventBus } from './event-bus.js';
-import type { TaskQueuedEvent, TaskStartedEvent, TaskCompleteEvent } from './events.js';
+import type {
+  TaskQueuedEvent,
+  TaskStartedEvent,
+  TaskCompleteEvent,
+} from './events.js';
 ```
 
 Add event emission in `enqueueMessageCheck` when queuing (at capacity):
@@ -795,6 +843,7 @@ git commit -m "feat: wire GroupQueue to emit events on task lifecycle"
 Add `message.inbound` event emission to the message handling flow. The existing behavior stays identical — we're adding event emission alongside, not replacing the flow yet.
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add event bus import to index.ts**
@@ -802,7 +851,11 @@ Add `message.inbound` event emission to the message handling flow. The existing 
 ```typescript
 // Add to imports at top of src/index.ts
 import { eventBus } from './event-bus.js';
-import type { MessageInboundEvent, MessageOutboundEvent, SystemStartupEvent } from './events.js';
+import type {
+  MessageInboundEvent,
+  MessageOutboundEvent,
+  SystemStartupEvent,
+} from './events.js';
 ```
 
 - [ ] **Step 2: Emit message.inbound in the onMessage callback**
@@ -852,7 +905,7 @@ eventBus.emit('system.startup', {
   source: 'orchestrator',
   timestamp: Date.now(),
   payload: {
-    channels: channels.map(c => c.name),
+    channels: channels.map((c) => c.name),
     groupCount: Object.keys(registeredGroups).length,
   },
 });
@@ -882,6 +935,7 @@ git commit -m "feat: emit message and system events from orchestrator"
 Create a simple event log that records all events to SQLite. This is the foundation for daily digest, "what did I miss?", and cost tracking.
 
 **Files:**
+
 - Create: `src/event-log.ts`
 - Create: `src/event-log.test.ts`
 - Modify: `src/db.ts` (add event_log table)
@@ -959,6 +1013,7 @@ git commit -m "feat: add event log for observability and future analytics"
 Verify the complete flow: message arrives → event emitted → GroupQueue processes → events logged.
 
 **Files:**
+
 - Create: `src/event-flow.integration.test.ts`
 
 - [ ] **Step 1: Write integration test**
@@ -993,7 +1048,12 @@ describe('Event Flow Integration', () => {
       source: 'executor',
       groupId: 'g1',
       timestamp: 2,
-      payload: { taskId: 't1', groupJid: 'g1', containerName: 'c1', slotIndex: 0 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        containerName: 'c1',
+        slotIndex: 0,
+      },
     });
 
     bus.emit('task.complete', {
@@ -1001,11 +1061,16 @@ describe('Event Flow Integration', () => {
       source: 'executor',
       groupId: 'g1',
       timestamp: 3,
-      payload: { taskId: 't1', groupJid: 'g1', status: 'success', durationMs: 1000 },
+      payload: {
+        taskId: 't1',
+        groupJid: 'g1',
+        status: 'success',
+        durationMs: 1000,
+      },
     });
 
     expect(events).toHaveLength(3);
-    expect(events.map(e => e.type)).toEqual([
+    expect(events.map((e) => e.type)).toEqual([
       'message.inbound',
       'task.started',
       'task.complete',
@@ -1067,6 +1132,7 @@ Expected: All tests PASS
 
 Run: `npm run dev`
 Expected: System starts normally. Send a test message to any channel. Verify in logs:
+
 - `Event emitted: message.inbound` appears
 - `Event emitted: task.started` appears
 - `Event emitted: task.complete` appears

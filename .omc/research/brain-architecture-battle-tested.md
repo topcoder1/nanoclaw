@@ -17,6 +17,7 @@ A lifetime personal+company augmented-memory system is achievable on the NanoCla
 ### 1.1 Tool Landscape
 
 **Splink** [A] — **Adopt now**
+
 - Probabilistic Fellegi-Sunter model with DuckDB backend.
 - Benchmarked: 7M records in ~2 minutes on standard AWS instance (2024 benchmark by Robin Linacre).
 - Production deployments: NHS England (healthcare), Australian Bureau of Statistics Census 2024.
@@ -25,13 +26,16 @@ A lifetime personal+company augmented-memory system is achievable on the NanoCla
 - Best use: batch deduplication during ingestion, nightly consolidation runs.
 
 **Zingg** [A] — **Adopt later**
+
 - Spark/Databricks ML active learning. Native AWS Glue integration (2024). Ideal for messy data where rule-writing is impractical.
 - Over-engineered for single-user personal KB at < 500K entities. Know it exists.
 
 **Dedupe.io** [B] — **Skip at scale**
+
 - v3.0 (mid-2024) improved active learning but OOM threshold remains ~2M records. Use for local prototyping only.
 
 **Senzing** [A] — **Skip**
+
 - Graph-based; correct for 100M+ entities. Proprietary, over-engineered for this use case.
 
 ### 1.2 Identity Spine Pattern [A] — Adopt now
@@ -65,6 +69,7 @@ CREATE TABLE entity_aliases (
 ### 1.3 Confidence Thresholds [B]
 
 Industry-standard bands (HubSpot/Apollo/Clearbit internal practice):
+
 - **> 0.9** — auto-merge, write to canonical entity
 - **0.7 – 0.9** — queue to `entity_review` table, merge on next human/agent review pass
 - **< 0.7** — keep separate, link as `candidate_match` edge with confidence score
@@ -102,11 +107,13 @@ Production consensus (2024-2025): **hybrid wins.** Start deterministic (exact em
 **Architecture:** Three-tier — Core Memory (in-context RAM), Recall Memory (conversation history), Archival Memory (vector DB, effectively infinite).
 
 **2025 updates:**
+
 - Letta V1 (Oct 2025): rearchitects away from explicit tool-chaining toward native LLM reasoning (Response APIs). Less brittle than the original heartbeat loop.
 - "Sleep-Time Compute" pattern: secondary agents process and consolidate archival memories asynchronously while the main agent is idle. High-value pattern directly applicable to NanoClaw.
 - Letta Filesystem (Aug 2025): organizes archival content with file/folder metaphor + agentic grep/semantic_search tools. Higher benchmark accuracy on LoCoMo than pure RAG.
 
 **Known issues:**
+
 - Archival memory search is coarse (semantic-only). No BM25 fallback — exact-match queries on names, IDs, and dates are unreliable.
 - Not Node.js native — Python server. Integrate via HTTP API or avoid as a direct dependency.
 - Original heartbeat architecture was brittle under high message volume. V1 fixes this but breaks migration paths.
@@ -134,6 +141,7 @@ Production consensus (2024-2025): **hybrid wins.** Start deterministic (exact em
 ### 2.4 LangChain Memory Modules [B] — Skip
 
 **Confirmed production limitations:**
+
 - `ConversationSummaryBufferMemory`: triggers LLM calls on every token-limit breach, adding seconds to response time
 - `VectorStoreRetrieverMemory`: exponential latency as history grows. Multi-hop accuracy ~70-75%. Fails on chronological reasoning.
 - No native cross-session persistence without significant custom wiring.
@@ -152,12 +160,14 @@ Production consensus (2024-2025): **hybrid wins.** Start deterministic (exact em
 ### 3.1 Bitemporal Modeling [A] — Adopt now
 
 **The core distinction:**
+
 - `valid_from` / `valid_until` — when the fact was true in the real world (event time)
 - `recorded_at` / `superseded_at` — when the system believed it (transaction time)
 
 **XTDB vs. Datomic:** Both JVM-based, incompatible with Node.js stack. Implement the pattern manually in SQLite.
 
 **Full KU schema:**
+
 ```sql
 CREATE TABLE knowledge_units (
   id              TEXT PRIMARY KEY,  -- ULID
@@ -185,6 +195,7 @@ CREATE TABLE knowledge_units (
 ### 3.3 Snapshot + Delta for Vector Collections [A] — Adopt now
 
 **Never mix embedding model generations in the same Qdrant collection:**
+
 1. Store `model_version` in every Qdrant point payload.
 2. When upgrading embedding model, create a new collection — never update in-place.
 3. Run shadow queries against both during transition; cut over when new collection coverage > 99%.
@@ -220,6 +231,7 @@ GraphRAG adds value once the entity graph has > 50K edges. At personal KB scale 
 ### 4.3 HyDE — Conditional Use [B] — Evaluate
 
 **Production evaluation (2025):**
+
 - Effective for vague/short queries with vocabulary mismatch (+25% improvement in technical domain).
 - Counterproductive for numerical, financial, or precise factual queries — hallucinates context.
 - Adds 25-60% latency.
@@ -231,7 +243,7 @@ GraphRAG adds value once the entity graph has > 50K edges. At personal KB scale 
 ```javascript
 const recencyDecay = (validFrom, halfLifeDays = 180) => {
   const ageDays = (Date.now() - new Date(validFrom)) / 86400000;
-  return Math.exp(-Math.LN2 * ageDays / halfLifeDays);
+  return Math.exp((-Math.LN2 * ageDays) / halfLifeDays);
 };
 const combinedScore = 0.7 * rrfScore + 0.3 * recencyDecay(ku.valid_from);
 ```
@@ -248,13 +260,13 @@ ColBERT v2 via Transformers.js enables token-level late interaction reranking in
 
 ### 5.1 Graph DB Assessment
 
-| Option | Status | Assessment |
-|--------|--------|-----------|
-| SQLite recursive CTE | [A] | Depth 1-2 fine. Depth > 3 exponential latency. |
-| Neo4j Community | [A] | ~500MB RAM idle, Java, Cypher, mature. Add only if needed. |
-| Memgraph | [B] | In-memory, sub-millisecond, OpenCypher. |
-| **Kuzu (embedded)** | **ARCHIVED Oct 2025** | **Do not adopt under any circumstances** |
-| SQLite adjacency list | [A] | Sufficient to depth 3 with covering indexes |
+| Option                | Status                | Assessment                                                 |
+| --------------------- | --------------------- | ---------------------------------------------------------- |
+| SQLite recursive CTE  | [A]                   | Depth 1-2 fine. Depth > 3 exponential latency.             |
+| Neo4j Community       | [A]                   | ~500MB RAM idle, Java, Cypher, mature. Add only if needed. |
+| Memgraph              | [B]                   | In-memory, sub-millisecond, OpenCypher.                    |
+| **Kuzu (embedded)**   | **ARCHIVED Oct 2025** | **Do not adopt under any circumstances**                   |
+| SQLite adjacency list | [A]                   | Sufficient to depth 3 with covering indexes                |
 
 **Verdict:** SQLite adjacency list with covering indexes on `(from_entity_id, relationship)` and `(to_entity_id, relationship)` covers 95% of queries. Depth-2: ~12ms on 1M rows. Depth-3: ~150ms. Add Neo4j Community only if depth > 3 multi-hop queries become frequent.
 
@@ -275,10 +287,11 @@ Property graph is the correct choice. RDF/SPARQL is unnecessary complexity; prop
 **Application-layer RBAC within a single SQLite file is fragile.** A single bug in the query builder leaks personal data into work queries. Physical separation is the only reliable hard wall.
 
 **Recommended pattern:** Two SQLite files joined via `ATTACH DATABASE`:
+
 ```javascript
 const db = new Database('/data/work.db');
 db.exec("ATTACH '/data/personal.db' AS personal");
-db.prepare("SELECT * FROM personal.knowledge_units WHERE ...").all();
+db.prepare('SELECT * FROM personal.knowledge_units WHERE ...').all();
 ```
 
 ### 6.2 OpenFGA for Fine-Grained Work RBAC — Adopt later
@@ -303,12 +316,12 @@ Log a hash of the query text, not the verbatim text. Prevents the audit log from
 
 ### 9.2 Qdrant HNSW Scaling Limits [A]
 
-| Failure Mode | Threshold | Mitigation |
-|-------------|-----------|-----------|
-| Memory exhaustion | ~5M vectors @ 1536d ≈ 30GB RAM | Scalar Quantization (4x) or Binary Quantization (32x) |
-| Recall drift | > 1M vectors | Increase HNSW `m` to 32-48, `ef_construct` to 200 |
-| I/O saturation | On-disk vectors | Enable `io_uring` in Qdrant config |
-| Indexing deadlocks | Background optimization during high write load | Throttle ingestion; dedicated write queue |
+| Failure Mode       | Threshold                                      | Mitigation                                            |
+| ------------------ | ---------------------------------------------- | ----------------------------------------------------- |
+| Memory exhaustion  | ~5M vectors @ 1536d ≈ 30GB RAM                 | Scalar Quantization (4x) or Binary Quantization (32x) |
+| Recall drift       | > 1M vectors                                   | Increase HNSW `m` to 32-48, `ef_construct` to 200     |
+| I/O saturation     | On-disk vectors                                | Enable `io_uring` in Qdrant config                    |
+| Indexing deadlocks | Background optimization during high write load | Throttle ingestion; dedicated write queue             |
 
 **Starting point:** `m=16, ef_construct=100` (defaults). Enable Scalar Quantization at 500K vectors.
 
@@ -323,6 +336,7 @@ An incorrect auto-merge at confidence 0.85 causes all subsequent KUs to inherit 
 **Real risk:** Gmail MCP + HubSpot sync + Gong pipeline running concurrently. SQLite WAL mode allows one writer at a time.
 
 **Mitigation:**
+
 1. Single write-serializer queue in Node.js — all writes pass through one async queue.
 2. Batch writes: 50-100 KUs before flushing in one transaction.
 3. WAL mode + `PRAGMA synchronous = NORMAL` for ingestion.
@@ -331,6 +345,7 @@ An incorrect auto-merge at confidence 0.85 causes all subsequent KUs to inherit 
 ### 9.5 Decay Policy Failure Modes [B]
 
 **Recommended tiering:**
+
 ```
 hot:       0–14 days   → full Qdrant RAM index + FTS5
 warm:      15–90 days  → full Qdrant RAM index + FTS5
@@ -346,21 +361,21 @@ forgotten: > 5yr       → metadata stub only (text stripped, removed from vecto
 
 ### 10.1 Recommended Library Stack
 
-| Layer | Library | Tier | Decision |
-|-------|---------|------|---------|
-| SQLite | `better-sqlite3` | [A] | Adopt now |
-| Query builder | `Kysely` or `Drizzle` | [B] | Adopt now — **avoid Prisma** |
-| Qdrant | `@qdrant/js-client-rest` | [A] | Adopt now — gRPC for high-throughput |
-| Embeddings (API) | OpenAI `text-embedding-3-small` | [A] | Adopt now — $0.02/1M tokens, Matryoshka truncation to 512d |
-| Embeddings (local) | `@xenova/transformers` + `nomic-embed-text-v1.5` | [B] | Adopt later — privacy-sensitive data |
-| Reranker (local) | `@xenova/transformers` + `ms-marco-MiniLM-L-6-v2` | [B] | Adopt now — cross-encoder in-process |
-| Reranker (API) | `cohere-ai` Rerank 4 | [A] | Adopt later — best accuracy |
-| Entity resolution | Splink (Python HTTP sidecar) | [A] | Adopt now — nightly batch |
-| RBAC | `@openfga/sdk` | [B] | Adopt later |
-| Graph (light) | SQLite adjacency list | [A] | Adopt now |
-| Graph (heavy) | Neo4j Community | [B] | Adopt later |
-| RRF fusion | Native (20 lines JS) | [A] | Adopt now |
-| Entity IDs | `ulid` npm | [A] | Adopt now |
+| Layer              | Library                                           | Tier | Decision                                                   |
+| ------------------ | ------------------------------------------------- | ---- | ---------------------------------------------------------- |
+| SQLite             | `better-sqlite3`                                  | [A]  | Adopt now                                                  |
+| Query builder      | `Kysely` or `Drizzle`                             | [B]  | Adopt now — **avoid Prisma**                               |
+| Qdrant             | `@qdrant/js-client-rest`                          | [A]  | Adopt now — gRPC for high-throughput                       |
+| Embeddings (API)   | OpenAI `text-embedding-3-small`                   | [A]  | Adopt now — $0.02/1M tokens, Matryoshka truncation to 512d |
+| Embeddings (local) | `@xenova/transformers` + `nomic-embed-text-v1.5`  | [B]  | Adopt later — privacy-sensitive data                       |
+| Reranker (local)   | `@xenova/transformers` + `ms-marco-MiniLM-L-6-v2` | [B]  | Adopt now — cross-encoder in-process                       |
+| Reranker (API)     | `cohere-ai` Rerank 4                              | [A]  | Adopt later — best accuracy                                |
+| Entity resolution  | Splink (Python HTTP sidecar)                      | [A]  | Adopt now — nightly batch                                  |
+| RBAC               | `@openfga/sdk`                                    | [B]  | Adopt later                                                |
+| Graph (light)      | SQLite adjacency list                             | [A]  | Adopt now                                                  |
+| Graph (heavy)      | Neo4j Community                                   | [B]  | Adopt later                                                |
+| RRF fusion         | Native (20 lines JS)                              | [A]  | Adopt now                                                  |
+| Entity IDs         | `ulid` npm                                        | [A]  | Adopt now                                                  |
 
 ### 10.2 Embedding Model Recommendations (2026)
 
@@ -411,4 +426,4 @@ Run persistent Python FastAPI sidecar on port 8765 with `/dedupe` endpoint for S
 
 ---
 
-*Research conducted: 2026-04-23. Sources: 60+ web queries, arXiv 2501.13956/2504.19413/2508.03767, vendor documentation (Letta, Qdrant, OpenFGA, Splink, Zep), production post-mortems, MTEB leaderboard.*
+_Research conducted: 2026-04-23. Sources: 60+ web queries, arXiv 2501.13956/2504.19413/2508.03767, vendor documentation (Letta, Qdrant, OpenFGA, Splink, Zep), production post-mortems, MTEB leaderboard._

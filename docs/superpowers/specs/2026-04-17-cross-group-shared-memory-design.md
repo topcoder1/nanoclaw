@@ -13,11 +13,11 @@ Each NanoClaw group has isolated state. Facts learned in one group (preferences,
 - **Personalization drift** — preferences taught to one group aren't honored elsewhere
 - **Knowledge isolation** — research/learnings can't be recalled cross-group
 
-A `groups/global/CLAUDE.md` already exists and is mounted into every container, but it holds *instructions* (Andy persona, formatting rules), not *facts about the user*. Only `main` can write to it. There is no mechanism for groups to contribute or evolve shared knowledge.
+A `groups/global/CLAUDE.md` already exists and is mounted into every container, but it holds _instructions_ (Andy persona, formatting rules), not _facts about the user_. Only `main` can write to it. There is no mechanism for groups to contribute or evolve shared knowledge.
 
 ## Goals
 
-1. Build a shared *facts* layer alongside the existing shared *instructions* layer.
+1. Build a shared _facts_ layer alongside the existing shared _instructions_ layer.
 2. Compatible with Claude Code's auto-memory format so the same store can later be mounted into CC sessions on the host (one shared brain).
 3. Captures facts automatically (per-turn), not just on explicit save.
 4. Preserves signal — conflicting/evolving facts are weighted by frequency and recency rather than overwritten.
@@ -69,7 +69,7 @@ No new container-side code. Claude inside the container sees `MEMORY.md` via the
 name: Prefers terse responses
 description: User prefers short, direct answers without preamble
 type: feedback
-scopes: [chat]              # omitted = global
+scopes: [chat] # omitted = global
 count: 12
 first_seen: 2026-04-01
 last_seen: 2026-04-15
@@ -93,6 +93,7 @@ Always loaded (≤200 lines per CC convention). Format:
 # Shared user memory
 
 These facts were learned across all groups. Each fact has metadata:
+
 - `count` — times reinforced (higher = more reliable)
 - `last_seen` — recency
 - `last_value` — current value if it shifts
@@ -105,7 +106,7 @@ Apply the highest-count value by default; override with newer/scoped values when
 - [Prefers terse responses](feedback_terse_responses.md) — 12 reinforcements across telegram + whatsapp
 - [Four Google accounts](user_google_accounts.md) — personal/whoisxml/attaxion/dev routing
 - [Telegram is primary channel](feedback_telegram_primary.md) — email intelligence routes here
-...
+  ...
 ```
 
 ### Candidate file
@@ -116,7 +117,7 @@ Same format as fact file plus:
 candidate: true
 extracted_from: telegram_main
 extracted_at: 2026-04-17T15:32:00-07:00
-turn_excerpt: "...the last 2-3 turns that triggered this..."
+turn_excerpt: '...the last 2-3 turns that triggered this...'
 proposed_action: create | merge:<existing-fact-slug>
 confidence: 0.85
 ```
@@ -138,6 +139,7 @@ Default scope is empty (= global). Soft-honored by the agent in v1; hard-filtere
 Trigger: `turn_completed` event on the existing event-bus, fired after `send_message`. Async — does not block the user-facing reply.
 
 Inputs to Haiku:
+
 - Last user message + agent reply
 - Current `MEMORY.md` index (so extractor proposes merges, not duplicates)
 - Originating group name (becomes `extracted_from` and feeds `sources`)
@@ -155,6 +157,7 @@ Kill switch: `NANOCLAW_MEMORY_EXTRACT=0`.
 Trigger: every 5 minutes via `task-scheduler`, OR when `candidate/` count exceeds 10 (event-bus event), whichever first.
 
 Per candidate:
+
 1. **Dedupe** — `proposed_action: merge:<slug>` and slug exists → increment count, append source, update `last_seen`/`last_value`. Done.
 2. **Conflict** — same `name`, different `body` → treated as reinforcement of the same fact: increment `count`, append source, set `last_value` from the candidate, replace the body with the candidate's body, and append the previous body to a `history:` array in frontmatter (capped at last 5 entries). Original `name`/`description`/`type` preserved.
 3. **Quality gate** — Haiku judges: real fact about user/work or noise/hallucination? Pass = promote, fail = move to `candidate/rejected/`.
@@ -195,6 +198,7 @@ Drops directly into `candidate/` with `confidence: 1.0` and `proposed_action: cr
 ### Chat commands
 
 Via existing `chat-commands.ts`:
+
 - `/memory list` — show MEMORY.md index in the channel
 - `/memory show <slug>` — show a fact's full body
 - `/memory forget <slug>` — soft-delete to `.archived/`
@@ -225,22 +229,22 @@ A short doc (`docs/memory-cc-compat.md`) describes the migration when the user i
 
 ## Rollout
 
-| Phase | Scope | Both kill-switches | Goal |
-|-------|-------|--------------------|------|
-| 1 (week 1) | Land code, manual `/memory list` works | OFF | Verify infra without behavior change |
-| 2 (week 1–2) | `telegram_main` only | EXTRACT on, VERIFY on | Tune extractor + verifier prompts |
-| 3 (week 2+) | All groups | Both ON | Production |
-| 4 (later) | Mount source swap to host CC dir | n/a | One shared brain |
+| Phase        | Scope                                  | Both kill-switches    | Goal                                 |
+| ------------ | -------------------------------------- | --------------------- | ------------------------------------ |
+| 1 (week 1)   | Land code, manual `/memory list` works | OFF                   | Verify infra without behavior change |
+| 2 (week 1–2) | `telegram_main` only                   | EXTRACT on, VERIFY on | Tune extractor + verifier prompts    |
+| 3 (week 2+)  | All groups                             | Both ON               | Production                           |
+| 4 (later)    | Mount source swap to host CC dir       | n/a                   | One shared brain                     |
 
 ## Risks and mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| Memory pollution from extractor noise | Verifier gate + audit log + `/memory forget`. Tighten if rejection rate >10% after a week. |
-| Per-turn token cost grows | Trivial-turn skip + kill switch. Measure via audit log. |
-| Extractor/verifier crash | Both fail closed; agent still works, learning paused. Failure-escalator logs. |
+| Risk                                   | Mitigation                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Memory pollution from extractor noise  | Verifier gate + audit log + `/memory forget`. Tighten if rejection rate >10% after a week.  |
+| Per-turn token cost grows              | Trivial-turn skip + kill switch. Measure via audit log.                                     |
+| Extractor/verifier crash               | Both fail closed; agent still works, learning paused. Failure-escalator logs.               |
 | Cross-group leakage of sensitive facts | Soft scopes for v1, hard scopes available as follow-up. `/memory forget` for slip-throughs. |
-| Conflict with user's CC auto-memory | Format is identical; co-mounting produces enrichment, not conflict. |
+| Conflict with user's CC auto-memory    | Format is identical; co-mounting produces enrichment, not conflict.                         |
 
 ## Success criteria
 

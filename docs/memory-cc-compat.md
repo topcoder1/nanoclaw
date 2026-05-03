@@ -47,9 +47,7 @@ to your CC settings. In `~/.claude/settings.json`:
 
 ```json
 {
-  "additionalDirectories": [
-    "/path/to/nanoclaw/groups/global/memory"
-  ]
+  "additionalDirectories": ["/path/to/nanoclaw/groups/global/memory"]
 }
 ```
 

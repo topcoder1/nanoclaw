@@ -26,11 +26,12 @@ All merged to main and pushed.
 
 **Problem:** SSE drops every ~30-100s due to Cloudflare proxy timeout.
 
-**Finding:** The superpilot SSE endpoint already has a 30-second heartbeat (`backend/app/api/nanoclaw_bridge.py:191-194`), sending `: heartbeat\n\n` every 30 seconds. This should be sufficient for Cloudflare (100s default timeout). 
+**Finding:** The superpilot SSE endpoint already has a 30-second heartbeat (`backend/app/api/nanoclaw_bridge.py:191-194`), sending `: heartbeat\n\n` every 30 seconds. This should be sufficient for Cloudflare (100s default timeout).
 
 **Root cause hypothesis:** The heartbeat uses 3 cycles × 10s sleep (line 201), but `asyncio.sleep(10)` may not fire punctually under load, or Cloudflare's timeout may be shorter on this plan.
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py:139-211`
 
 - [ ] **Step 1: Reduce heartbeat interval to 15 seconds**
@@ -45,7 +46,7 @@ async def event_generator():
     cursor = since_iso
     while True:
         # ... existing poll logic ...
-        
+
         # Send keepalive every iteration (15s sleep below)
         yield ": keepalive\n\n"
         await asyncio.sleep(15)
@@ -67,6 +68,7 @@ git push
 ```
 
 After deploy, monitor NanoClaw logs for 10+ minutes:
+
 ```bash
 journalctl --user -u nanoclaw -f | grep SSE
 ```
@@ -82,6 +84,7 @@ Expected: No "SSE connection closed by server" messages within 10 minutes.
 **Finding:** `EmailHistoryIndex` model has `subject` and `sender_email`/`sender_name` fields. Need to join via `gmail_message_id`.
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py:58-101`
 - Modify: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py:139-211` (SSE events too)
 
@@ -150,6 +153,7 @@ git push
 **Finding:** The test file has 3 bug reproduction tests (BUG 1, 2, 3) related to per-account session checking and storage listener issues in the Chrome extension sidebar.
 
 **Files:**
+
 - Fix: `~/dev/inbox_superpilot/extension/src/sidebar/components/AuthGate.test.tsx`
 - May need: `~/dev/inbox_superpilot/extension/src/sidebar/components/AuthGate.tsx`
 
@@ -172,6 +176,7 @@ cat extension/src/sidebar/components/AuthGate.tsx | head -150
 - [ ] **Step 3: Fix based on actual failure**
 
 Common patterns:
+
 - Mock setup doesn't match current component API
 - Storage listener test needs async act() wrapping
 - State update timing issues with React testing
@@ -211,6 +216,7 @@ journalctl --user -u nanoclaw | tail -20
 ```
 
 Verify startup logs show:
+
 - SSE connected to superpilot
 - Email intelligence enabled
 - All channels connected
@@ -231,11 +237,13 @@ Send a real email to one of the monitored accounts (e.g., a question that needs 
 - [ ] **Step 5: Verify agent processes the trigger**
 
 Watch NanoClaw logs:
+
 ```bash
 journalctl --user -u nanoclaw -f | grep -E "email_trigger|Email trigger|Container"
 ```
 
 Expected sequence:
+
 1. "SSE email trigger written" — SSE client writes IPC file
 2. "Email trigger enqueued for agent processing" — IPC handler picks it up
 3. Container spawns and processes
@@ -244,6 +252,7 @@ Expected sequence:
 - [ ] **Step 6: Verify clean proposal on Telegram**
 
 Check Telegram for a formatted proposal (not raw instructions). Should include:
+
 - Email subject and sender
 - Proposed action (reply draft, archive, escalate)
 - Approval options (approve / edit / skip)
@@ -251,9 +260,11 @@ Check Telegram for a formatted proposal (not raw instructions). Should include:
 - [ ] **Step 7: Test approval flow**
 
 Reply "approve" on Telegram. Verify:
+
 - Agent receives the reply via message loop
 - Action is executed
 - `approval_log` table has entry:
+
 ```bash
 sqlite3 ~/dev/nanoclaw/store/messages.db "SELECT * FROM approval_log ORDER BY timestamp DESC LIMIT 5;"
 ```
@@ -273,6 +284,7 @@ Should show entries for the agent sessions.
 - [ ] **Step 10: Verify Discord digest**
 
 Trigger a morning briefing:
+
 ```
 (on Telegram) run morning briefing
 ```

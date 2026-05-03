@@ -14,32 +14,33 @@
 
 ### New files
 
-| Path | Responsibility |
-|------|----------------|
-| `src/mini-app/pending-send.ts` | `PendingSendRegistry` class (pure logic, no Express) |
-| `src/mini-app/pending-send.test.ts` | Unit tests for the registry |
-| `src/__tests__/mini-app-draft-send-routes.test.ts` | Route handler tests (save/send/cancel/reply) |
-| `src/__tests__/mini-app-send-integration.test.ts` | End-to-end with mocked GmailOps |
+| Path                                               | Responsibility                                       |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| `src/mini-app/pending-send.ts`                     | `PendingSendRegistry` class (pure logic, no Express) |
+| `src/mini-app/pending-send.test.ts`                | Unit tests for the registry                          |
+| `src/__tests__/mini-app-draft-send-routes.test.ts` | Route handler tests (save/send/cancel/reply)         |
+| `src/__tests__/mini-app-send-integration.test.ts`  | End-to-end with mocked GmailOps                      |
 
 ### Modified files
 
-| Path | Change |
-|------|--------|
-| `src/gmail-ops.ts` | Add `getDraftReplyContext` + `sendDraft` + `DraftReplyContext` type |
-| `src/channels/gmail.ts` | Implement the two new GmailOpsProvider methods |
-| `src/channels/gmail.test.ts` | Add tests for both new methods |
-| `src/__tests__/gmail-channel-ops.test.ts` | Extend `GmailOpsRouter` routing tests |
-| `src/events.ts` | Add `email.draft.send_failed` event type + interface |
-| `src/mini-app/server.ts` | 4 new routes + `PendingSendRegistry` instance + event-bus emit |
-| `src/mini-app/templates/email-full.ts` | Textarea + Send/Edit-in-Gmail/Archive buttons + undo banner + inline JS |
-| `src/callback-router.ts` | "Full Email" callback picks `/reply/:draftId` when a draft exists |
-| `src/index.ts` | Wire `pendingSendRegistry.shutdown()` into SIGTERM/SIGINT; subscribe to `email.draft.send_failed` and route via push-manager |
+| Path                                      | Change                                                                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `src/gmail-ops.ts`                        | Add `getDraftReplyContext` + `sendDraft` + `DraftReplyContext` type                                                          |
+| `src/channels/gmail.ts`                   | Implement the two new GmailOpsProvider methods                                                                               |
+| `src/channels/gmail.test.ts`              | Add tests for both new methods                                                                                               |
+| `src/__tests__/gmail-channel-ops.test.ts` | Extend `GmailOpsRouter` routing tests                                                                                        |
+| `src/events.ts`                           | Add `email.draft.send_failed` event type + interface                                                                         |
+| `src/mini-app/server.ts`                  | 4 new routes + `PendingSendRegistry` instance + event-bus emit                                                               |
+| `src/mini-app/templates/email-full.ts`    | Textarea + Send/Edit-in-Gmail/Archive buttons + undo banner + inline JS                                                      |
+| `src/callback-router.ts`                  | "Full Email" callback picks `/reply/:draftId` when a draft exists                                                            |
+| `src/index.ts`                            | Wire `pendingSendRegistry.shutdown()` into SIGTERM/SIGINT; subscribe to `email.draft.send_failed` and route via push-manager |
 
 ---
 
 ## Task 1: `PendingSendRegistry`
 
 **Files:**
+
 - Create: `src/mini-app/pending-send.ts`
 - Test: `src/mini-app/pending-send.test.ts`
 
@@ -168,10 +169,7 @@ export class PendingSendRegistry {
       // Remove from pending BEFORE firing so cancel() post-fire returns false.
       this.pending.delete(draftId);
       onFire(draftId, account).catch((err) => {
-        logger.error(
-          { draftId, account, err },
-          'Pending send onFire rejected',
-        );
+        logger.error({ draftId, account, err }, 'Pending send onFire rejected');
       });
     }, delayMs);
 
@@ -224,6 +222,7 @@ git commit -m "feat(mini-app): add PendingSendRegistry for deferred draft sends"
 ## Task 2: New event type `email.draft.send_failed`
 
 **Files:**
+
 - Modify: `src/events.ts`
 
 - [ ] **Step 1: Add the event interface**
@@ -268,6 +267,7 @@ git commit -m "feat(events): add email.draft.send_failed event type"
 ## Task 3: Extend `GmailOps` / `GmailOpsProvider` interfaces
 
 **Files:**
+
 - Modify: `src/gmail-ops.ts`
 
 - [ ] **Step 1: Add types and methods**
@@ -373,6 +373,7 @@ Leave this file modified; commit together with Task 4 once the Gmail channel imp
 ## Task 4: Gmail channel impl — `getDraftReplyContext` + `sendDraft`
 
 **Files:**
+
 - Modify: `src/channels/gmail.ts`
 - Test: `src/channels/gmail.test.ts`
 
@@ -410,7 +411,9 @@ describe('GmailChannel.getDraftReplyContext', () => {
           threadId: 'thread-abc',
           payload: {
             mimeType: 'text/plain',
-            body: { data: Buffer.from('Agent draft body here').toString('base64url') },
+            body: {
+              data: Buffer.from('Agent draft body here').toString('base64url'),
+            },
             headers: [],
           },
         },
@@ -497,9 +500,7 @@ describe('GmailChannel.sendDraft', () => {
   });
 
   it('propagates errors from Gmail API', async () => {
-    const draftsSend = vi
-      .fn()
-      .mockRejectedValue(new Error('quota exceeded'));
+    const draftsSend = vi.fn().mockRejectedValue(new Error('quota exceeded'));
     const ch = new GmailChannel(
       {
         onMessage: async () => {},
@@ -631,6 +632,7 @@ git commit -m "feat(gmail): add getDraftReplyContext and sendDraft"
 ## Task 5: GmailOpsRouter routing tests
 
 **Files:**
+
 - Test: `src/__tests__/gmail-channel-ops.test.ts`
 
 - [ ] **Step 1: Add failing routing tests**
@@ -699,6 +701,7 @@ git commit -m "test(gmail-ops): cover getDraftReplyContext and sendDraft routing
 ## Task 6: New routes in `src/mini-app/server.ts`
 
 **Files:**
+
 - Modify: `src/mini-app/server.ts`
 - Test: `src/__tests__/mini-app-draft-send-routes.test.ts`
 
@@ -1056,10 +1059,7 @@ app.post('/api/draft/:draftId/send/cancel', (req, res) => {
   const { draftId } = req.params;
   const cancelled = registry.cancel(draftId);
   if (cancelled) {
-    logger.info(
-      { draftId, component: 'mini-app' },
-      'Draft send cancelled',
-    );
+    logger.info({ draftId, component: 'mini-app' }, 'Draft send cancelled');
   }
   res.json({ ok: true, cancelled });
 });
@@ -1101,6 +1101,7 @@ git commit -m "feat(mini-app): add reply render + save/send/cancel routes"
 ## Task 7: Template update — `email-full.ts`
 
 **Files:**
+
 - Modify: `src/mini-app/templates/email-full.ts`
 
 - [ ] **Step 1: Replace the template**
@@ -1318,6 +1319,7 @@ git commit -m "feat(mini-app): add reply mode with textarea, Send, Undo, Edit-in
 ## Task 8: Callback-router picks `/reply` when a draft exists
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Test: `src/__tests__/callback-router.test.ts`
 
@@ -1416,7 +1418,12 @@ const draftRow = getDb()
 //   .prepare('SELECT draft_id FROM draft_originals WHERE account = ? LIMIT 1')
 //   .get(account) as { draft_id: string } | undefined;
 const draftIdForThread = draftRow?.draft_id ?? null;
-const url = resolveFullEmailUrl({ emailId, threadId, account, draftIdForThread });
+const url = resolveFullEmailUrl({
+  emailId,
+  threadId,
+  account,
+  draftIdForThread,
+});
 ```
 
 **Note:** `draft_originals` is keyed by `draft_id` only. If there is no existing `thread_id → draft_id` mapping in the schema, use the `draft-enrichment` store's API instead — specifically the `getDraftIdForThread(threadId, account)` helper if it exists. If it does not, add a minimal helper in `src/draft-enrichment.ts` that SELECTs by the draft's stored threadId after extending the `draft_originals` table with a `thread_id` column (backward-compatible ALTER + COALESCE lookup). If this is too invasive, fall back to calling `gmailOps.listRecentDrafts(account)` and filtering by threadId on each callback — acceptable since this is human-initiated and infrequent.
@@ -1440,6 +1447,7 @@ git commit -m "feat(callback-router): route Full Email to /reply/:draftId when a
 ## Task 9: SIGTERM/SIGINT handler + send_failed subscriber in `src/index.ts`
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add registry shutdown wiring**
@@ -1488,7 +1496,7 @@ In the same file, after `eventBus` is created and after `pushManager` (or equiva
 ```ts
 eventBus.on('email.draft.send_failed', async (event) => {
   const msg =
-    '❌ Couldn\'t send reply' +
+    "❌ Couldn't send reply" +
     (event.subject ? ` to *${event.subject}*` : '') +
     ` — ${event.error}`;
   try {
@@ -1525,6 +1533,7 @@ git commit -m "feat(mini-app): wire pending-send shutdown + send_failed notifica
 ## Task 10: Integration test — full save/send/cancel flow
 
 **Files:**
+
 - Test: `src/__tests__/mini-app-send-integration.test.ts`
 
 - [ ] **Step 1: Write the integration test**
@@ -1696,26 +1705,26 @@ Checking this plan against the spec at `docs/superpowers/specs/2026-04-16-miniap
 
 **Spec coverage:**
 
-| Spec requirement | Task |
-|------------------|------|
-| `PendingSendRegistry` class with schedule/cancel/has/shutdown | Task 1 |
-| `onFire` rejection caught, logged, event emitted | Task 1 + Task 6 + Task 10 |
-| `email.draft.send_failed` event type | Task 2 |
-| `getDraftReplyContext` + `sendDraft` on interfaces | Task 3 |
-| Gmail channel impl of both | Task 4 |
-| `GmailOpsRouter` routing | Task 5 |
-| `GET /reply/:draftId` render route | Task 6 |
-| `PATCH /api/draft/:draftId/save` | Task 6 |
-| `POST /api/draft/:draftId/send` (10s delay) | Task 6 |
-| `POST /api/draft/:draftId/send/cancel` | Task 6 |
-| Error response shape `{ ok, error, code }` | Task 6 |
-| Structured pino logs with fields | Task 6 |
-| Template: textarea + Send/Edit-in-Gmail/Archive + undo banner + inline JS | Task 7 |
-| Callback-router picks /reply vs /email | Task 8 |
-| SIGTERM/SIGINT → `registry.shutdown()` | Task 9 |
-| Event-bus subscriber → Telegram push | Task 9 |
-| Integration tests for save/send/cancel | Task 10 |
-| Manual smoke checklist | Task 11 |
+| Spec requirement                                                          | Task                      |
+| ------------------------------------------------------------------------- | ------------------------- |
+| `PendingSendRegistry` class with schedule/cancel/has/shutdown             | Task 1                    |
+| `onFire` rejection caught, logged, event emitted                          | Task 1 + Task 6 + Task 10 |
+| `email.draft.send_failed` event type                                      | Task 2                    |
+| `getDraftReplyContext` + `sendDraft` on interfaces                        | Task 3                    |
+| Gmail channel impl of both                                                | Task 4                    |
+| `GmailOpsRouter` routing                                                  | Task 5                    |
+| `GET /reply/:draftId` render route                                        | Task 6                    |
+| `PATCH /api/draft/:draftId/save`                                          | Task 6                    |
+| `POST /api/draft/:draftId/send` (10s delay)                               | Task 6                    |
+| `POST /api/draft/:draftId/send/cancel`                                    | Task 6                    |
+| Error response shape `{ ok, error, code }`                                | Task 6                    |
+| Structured pino logs with fields                                          | Task 6                    |
+| Template: textarea + Send/Edit-in-Gmail/Archive + undo banner + inline JS | Task 7                    |
+| Callback-router picks /reply vs /email                                    | Task 8                    |
+| SIGTERM/SIGINT → `registry.shutdown()`                                    | Task 9                    |
+| Event-bus subscriber → Telegram push                                      | Task 9                    |
+| Integration tests for save/send/cancel                                    | Task 10                   |
+| Manual smoke checklist                                                    | Task 11                   |
 
 **Coverage gaps:** none material. The spec's "Draft deleted in Gmail between save and send" edge case is covered by Task 4's 404 handling in `getDraftReplyContext` (null return) and Task 9's `send_failed` notification when `sendDraft` itself fails with 404.
 

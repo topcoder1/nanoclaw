@@ -33,6 +33,7 @@ Run: `npm run dev` in one terminal, watch logs for `SSE connected to superpilot`
 ## Task 1: Database schema migration — extend tracked_items for triage
 
 **Files:**
+
 - Modify: `src/db.ts` (add migration)
 - Modify: `src/tracked-items.ts` (extend TrackedItem type + CRUD)
 - Test: `src/__tests__/db-migration.test.ts` (add case)
@@ -53,9 +54,9 @@ describe('triage migration', () => {
 
   it('adds triage columns to tracked_items', () => {
     const db = getDb();
-    const cols = db
-      .prepare("PRAGMA table_info('tracked_items')")
-      .all() as { name: string }[];
+    const cols = db.prepare("PRAGMA table_info('tracked_items')").all() as {
+      name: string;
+    }[];
     const names = cols.map((c) => c.name);
     expect(names).toContain('confidence');
     expect(names).toContain('model_tier');
@@ -137,6 +138,7 @@ git commit -m "feat(triage): add triage columns to tracked_items"
 ## Task 2: Triage config + feature flags
 
 **Files:**
+
 - Create: `src/triage/config.ts`
 - Modify: `src/config.ts` (export new env-driven flags)
 
@@ -155,7 +157,9 @@ describe('triage config', () => {
     expect(TRIAGE_DEFAULTS.archiveThreshold).toBeGreaterThan(
       TRIAGE_DEFAULTS.attentionThreshold,
     );
-    expect(TRIAGE_DEFAULTS.escalateLow).toBeLessThan(TRIAGE_DEFAULTS.escalateHigh);
+    expect(TRIAGE_DEFAULTS.escalateLow).toBeLessThan(
+      TRIAGE_DEFAULTS.escalateHigh,
+    );
     expect(TRIAGE_DEFAULTS.dailyCostCapUsd).toBeGreaterThan(0);
   });
 
@@ -240,6 +244,7 @@ git commit -m "feat(triage): add triage config module with env-driven flags"
 ## Task 3: Structured output schema + validator
 
 **Files:**
+
 - Create: `src/triage/schema.ts`
 - Test: `src/__tests__/triage-schema.test.ts`
 
@@ -443,6 +448,7 @@ git commit -m "feat(triage): add structured output schema with validation"
 ## Task 4: Pre-filter — SuperPilot flags + skip-list
 
 **Files:**
+
 - Create: `src/triage/prefilter.ts`
 - Test: `src/__tests__/triage-prefilter.test.ts`
 
@@ -634,6 +640,7 @@ git commit -m "feat(triage): add pre-filter with SP flags + skip-list promotion"
 ## Task 5: Example store — positive/negative examples for prompt injection
 
 **Files:**
+
 - Create: `src/triage/examples.ts`
 - Test: `src/__tests__/triage-examples.test.ts`
 
@@ -667,10 +674,7 @@ Create `src/__tests__/triage-examples.test.ts`:
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { _initTestDatabase, _closeDatabase } from '../db.js';
-import {
-  recordExample,
-  getRecentExamples,
-} from '../triage/examples.js';
+import { recordExample, getRecentExamples } from '../triage/examples.js';
 
 describe('triage examples store', () => {
   beforeEach(() => _initTestDatabase());
@@ -807,6 +811,7 @@ git commit -m "feat(triage): add positive/negative example store"
 ## Task 6: Prompt builder with cacheable layers
 
 **Files:**
+
 - Create: `src/triage/prompt-builder.ts`
 - Test: `src/__tests__/triage-prompt-builder.test.ts`
 - Create: `memory/triage_rules.md` (seed file, separate commit if preferred)
@@ -911,12 +916,12 @@ export interface BuildPromptInput {
   superpilotLabel: string | null;
   threadId: string;
   account: string;
-  rulesPath?: string;      // override for tests
+  rulesPath?: string; // override for tests
   memoryDir?: string;
 }
 
 export interface BuiltPrompt {
-  system: string;           // joined convenience
+  system: string; // joined convenience
   systemBlocks: PromptBlock[];
   userMessage: string;
 }
@@ -972,8 +977,7 @@ function renderExamples(
 
 export function buildPrompt(input: BuildPromptInput): BuiltPrompt {
   const memoryDir = input.memoryDir ?? path.resolve(process.cwd(), 'memory');
-  const rulesPath =
-    input.rulesPath ?? path.join(memoryDir, 'triage_rules.md');
+  const rulesPath = input.rulesPath ?? path.join(memoryDir, 'triage_rules.md');
   const rules = readIfExists(rulesPath) ?? '';
 
   const negatives = getRecentExamples(
@@ -1052,6 +1056,7 @@ git commit -m "feat(triage): add cacheable layered prompt builder"
 ## Task 7: LLM classifier — tier-routed call with caching + retry
 
 **Files:**
+
 - Create: `src/triage/classifier.ts`
 - Test: `src/__tests__/triage-classifier.test.ts`
 
@@ -1211,16 +1216,13 @@ Expected: FAIL.
 
 - [ ] **Step 7.3: Implement `src/triage/classifier.ts`**
 
-```typescript
+````typescript
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { logger } from '../logger.js';
 import { buildPrompt, type BuildPromptInput } from './prompt-builder.js';
 import { TRIAGE_DEFAULTS } from './config.js';
-import {
-  validateTriageDecision,
-  type TriageDecision,
-} from './schema.js';
+import { validateTriageDecision, type TriageDecision } from './schema.js';
 
 export interface ClassifierResult {
   decision: TriageDecision;
@@ -1304,7 +1306,7 @@ async function callTier(
     outputTokens: resp.usage?.outputTokens ?? 0,
     cacheReadTokens:
       (resp.usage as { cachedInputTokens?: number })?.cachedInputTokens ?? 0,
-    cacheCreationTokens: 0,   // not exposed uniformly; leave at 0
+    cacheCreationTokens: 0, // not exposed uniformly; leave at 0
   };
 
   return { raw, usage };
@@ -1313,10 +1315,14 @@ async function callTier(
 async function tryTier(
   tier: 1 | 2 | 3,
   input: BuildPromptInput,
-): Promise<ClassifierResult | { malformed: true; usage: ClassifierResult['usage'] }> {
+): Promise<
+  ClassifierResult | { malformed: true; usage: ClassifierResult['usage'] }
+> {
   const first = await callTier(tier, input);
   const json1 = extractJson(first.raw);
-  const v1 = json1 ? validateTriageDecision(json1) : { ok: false as const, error: 'not json' };
+  const v1 = json1
+    ? validateTriageDecision(json1)
+    : { ok: false as const, error: 'not json' };
   if (v1.ok) {
     return { decision: v1.value, tier, usage: first.usage };
   }
@@ -1332,12 +1338,15 @@ async function tryTier(
     `Your previous output was invalid: ${v1.ok === false ? v1.error : 'unknown'}. Output ONLY valid JSON matching the schema. No prose, no markdown fences.`,
   );
   const json2 = extractJson(second.raw);
-  const v2 = json2 ? validateTriageDecision(json2) : { ok: false as const, error: 'not json' };
+  const v2 = json2
+    ? validateTriageDecision(json2)
+    : { ok: false as const, error: 'not json' };
   if (v2.ok) {
     const mergedUsage = {
       inputTokens: first.usage.inputTokens + second.usage.inputTokens,
       outputTokens: first.usage.outputTokens + second.usage.outputTokens,
-      cacheReadTokens: first.usage.cacheReadTokens + second.usage.cacheReadTokens,
+      cacheReadTokens:
+        first.usage.cacheReadTokens + second.usage.cacheReadTokens,
       cacheCreationTokens:
         first.usage.cacheCreationTokens + second.usage.cacheCreationTokens,
     };
@@ -1349,7 +1358,8 @@ async function tryTier(
     usage: {
       inputTokens: first.usage.inputTokens + second.usage.inputTokens,
       outputTokens: first.usage.outputTokens + second.usage.outputTokens,
-      cacheReadTokens: first.usage.cacheReadTokens + second.usage.cacheReadTokens,
+      cacheReadTokens:
+        first.usage.cacheReadTokens + second.usage.cacheReadTokens,
       cacheCreationTokens:
         first.usage.cacheCreationTokens + second.usage.cacheCreationTokens,
     },
@@ -1404,7 +1414,7 @@ export async function classifyWithLlm(
 
   throw new Error('Triage classifier: exhausted all tiers');
 }
-```
+````
 
 - [ ] **Step 7.4: Run tests — confirm pass**
 
@@ -1423,6 +1433,7 @@ git commit -m "feat(triage): tier-routed LLM classifier with caching and retry"
 ## Task 8: MLflow trace emission
 
 **Files:**
+
 - Create: `src/triage/traces.ts`
 - Test: `src/__tests__/triage-traces.test.ts`
 
@@ -1509,7 +1520,8 @@ import path from 'path';
 import { logger } from '../logger.js';
 
 let traceDir =
-  process.env.TRIAGE_TRACE_DIR ?? path.resolve(process.cwd(), '.omc/logs/triage');
+  process.env.TRIAGE_TRACE_DIR ??
+  path.resolve(process.cwd(), '.omc/logs/triage');
 
 export function setTraceDir(d: string): void {
   traceDir = d;
@@ -1561,6 +1573,7 @@ git commit -m "feat(triage): JSONL trace emission for every classifier call"
 ## Task 9: Cost cap enforcement
 
 **Files:**
+
 - Create: `src/triage/cost-cap.ts`
 - Test: `src/__tests__/triage-cost-cap.test.ts`
 
@@ -1640,10 +1653,13 @@ import path from 'path';
 
 // Rough $/1M token prices (as of model release). Update when pricing changes.
 // Input pricing is used for uncached input; cached reads are billed at 10%.
-const PRICES: Record<1 | 2 | 3, { inUsdPerMtok: number; outUsdPerMtok: number }> = {
-  1: { inUsdPerMtok: 1.0, outUsdPerMtok: 5.0 },     // Haiku
-  2: { inUsdPerMtok: 3.0, outUsdPerMtok: 15.0 },    // Sonnet
-  3: { inUsdPerMtok: 15.0, outUsdPerMtok: 75.0 },   // Opus
+const PRICES: Record<
+  1 | 2 | 3,
+  { inUsdPerMtok: number; outUsdPerMtok: number }
+> = {
+  1: { inUsdPerMtok: 1.0, outUsdPerMtok: 5.0 }, // Haiku
+  2: { inUsdPerMtok: 3.0, outUsdPerMtok: 15.0 }, // Sonnet
+  3: { inUsdPerMtok: 15.0, outUsdPerMtok: 75.0 }, // Opus
 };
 
 export function estimateCostUsd(
@@ -1758,6 +1774,7 @@ git commit -m "feat(triage): daily cost cap enforcement from trace log"
 ## Task 10: Triage worker — orchestrates prefilter + classifier + persistence
 
 **Files:**
+
 - Create: `src/triage/worker.ts`
 - Test: `src/__tests__/triage-worker.test.ts`
 
@@ -1795,7 +1812,11 @@ describe('triageEmail', () => {
   });
   afterEach(() => {
     _closeDatabase();
-    try { fs.rmSync(dir, { recursive: true }); } catch { /* noop */ }
+    try {
+      fs.rmSync(dir, { recursive: true });
+    } catch {
+      /* noop */
+    }
   });
 
   it('returns skipped when prefilter matches (SP newsletter)', async () => {
@@ -1824,7 +1845,12 @@ describe('triageEmail', () => {
         attention_reason: 'x',
       },
       tier: 1,
-      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 8, cacheCreationTokens: 0 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 8,
+        cacheCreationTokens: 0,
+      },
     });
 
     const out = await triageEmail({
@@ -1858,7 +1884,12 @@ describe('triageEmail', () => {
         attention_reason: 'x',
       },
       tier: 1,
-      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 8, cacheCreationTokens: 0 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 8,
+        cacheCreationTokens: 0,
+      },
     });
 
     const out = await triageEmail({
@@ -1919,8 +1950,7 @@ export type TriageOutcome =
 export async function triageEmail(
   input: TriageWorkerInput,
 ): Promise<TriageOutcome> {
-  const shadowMode =
-    input.shadowMode ?? TRIAGE_DEFAULTS.shadowMode;
+  const shadowMode = input.shadowMode ?? TRIAGE_DEFAULTS.shadowMode;
 
   const pre = shouldSkip({
     superpilotLabel: input.superpilotLabel,
@@ -2033,6 +2063,7 @@ git commit -m "feat(triage): orchestrator worker (prefilter→classify→persist
 ## Task 11: Wire triage worker into `sse-classifier` behind `TRIAGE_V1_ENABLED`
 
 **Files:**
+
 - Modify: `src/sse-classifier.ts`
 - Modify: `src/__tests__/sse-classifier.test.ts` (add gated integration test)
 
@@ -2077,7 +2108,7 @@ if (TRIAGE_DEFAULTS.enabled) {
   // Fire-and-forget. Errors are logged inside triageEmail.
   void triageEmail({
     trackedItemId: itemId,
-    emailBody: email.subject || '',     // body not yet in SSE payload; v1 uses subject+headers
+    emailBody: email.subject || '', // body not yet in SSE payload; v1 uses subject+headers
     sender,
     subject,
     superpilotLabel: email.superpilot_label ?? null,
@@ -2104,7 +2135,12 @@ it('invokes triage worker when TRIAGE_V1_ENABLED=1', async () => {
   });
 
   const emails: SSEEmail[] = [
-    { thread_id: 't2', account: 'a@b.com', subject: 'urgent fix', sender: 'x@y.com' },
+    {
+      thread_id: 't2',
+      account: 'a@b.com',
+      subject: 'urgent fix',
+      sender: 'x@y.com',
+    },
   ];
   classifyFromSSE(emails);
 
@@ -2134,6 +2170,7 @@ git commit -m "feat(triage): wire triage worker into SSE classifier behind flag"
 ## Task 12: Telegram attention pinned dashboard — edit-in-place
 
 **Files:**
+
 - Create: `src/triage/dashboards.ts`
 - Test: `src/__tests__/triage-dashboards.test.ts`
 
@@ -2202,7 +2239,9 @@ describe('renderAttentionDashboard', () => {
     expect(mockPin).toHaveBeenCalledWith('-100123', 42);
 
     const row = getDb()
-      .prepare(`SELECT pinned_msg_id FROM triage_dashboards WHERE topic = 'attention'`)
+      .prepare(
+        `SELECT pinned_msg_id FROM triage_dashboards WHERE topic = 'attention'`,
+      )
       .get() as { pinned_msg_id: number };
     expect(row.pinned_msg_id).toBe(42);
   });
@@ -2276,7 +2315,9 @@ function fmtAttention(items: DashboardItem[]): string {
     (it, i) => `${i + 1}. [${it.reason}] ${it.title} · ${it.ageMins}m ago`,
   );
   const tail =
-    items.length > 5 ? `\n+${items.length - 5} more · /attention for full list` : '';
+    items.length > 5
+      ? `\n+${items.length - 5} more · /attention for full list`
+      : '';
   return `${header}\n${divider}\n${lines.join('\n')}${tail}\n\nLast update: ${new Date().toLocaleTimeString()}`;
 }
 
@@ -2341,6 +2382,7 @@ git commit -m "feat(triage): pinned live dashboards for attention + archive queu
 ## Task 13: Callback handlers for queue buttons
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Test: `src/__tests__/callback-router.test.ts` (add cases)
 - Create: `src/triage/queue-actions.ts`
@@ -2404,13 +2446,19 @@ export function handleArchive(itemId: string): void {
   if (!item) return;
 
   getDb()
-    .prepare(`UPDATE tracked_items SET state = 'resolved', resolution_method = 'manual:button', resolved_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE tracked_items SET state = 'resolved', resolution_method = 'manual:button', resolved_at = ? WHERE id = ?`,
+    )
     .run(Date.now(), itemId);
 
   const sender = parseSender(item.metadata);
   if (sender) {
-    const { promoted } = recordSkip(sender, TRIAGE_DEFAULTS.skiplistPromotionHits);
-    if (promoted) logger.info({ sender }, 'Triage: sender promoted to skip-list');
+    const { promoted } = recordSkip(
+      sender,
+      TRIAGE_DEFAULTS.skiplistPromotionHits,
+    );
+    if (promoted)
+      logger.info({ sender }, 'Triage: sender promoted to skip-list');
   }
 
   if (item.classification) {
@@ -2427,20 +2475,33 @@ export function handleArchive(itemId: string): void {
 
 export function handleDismiss(itemId: string): void {
   getDb()
-    .prepare(`UPDATE tracked_items SET state = 'resolved', resolution_method = 'manual:button', resolved_at = ? WHERE id = ?`)
+    .prepare(
+      `UPDATE tracked_items SET state = 'resolved', resolution_method = 'manual:button', resolved_at = ? WHERE id = ?`,
+    )
     .run(Date.now(), itemId);
 }
 
-export function handleSnooze(itemId: string, duration: '1h' | 'tomorrow'): void {
-  const untilMs = duration === '1h'
-    ? Date.now() + 60 * 60 * 1000
-    : new Date(new Date().setHours(8, 0, 0, 0) + 24 * 60 * 60 * 1000).getTime();
+export function handleSnooze(
+  itemId: string,
+  duration: '1h' | 'tomorrow',
+): void {
+  const untilMs =
+    duration === '1h'
+      ? Date.now() + 60 * 60 * 1000
+      : new Date(
+          new Date().setHours(8, 0, 0, 0) + 24 * 60 * 60 * 1000,
+        ).getTime();
   getDb()
-    .prepare(`UPDATE tracked_items SET state = 'held', metadata = json_set(COALESCE(metadata, '{}'), '$.snoozed_until', ?) WHERE id = ?`)
+    .prepare(
+      `UPDATE tracked_items SET state = 'held', metadata = json_set(COALESCE(metadata, '{}'), '$.snoozed_until', ?) WHERE id = ?`,
+    )
     .run(untilMs, itemId);
 }
 
-export function handleOverride(itemId: string, userQueue: 'attention' | 'archive_candidate'): void {
+export function handleOverride(
+  itemId: string,
+  userQueue: 'attention' | 'archive_candidate',
+): void {
   const item = getItem(itemId);
   if (!item || !item.classification) return;
 
@@ -2470,8 +2531,12 @@ import {
 // within the registration section
 registerHandler('triage:archive', (itemId: string) => handleArchive(itemId));
 registerHandler('triage:dismiss', (itemId: string) => handleDismiss(itemId));
-registerHandler('triage:snooze:1h', (itemId: string) => handleSnooze(itemId, '1h'));
-registerHandler('triage:snooze:tomorrow', (itemId: string) => handleSnooze(itemId, 'tomorrow'));
+registerHandler('triage:snooze:1h', (itemId: string) =>
+  handleSnooze(itemId, '1h'),
+);
+registerHandler('triage:snooze:tomorrow', (itemId: string) =>
+  handleSnooze(itemId, 'tomorrow'),
+);
 registerHandler('triage:override:attention', (itemId: string) =>
   handleOverride(itemId, 'attention'),
 );
@@ -2489,10 +2554,7 @@ Create `src/__tests__/triage-queue-actions.test.ts`:
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
-import {
-  handleArchive,
-  handleOverride,
-} from '../triage/queue-actions.js';
+import { handleArchive, handleOverride } from '../triage/queue-actions.js';
 import { insertTrackedItem } from '../tracked-items.js';
 
 describe('queue-actions', () => {
@@ -2501,15 +2563,31 @@ describe('queue-actions', () => {
 
   it('handleArchive marks item resolved and records skip', () => {
     insertTrackedItem({
-      id: 'a1', source: 'gmail', source_id: 'gmail:t', group_name: 'main',
-      state: 'pushed', classification: 'push', superpilot_label: null,
-      trust_tier: null, title: 'hi', summary: null, thread_id: 't',
-      detected_at: Date.now(), pushed_at: Date.now(), resolved_at: null,
-      resolution_method: null, digest_count: 0, telegram_message_id: null,
+      id: 'a1',
+      source: 'gmail',
+      source_id: 'gmail:t',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'hi',
+      summary: null,
+      thread_id: 't',
+      detected_at: Date.now(),
+      pushed_at: Date.now(),
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
       classification_reason: null,
       metadata: { sender: 'noreply@foo.com' },
-      confidence: 0.6, model_tier: 1, action_intent: null,
-      facts_extracted: null, repo_candidates: null, reasons: null,
+      confidence: 0.6,
+      model_tier: 1,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
     });
 
     handleArchive('a1');
@@ -2522,20 +2600,38 @@ describe('queue-actions', () => {
 
   it('handleOverride records a negative example', () => {
     insertTrackedItem({
-      id: 'a2', source: 'gmail', source_id: 'gmail:t2', group_name: 'main',
-      state: 'queued', classification: 'digest', superpilot_label: null,
-      trust_tier: null, title: 'yo', summary: null, thread_id: 't2',
-      detected_at: Date.now(), pushed_at: null, resolved_at: null,
-      resolution_method: null, digest_count: 0, telegram_message_id: null,
+      id: 'a2',
+      source: 'gmail',
+      source_id: 'gmail:t2',
+      group_name: 'main',
+      state: 'queued',
+      classification: 'digest',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'yo',
+      summary: null,
+      thread_id: 't2',
+      detected_at: Date.now(),
+      pushed_at: null,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
       classification_reason: null,
       metadata: null,
-      confidence: 0.6, model_tier: 1, action_intent: null,
-      facts_extracted: null, repo_candidates: null, reasons: null,
+      confidence: 0.6,
+      model_tier: 1,
+      action_intent: null,
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: null,
     });
 
     handleOverride('a2', 'attention');
     const row = getDb()
-      .prepare(`SELECT kind, user_queue FROM triage_examples WHERE tracked_item_id = ?`)
+      .prepare(
+        `SELECT kind, user_queue FROM triage_examples WHERE tracked_item_id = ?`,
+      )
       .get('a2') as { kind: string; user_queue: string };
     expect(row.kind).toBe('negative');
     expect(row.user_queue).toBe('attention');
@@ -2560,6 +2656,7 @@ git commit -m "feat(triage): callback handlers for queue buttons + learning"
 ## Task 14: Push message with inline buttons on new attention item
 
 **Files:**
+
 - Create: `src/triage/push-attention.ts`
 - Test: `src/__tests__/triage-push-attention.test.ts`
 
@@ -2604,7 +2701,11 @@ describe('pushAttentionItem', () => {
     const [, text, opts] = mockSend.mock.calls[0];
     expect(text).toContain('PR #42');
     expect(opts.reply_markup.inline_keyboard).toBeDefined();
-    const flat = (opts.reply_markup.inline_keyboard as Array<Array<{ callback_data: string }>>)
+    const flat = (
+      opts.reply_markup.inline_keyboard as Array<
+        Array<{ callback_data: string }>
+      >
+    )
       .flat()
       .map((b) => b.callback_data);
     expect(flat).toEqual(
@@ -2646,14 +2747,20 @@ export async function pushAttentionItem(
   const keyboard = [
     [
       { text: 'Snooze 1h', callback_data: `triage:snooze:1h:${input.itemId}` },
-      { text: 'Snooze tomorrow', callback_data: `triage:snooze:tomorrow:${input.itemId}` },
+      {
+        text: 'Snooze tomorrow',
+        callback_data: `triage:snooze:tomorrow:${input.itemId}`,
+      },
     ],
     [
       { text: 'Dismiss', callback_data: `triage:dismiss:${input.itemId}` },
       { text: 'Archive', callback_data: `triage:archive:${input.itemId}` },
     ],
     [
-      { text: 'Move to archive queue', callback_data: `triage:override:archive:${input.itemId}` },
+      {
+        text: 'Move to archive queue',
+        callback_data: `triage:override:archive:${input.itemId}`,
+      },
     ],
   ];
 
@@ -2681,6 +2788,7 @@ git commit -m "feat(triage): push per-email attention message with inline button
 ## Task 15: Wire push + dashboard re-render into the worker side-effects
 
 **Files:**
+
 - Modify: `src/triage/worker.ts`
 - Modify: `src/__tests__/triage-worker.test.ts`
 
@@ -2767,11 +2875,18 @@ it('does NOT push or render when shadowMode=true', async () => {
       attention_reason: 'x',
     },
     tier: 1,
-    usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 8, cacheCreationTokens: 0 },
+    usage: {
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 8,
+      cacheCreationTokens: 0,
+    },
   });
 
   const pushSpy = vi.fn();
-  vi.doMock('../triage/push-attention.js', () => ({ pushAttentionItem: pushSpy }));
+  vi.doMock('../triage/push-attention.js', () => ({
+    pushAttentionItem: pushSpy,
+  }));
 
   const out = await triageEmail({
     trackedItemId: 'x3',
@@ -2805,6 +2920,7 @@ git commit -m "feat(triage): push attention + re-render dashboard on classify"
 ## Task 16: Facts extraction → knowledge.md + Weaviate
 
 **Files:**
+
 - Create: `src/triage/knowledge-append.ts`
 - Test: `src/__tests__/triage-knowledge-append.test.ts`
 - Modify: `src/triage/worker.ts`
@@ -2904,7 +3020,9 @@ export async function appendExtractedFacts(
     `## ${ts} — ${input.subject}`,
     `- **From:** ${input.sender}`,
     `- **Thread:** \`${input.threadId}\` · account \`${input.account}\``,
-    ...input.facts.map((f) => `- **${f.key}:** ${f.value}  _(${f.source_span})_`),
+    ...input.facts.map(
+      (f) => `- **${f.key}:** ${f.value}  _(${f.source_span})_`,
+    ),
   ];
   fs.appendFileSync(file, lines.join('\n') + '\n');
 
@@ -2919,7 +3037,7 @@ export async function appendExtractedFacts(
         classification_id: input.classificationId,
         sender: input.sender,
       },
-    } as never);                        // relax to match actual signature
+    } as never); // relax to match actual signature
   } catch (err) {
     logger.warn(
       { err: String(err) },
@@ -2977,6 +3095,7 @@ git commit -m "feat(triage): append extracted facts to group knowledge.md + Weav
 ## Task 17: Daily archive digest — wire into existing digest posting
 
 **Files:**
+
 - Modify: `src/daily-digest.ts` (or `src/digest-engine.ts` depending on which owns 8am-PT posting)
 - Test: `src/__tests__/daily-digest.test.ts` (add case)
 - Modify: `src/triage/dashboards.ts` (add `renderArchiveDashboard`)
@@ -2998,7 +3117,11 @@ Extend `src/__tests__/daily-digest.test.ts` with a test that seeds two `archive_
 Symmetric to `renderAttentionDashboard`:
 
 ```typescript
-function fmtArchive(counts: Record<string, number>, total: number, nextDigestHuman: string): string {
+function fmtArchive(
+  counts: Record<string, number>,
+  total: number,
+  nextDigestHuman: string,
+): string {
   const header = `🗄 Archive queue — ${total} candidates`;
   const divider = '────────────────────';
   const breakdown = Object.entries(counts)
@@ -3041,6 +3164,7 @@ git commit -m "feat(triage): wire archive dashboard + daily 8am PT digest integr
 ## Task 18: Attention re-surface timer (4h, once)
 
 **Files:**
+
 - Create: `src/triage/reminder.ts`
 - Test: `src/__tests__/triage-reminder.test.ts`
 - Modify: `src/index.ts` (or wherever periodic timers are scheduled)
@@ -3089,14 +3213,31 @@ describe('runAttentionReminderSweep', () => {
   it('sends reminder for overdue unreminded attention items', async () => {
     const oldMs = Date.now() - 5 * 60 * 60 * 1000;
     insertTrackedItem({
-      id: 'r1', source: 'gmail', source_id: 'gmail:t', group_name: 'main',
-      state: 'pushed', classification: 'push', superpilot_label: null,
-      trust_tier: null, title: 'old one', summary: null, thread_id: 't',
-      detected_at: oldMs, pushed_at: oldMs, resolved_at: null,
-      resolution_method: null, digest_count: 0, telegram_message_id: null,
-      classification_reason: null, metadata: null,
-      confidence: 0.9, model_tier: 1, action_intent: 'none',
-      facts_extracted: null, repo_candidates: null, reasons: ['x', 'y'],
+      id: 'r1',
+      source: 'gmail',
+      source_id: 'gmail:t',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'old one',
+      summary: null,
+      thread_id: 't',
+      detected_at: oldMs,
+      pushed_at: oldMs,
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: null,
+      confidence: 0.9,
+      model_tier: 1,
+      action_intent: 'none',
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: ['x', 'y'],
     });
 
     await runAttentionReminderSweep({ windowHours: 4 });
@@ -3110,14 +3251,31 @@ describe('runAttentionReminderSweep', () => {
 
   it('does NOT send for fresh items', async () => {
     insertTrackedItem({
-      id: 'r2', source: 'gmail', source_id: 'gmail:t2', group_name: 'main',
-      state: 'pushed', classification: 'push', superpilot_label: null,
-      trust_tier: null, title: 'fresh', summary: null, thread_id: 't2',
-      detected_at: Date.now(), pushed_at: Date.now(), resolved_at: null,
-      resolution_method: null, digest_count: 0, telegram_message_id: null,
-      classification_reason: null, metadata: null,
-      confidence: 0.9, model_tier: 1, action_intent: 'none',
-      facts_extracted: null, repo_candidates: null, reasons: ['x', 'y'],
+      id: 'r2',
+      source: 'gmail',
+      source_id: 'gmail:t2',
+      group_name: 'main',
+      state: 'pushed',
+      classification: 'push',
+      superpilot_label: null,
+      trust_tier: null,
+      title: 'fresh',
+      summary: null,
+      thread_id: 't2',
+      detected_at: Date.now(),
+      pushed_at: Date.now(),
+      resolved_at: null,
+      resolution_method: null,
+      digest_count: 0,
+      telegram_message_id: null,
+      classification_reason: null,
+      metadata: null,
+      confidence: 0.9,
+      model_tier: 1,
+      action_intent: 'none',
+      facts_extracted: null,
+      repo_candidates: null,
+      reasons: ['x', 'y'],
     });
 
     await runAttentionReminderSweep({ windowHours: 4 });
@@ -3211,6 +3369,7 @@ git commit -m "feat(triage): 4h attention re-surface reminder (once per item)"
 ## Task 19: Nightly agreement-rate job + calibration alert
 
 **Files:**
+
 - Create: `src/triage/agreement.ts`
 - Test: `src/__tests__/triage-agreement.test.ts`
 
@@ -3223,9 +3382,7 @@ Create `src/__tests__/triage-agreement.test.ts`:
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { _initTestDatabase, _closeDatabase, getDb } from '../db.js';
-import {
-  computeAgreement,
-} from '../triage/agreement.js';
+import { computeAgreement } from '../triage/agreement.js';
 
 describe('computeAgreement', () => {
   beforeEach(() => _initTestDatabase());
@@ -3274,9 +3431,7 @@ export interface AgreementReport {
   bySlice: Record<string, { rate: number; total: number }>;
 }
 
-export function computeAgreement(opts: {
-  windowMs: number;
-}): AgreementReport {
+export function computeAgreement(opts: { windowMs: number }): AgreementReport {
   const cutoff = Date.now() - opts.windowMs;
   const rows = getDb()
     .prepare(
@@ -3315,14 +3470,16 @@ export async function runNightlyAgreementCheck(opts: {
   agreementFloor: number;
 }): Promise<void> {
   const r = computeAgreement({ windowMs: 7 * 24 * 60 * 60 * 1000 });
-  if (r.total < 20) return;                      // not enough data
+  if (r.total < 20) return; // not enough data
   if (r.overall >= opts.agreementFloor) return;
 
   const chatId = process.env.EMAIL_INTEL_TG_CHAT_ID;
   if (!chatId) return;
 
   const { sendTelegramMessage } = await import('../channels/telegram.js');
-  const worst = Object.entries(r.bySlice).sort((a, b) => a[1].rate - b[1].rate)[0];
+  const worst = Object.entries(r.bySlice).sort(
+    (a, b) => a[1].rate - b[1].rate,
+  )[0];
   const msg = `⚠️ Triage calibration alert: 7d agreement = ${(r.overall * 100).toFixed(0)}% (floor ${(opts.agreementFloor * 100).toFixed(0)}%).\nWorst slice: *${worst?.[0]}* at ${(worst?.[1].rate * 100).toFixed(0)}% over ${worst?.[1].total} items.`;
   await sendTelegramMessage(chatId, msg, { parse_mode: 'Markdown' });
 }
@@ -3360,6 +3517,7 @@ git commit -m "feat(triage): nightly agreement-rate check with calibration alert
 ## Task 20: Batch-API bootstrap script
 
 **Files:**
+
 - Create: `scripts/triage-bootstrap.ts`
 - Test: (none — it's a one-off script; dry-run flag is sufficient validation)
 
@@ -3391,6 +3549,7 @@ import Anthropic from '@anthropic-ai/sdk';
 ```
 
 Flesh this out to:
+
 1. Fetch N historical archived emails for the given account via chosen source
 2. Build a batch request: one item per email with the triage prompt
 3. Submit to `client.messages.batches.create(...)`
@@ -3431,6 +3590,7 @@ git commit -m "feat(triage): batch-API bootstrap for skip-list + example seeding
 ## Task 21: Rollout docs + shadow-mode verification
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-04-16-email-triage-pipeline-design.md` (append ops notes)
 - Create: `docs/runbooks/triage-v1-rollout.md`
 
@@ -3444,16 +3604,19 @@ Document the shadow → live rollout sequence (from the spec) with the exact env
 ## Phase 1 — Shadow mode (48h)
 
 1. Set in `.env`:
-   ```
-   TRIAGE_V1_ENABLED=1
-   TRIAGE_SHADOW_MODE=1
-   EMAIL_INTEL_TG_CHAT_ID=<group_id>
-   ```
+```
+
+TRIAGE_V1_ENABLED=1
+TRIAGE_SHADOW_MODE=1
+EMAIL_INTEL_TG_CHAT_ID=<group_id>
+
+````
 2. Restart NanoClaw: `launchctl kickstart -k gui/$(id -u) com.nanoclaw`
 3. Verify SSE is flowing + triage is firing:
-   ```bash
-   sqlite3 data/nanoclaw.db "SELECT queue, confidence, model_tier FROM tracked_items WHERE confidence IS NOT NULL ORDER BY detected_at DESC LIMIT 20;"
-   ```
+```bash
+sqlite3 data/nanoclaw.db "SELECT queue, confidence, model_tier FROM tracked_items WHERE confidence IS NOT NULL ORDER BY detected_at DESC LIMIT 20;"
+````
+
 4. Check traces:
    ```bash
    tail -50 .omc/logs/triage/$(date +%Y-%m-%d).jsonl | jq .
@@ -3481,14 +3644,15 @@ Document the shadow → live rollout sequence (from the spec) with the exact env
 1. Set `TRIAGE_V1_ENABLED=0`. Restart.
 2. Triage worker stops firing; legacy rule-based `classify()` remains as the only path.
 3. Data in `tracked_items` triage columns is preserved for later analysis.
-```
+
+````
 
 - [ ] **Step 21.2: Commit**
 
 ```bash
 git add docs/runbooks/triage-v1-rollout.md
 git commit -m "docs(triage): v1 rollout runbook with shadow→live commands"
-```
+````
 
 ---
 

@@ -14,21 +14,21 @@
 
 ## File Structure
 
-| File | Responsibility | Status |
-| ---- | -------------- | ------ |
-| `src/brain/auto-merge.ts` | Pure classifier + sweep orchestrator + scheduler entry point | new |
-| `src/brain/__tests__/auto-merge.test.ts` | Classifier, sweep, idempotency, dry-run, env-gate tests | new |
-| `src/brain/schema.sql` | `entity_merge_suggestions`, `entity_merge_suppressions` tables | edit |
-| `src/events.ts` | `entity.merge.suggested`, `entity.merge.reject.requested` event types | edit |
-| `src/brain/identity-merge.ts` | `mergeEntities()` lifecycle hook (mark suggestions accepted) | edit |
-| `src/brain/identity-merge-handler.ts` | `entity.merge.suggested` formatter + `claw merge-reject` handler + auto-suppress on unmerge of `auto:high` | edit |
-| `src/brain/__tests__/identity-merge-handler.test.ts` | New cases: suggestion formatter, merge-reject handler, auto-suppression | edit |
-| `src/channels/signal.ts` | `claw merge-reject` trigger BEFORE `claw merge` | edit |
-| `src/channels/discord.ts` | `claw merge-reject` trigger BEFORE `claw merge` | edit |
-| `src/channels/signal.test.ts` | New `claw merge-reject` parsing case | edit |
-| `src/channels/discord.test.ts` | New `claw merge-reject` parsing case | edit |
-| `src/index.ts` | Wire `startAutoMergeSchedule` at startup | edit |
-| `.env.example` | 5 new vars, drop `BRAIN_MERGE_AUTO_LOW_CONF_REJECT` | edit |
+| File                                                 | Responsibility                                                                                             | Status |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------ |
+| `src/brain/auto-merge.ts`                            | Pure classifier + sweep orchestrator + scheduler entry point                                               | new    |
+| `src/brain/__tests__/auto-merge.test.ts`             | Classifier, sweep, idempotency, dry-run, env-gate tests                                                    | new    |
+| `src/brain/schema.sql`                               | `entity_merge_suggestions`, `entity_merge_suppressions` tables                                             | edit   |
+| `src/events.ts`                                      | `entity.merge.suggested`, `entity.merge.reject.requested` event types                                      | edit   |
+| `src/brain/identity-merge.ts`                        | `mergeEntities()` lifecycle hook (mark suggestions accepted)                                               | edit   |
+| `src/brain/identity-merge-handler.ts`                | `entity.merge.suggested` formatter + `claw merge-reject` handler + auto-suppress on unmerge of `auto:high` | edit   |
+| `src/brain/__tests__/identity-merge-handler.test.ts` | New cases: suggestion formatter, merge-reject handler, auto-suppression                                    | edit   |
+| `src/channels/signal.ts`                             | `claw merge-reject` trigger BEFORE `claw merge`                                                            | edit   |
+| `src/channels/discord.ts`                            | `claw merge-reject` trigger BEFORE `claw merge`                                                            | edit   |
+| `src/channels/signal.test.ts`                        | New `claw merge-reject` parsing case                                                                       | edit   |
+| `src/channels/discord.test.ts`                       | New `claw merge-reject` parsing case                                                                       | edit   |
+| `src/index.ts`                                       | Wire `startAutoMergeSchedule` at startup                                                                   | edit   |
+| `.env.example`                                       | 5 new vars, drop `BRAIN_MERGE_AUTO_LOW_CONF_REJECT`                                                        | edit   |
 
 ---
 
@@ -43,6 +43,7 @@ The existing `claw merge` regex in [src/channels/signal.ts:331](../../../src/cha
 ## Task 1: Schema additions
 
 **Files:**
+
 - Modify: `src/brain/schema.sql` (append after the existing `entity_merge_log` table on line 58)
 - Test: `src/brain/__tests__/auto-merge.test.ts` (new file, schema-presence test only in this task)
 
@@ -57,12 +58,20 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
@@ -154,6 +163,7 @@ git commit -m "feat(brain): schema for auto-merge suggestions and suppressions"
 ## Task 2: Add `entity.merge.suggested` event type
 
 **Files:**
+
 - Modify: `src/events.ts` (add interface near line 838 alongside other entity-merge events; add to EventMap near line 912)
 
 - [ ] **Step 1: Edit `src/events.ts` — add interface after `EntityUnmergeRequestedEvent`**
@@ -171,8 +181,8 @@ After the closing `}` of `EntityUnmergeRequestedEvent` (around line 838) and bef
 export interface EntityMergeSuggestedEvent extends NanoClawEvent {
   type: 'entity.merge.suggested';
   suggestion_id: string;
-  entity_id_a: string;          // lex-smaller
-  entity_id_b: string;          // lex-larger
+  entity_id_a: string; // lex-smaller
+  entity_id_b: string; // lex-larger
   confidence: number;
   reason_code: 'name_exact' | string;
   evidence: {
@@ -225,6 +235,7 @@ git commit -m "feat(events): add entity.merge.suggested and entity.merge.reject.
 ## Task 3: Lex-ordering helper + ULID re-use
 
 **Files:**
+
 - Create: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -293,6 +304,7 @@ git commit -m "feat(brain): auto-merge lexOrdered helper"
 **Why:** Hard-identifier matching for `phone` requires comparing E.164 forms. `+1 (626) 348-3472`, `16263483472`, and `+16263483472` should all match. We do this in TypeScript (not SQL) because `entity_aliases.field_value` may be stored in any of these forms historically.
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -363,6 +375,7 @@ git commit -m "feat(brain): normalizePhone helper for hard-identifier matching"
 ## Task 5: High-confidence classifier (hard-identifier match)
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -375,9 +388,20 @@ function seedPerson(db: any, id: string, name: string): void {
   db.prepare(
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES (?, 'person', ?, ?, ?)`,
-  ).run(id, JSON.stringify({ name }), '2026-04-28T00:00:00Z', '2026-04-28T00:00:00Z');
+  ).run(
+    id,
+    JSON.stringify({ name }),
+    '2026-04-28T00:00:00Z',
+    '2026-04-28T00:00:00Z',
+  );
 }
-function seedAlias(db: any, aliasId: string, entityId: string, field: string, value: string): void {
+function seedAlias(
+  db: any,
+  aliasId: string,
+  entityId: string,
+  field: string,
+  value: string,
+): void {
   db.prepare(
     `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
      VALUES (?, ?, 'test', ?, ?, '2026-04-28T00:00:00Z', 1.0)`,
@@ -458,11 +482,15 @@ Expected: FAIL with `findHighConfidenceCandidates is not exported`.
 import type Database from 'better-sqlite3';
 
 export interface HighConfidencePair {
-  entity_id_a: string;          // lex-smaller
+  entity_id_a: string; // lex-smaller
   entity_id_b: string;
-  reason_code: 'email_exact' | 'phone_normalized' | 'signal_uuid_exact'
-    | 'discord_snowflake_exact' | 'whatsapp_jid_exact';
-  fields_matched: string[];     // e.g. ['email','phone']
+  reason_code:
+    | 'email_exact'
+    | 'phone_normalized'
+    | 'signal_uuid_exact'
+    | 'discord_snowflake_exact'
+    | 'whatsapp_jid_exact';
+  fields_matched: string[]; // e.g. ['email','phone']
   confidence: 1.0;
 }
 
@@ -471,11 +499,27 @@ const HARD_IDENTIFIER_FIELDS: ReadonlyArray<{
   reasonCode: HighConfidencePair['reason_code'];
   normalize: (raw: string) => string | null;
 }> = [
-  { field: 'email', reasonCode: 'email_exact', normalize: (r) => r.trim().toLowerCase() || null },
+  {
+    field: 'email',
+    reasonCode: 'email_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
   { field: 'phone', reasonCode: 'phone_normalized', normalize: normalizePhone },
-  { field: 'signal_uuid', reasonCode: 'signal_uuid_exact', normalize: (r) => r.trim().toLowerCase() || null },
-  { field: 'discord_snowflake', reasonCode: 'discord_snowflake_exact', normalize: (r) => r.trim() || null },
-  { field: 'whatsapp_jid', reasonCode: 'whatsapp_jid_exact', normalize: (r) => r.trim().toLowerCase() || null },
+  {
+    field: 'signal_uuid',
+    reasonCode: 'signal_uuid_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
+  {
+    field: 'discord_snowflake',
+    reasonCode: 'discord_snowflake_exact',
+    normalize: (r) => r.trim() || null,
+  },
+  {
+    field: 'whatsapp_jid',
+    reasonCode: 'whatsapp_jid_exact',
+    normalize: (r) => r.trim().toLowerCase() || null,
+  },
 ];
 
 /**
@@ -491,7 +535,12 @@ export function findHighConfidenceCandidates(
   // tuples for entities of the same type. Then group by (type, field, value)
   // to find collisions. Doing the normalization in JS is necessary because
   // SQLite has no built-in phone-canonicalization.
-  type Row = { entity_id: string; entity_type: string; field_name: string; field_value: string };
+  type Row = {
+    entity_id: string;
+    entity_type: string;
+    field_name: string;
+    field_value: string;
+  };
   const rows = db
     .prepare(
       `SELECT a.entity_id, e.entity_type, a.field_name, a.field_value
@@ -574,6 +623,7 @@ git commit -m "feat(brain): high-confidence duplicate detector (hard-identifier 
 ## Task 6: Medium-confidence classifier (name-exact match with conflict short-circuit)
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -666,10 +716,10 @@ Expected: FAIL with `findMediumConfidenceCandidates is not exported`.
 
 ```typescript
 export interface MediumConfidencePair {
-  entity_id_a: string;          // lex-smaller
+  entity_id_a: string; // lex-smaller
   entity_id_b: string;
   reason_code: 'name_exact';
-  confidence: number;           // 0.5–0.8
+  confidence: number; // 0.5–0.8
   evidence: {
     fields_matched: string[];
     canonical_a: Record<string, unknown>;
@@ -725,8 +775,10 @@ export function findMediumConfidenceCandidates(
         const rj = list[j];
         if (hasConflictingIdentifier(db, ri.entity_id, rj.entity_id)) continue;
         const [a, b] = lexOrdered(ri.entity_id, rj.entity_id);
-        const canonA = a === ri.entity_id ? safeJson(ri.canonical) : safeJson(rj.canonical);
-        const canonB = a === ri.entity_id ? safeJson(rj.canonical) : safeJson(ri.canonical);
+        const canonA =
+          a === ri.entity_id ? safeJson(ri.canonical) : safeJson(rj.canonical);
+        const canonB =
+          a === ri.entity_id ? safeJson(rj.canonical) : safeJson(ri.canonical);
         out.push({
           entity_id_a: a,
           entity_id_b: b,
@@ -772,7 +824,11 @@ function hasConflictingIdentifier(
         WHERE entity_id IN (?, ?)
           AND field_name IN (${HARD_IDENTIFIER_FIELDS.map(() => '?').join(',')})`,
     )
-    .all(entityA, entityB, ...HARD_IDENTIFIER_FIELDS.map((f) => f.field)) as Row[];
+    .all(
+      entityA,
+      entityB,
+      ...HARD_IDENTIFIER_FIELDS.map((f) => f.field),
+    ) as Row[];
 
   // For each field, collect normalized values per entity.
   const byField = new Map<string, { a: Set<string>; b: Set<string> }>();
@@ -787,7 +843,7 @@ function hasConflictingIdentifier(
     byField.set(r.field_name, slot);
   }
   for (const { a, b } of byField.values()) {
-    if (a.size === 0 || b.size === 0) continue;     // not both populated
+    if (a.size === 0 || b.size === 0) continue; // not both populated
     // Conflict iff there is no overlap.
     let overlap = false;
     for (const v of a) {
@@ -819,6 +875,7 @@ git commit -m "feat(brain): medium-confidence duplicate detector with conflict s
 ## Task 7: Suppression filter
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -835,7 +892,7 @@ describe('isSuppressed', () => {
        VALUES ('e-aaa','e-bbb', NULL, 'operator_rejected', ?)`,
     ).run(Date.now());
     expect(isSuppressed(db, 'e-aaa', 'e-bbb')).toBe(true);
-    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true);  // order-insensitive
+    expect(isSuppressed(db, 'e-bbb', 'e-aaa')).toBe(true); // order-insensitive
   });
   it('returns false when no row exists', () => {
     const db = getBrainDb();
@@ -910,6 +967,7 @@ git commit -m "feat(brain): isSuppressed check for auto-merge candidate filter"
 **Why:** When the operator runs `claw merge a b` (manual path) for a pair that already has a pending chat suggestion, the suggestion's status should flip to `accepted`. Without this hook, suggestions accumulate as `pending` forever and would be re-suggested by the next sweep (the suggestion-table UNIQUE constraint would block re-insert, but having stale `pending` rows is misleading).
 
 **Files:**
+
 - Modify: `src/brain/identity-merge.ts` (inside the `mergeEntities` transaction body, after the merge log INSERT around line 156)
 - Test: `src/brain/__tests__/identity-merge.test.ts` (add a new case)
 
@@ -918,34 +976,36 @@ git commit -m "feat(brain): isSuppressed check for auto-merge candidate filter"
 Open `src/brain/__tests__/identity-merge.test.ts` and append a new test inside the existing `describe('mergeEntities', ...)` block:
 
 ```typescript
-  it('marks any matching pending suggestion as accepted', async () => {
-    const db = getBrainDb();
-    db.prepare(
-      `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
+it('marks any matching pending suggestion as accepted', async () => {
+  const db = getBrainDb();
+  db.prepare(
+    `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
        VALUES ('e-aaa','person','{"name":"X"}','2026-04-28T00:00:00Z','2026-04-28T00:00:00Z'),
               ('e-bbb','person','{"name":"X"}','2026-04-28T00:00:00Z','2026-04-28T00:00:00Z')`,
-    ).run();
-    // Pre-seed a pending suggestion (lex-ordered).
-    db.prepare(
-      `INSERT INTO entity_merge_suggestions
+  ).run();
+  // Pre-seed a pending suggestion (lex-ordered).
+  db.prepare(
+    `INSERT INTO entity_merge_suggestions
          (suggestion_id, entity_id_a, entity_id_b, confidence, reason_code,
           evidence_json, suggested_at, status)
        VALUES ('s1','e-aaa','e-bbb',0.6,'name_exact','{}',?,'pending')`,
-    ).run(Date.now());
+  ).run(Date.now());
 
-    await mergeEntities('e-aaa', 'e-bbb', {
-      evidence: { trigger: 'manual' },
-      confidence: 1.0,
-      mergedBy: 'human:test',
-      db,
-    });
-
-    const row = db
-      .prepare(`SELECT status, status_at FROM entity_merge_suggestions WHERE suggestion_id = 's1'`)
-      .get() as { status: string; status_at: number | null };
-    expect(row.status).toBe('accepted');
-    expect(row.status_at).toBeGreaterThan(0);
+  await mergeEntities('e-aaa', 'e-bbb', {
+    evidence: { trigger: 'manual' },
+    confidence: 1.0,
+    mergedBy: 'human:test',
+    db,
   });
+
+  const row = db
+    .prepare(
+      `SELECT status, status_at FROM entity_merge_suggestions WHERE suggestion_id = 's1'`,
+    )
+    .get() as { status: string; status_at: number | null };
+  expect(row.status).toBe('accepted');
+  expect(row.status_at).toBeGreaterThan(0);
+});
 ```
 
 - [ ] **Step 2: Run the test and watch it fail**
@@ -958,17 +1018,18 @@ Expected: FAIL — `expect(row.status).toBe('accepted')` because we never UPDATE
 Inside the transaction body of `mergeEntities`, after step 5 (the merge_log INSERT) and before the closing `})()` (around line 157), add step 6:
 
 ```typescript
-    // 6. Lifecycle: mark any pending suggestion that matches this pair as
-    //    accepted. The suggestions table is lex-ordered by (a, b), so we
-    //    must lex-sort the inputs before the UPDATE.
-    const [sa, sb] = keptEntityId < mergedEntityId
-      ? [keptEntityId, mergedEntityId]
-      : [mergedEntityId, keptEntityId];
-    db.prepare(
-      `UPDATE entity_merge_suggestions
+// 6. Lifecycle: mark any pending suggestion that matches this pair as
+//    accepted. The suggestions table is lex-ordered by (a, b), so we
+//    must lex-sort the inputs before the UPDATE.
+const [sa, sb] =
+  keptEntityId < mergedEntityId
+    ? [keptEntityId, mergedEntityId]
+    : [mergedEntityId, keptEntityId];
+db.prepare(
+  `UPDATE entity_merge_suggestions
           SET status = 'accepted', status_at = ?
         WHERE entity_id_a = ? AND entity_id_b = ? AND status = 'pending'`,
-    ).run(Date.now(), sa, sb);
+).run(Date.now(), sa, sb);
 ```
 
 - [ ] **Step 4: Run the test and watch it pass**
@@ -993,6 +1054,7 @@ git commit -m "feat(brain): mark matching merge-suggestion accepted on manual me
 ## Task 9: Sweep — high-confidence path
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -1033,7 +1095,9 @@ describe('runAutoMergeSweep — high-confidence path', () => {
     const result = await runAutoMergeSweep({ db, enabled: true });
     expect(result.high_conf_merged).toBe(0);
     expect(result.suppressed_skipped).toBe(1);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get(),
+    ).toEqual({ n: 0 });
   });
 });
 ```
@@ -1054,9 +1118,9 @@ import { getBrainDb } from './db.js';
 
 export interface AutoMergeSweepOpts {
   db?: Database.Database;
-  enabled?: boolean;             // overrides BRAIN_MERGE_AUTO_ENABLED for tests
-  dryRun?: boolean;              // overrides BRAIN_MERGE_AUTO_DRY_RUN for tests
-  notifyChat?: boolean;          // overrides BRAIN_MERGE_AUTO_NOTIFY_CHAT for tests
+  enabled?: boolean; // overrides BRAIN_MERGE_AUTO_ENABLED for tests
+  dryRun?: boolean; // overrides BRAIN_MERGE_AUTO_DRY_RUN for tests
+  notifyChat?: boolean; // overrides BRAIN_MERGE_AUTO_NOTIFY_CHAT for tests
   nowMs?: number;
 }
 
@@ -1077,9 +1141,11 @@ export async function runAutoMergeSweep(
   opts: AutoMergeSweepOpts = {},
 ): Promise<AutoMergeSweepResult> {
   const db = opts.db ?? getBrainDb();
-  const enabled = opts.enabled ?? process.env.BRAIN_MERGE_AUTO_ENABLED === 'true';
+  const enabled =
+    opts.enabled ?? process.env.BRAIN_MERGE_AUTO_ENABLED === 'true';
   const dryRun = opts.dryRun ?? process.env.BRAIN_MERGE_AUTO_DRY_RUN === 'true';
-  const notifyChat = opts.notifyChat ??
+  const notifyChat =
+    opts.notifyChat ??
     (process.env.BRAIN_MERGE_AUTO_NOTIFY_CHAT ?? 'true') !== 'false';
   const nowMs = opts.nowMs ?? Date.now();
   const startedAt = nowMs;
@@ -1140,7 +1206,12 @@ export async function runAutoMergeSweep(
   return result;
 }
 
-type MergeEvidenceField = 'email' | 'phone' | 'name' | 'slack_id' | 'signal_uuid';
+type MergeEvidenceField =
+  | 'email'
+  | 'phone'
+  | 'name'
+  | 'slack_id'
+  | 'signal_uuid';
 ```
 
 Note: the `void notifyChat`, `void newId`, `void eventBus` are placeholders so TypeScript doesn't complain about unused imports between tasks. They are removed in Task 10.
@@ -1162,6 +1233,7 @@ git commit -m "feat(brain): runAutoMergeSweep — high-confidence path"
 ## Task 10: Sweep — medium-confidence path
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -1209,7 +1281,7 @@ describe('runAutoMergeSweep — medium-confidence path', () => {
       const row = db
         .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
         .get() as { n: number };
-      expect(row.n).toBe(1);     // suggestion still persisted
+      expect(row.n).toBe(1); // suggestion still persisted
     } finally {
       unsub();
     }
@@ -1229,72 +1301,72 @@ Expected: FAIL — `result.medium_conf_suggested` is undefined / 0.
 Replace the placeholder section in `runAutoMergeSweep` (the three `void` lines) with:
 
 ```typescript
-  // Medium-confidence: persist suggestion + optionally emit event.
-  const mediumPairs = findMediumConfidenceCandidates(db);
-  for (const pair of mediumPairs) {
-    if (isSuppressed(db, pair.entity_id_a, pair.entity_id_b, nowMs)) {
-      result.suppressed_skipped += 1;
-      continue;
-    }
-    if (dryRun) {
-      logger.info({ pair }, 'auto-merge: would suggest (dry-run, medium-conf)');
-      result.medium_conf_suggested += 1;
-      continue;
-    }
+// Medium-confidence: persist suggestion + optionally emit event.
+const mediumPairs = findMediumConfidenceCandidates(db);
+for (const pair of mediumPairs) {
+  if (isSuppressed(db, pair.entity_id_a, pair.entity_id_b, nowMs)) {
+    result.suppressed_skipped += 1;
+    continue;
+  }
+  if (dryRun) {
+    logger.info({ pair }, 'auto-merge: would suggest (dry-run, medium-conf)');
+    result.medium_conf_suggested += 1;
+    continue;
+  }
 
-    const suggestionId = newId();
-    let inserted = false;
-    try {
-      const info = db
-        .prepare(
-          `INSERT OR IGNORE INTO entity_merge_suggestions
+  const suggestionId = newId();
+  let inserted = false;
+  try {
+    const info = db
+      .prepare(
+        `INSERT OR IGNORE INTO entity_merge_suggestions
              (suggestion_id, entity_id_a, entity_id_b, confidence, reason_code,
               evidence_json, suggested_at, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        )
-        .run(
-          suggestionId,
-          pair.entity_id_a,
-          pair.entity_id_b,
-          pair.confidence,
-          pair.reason_code,
-          JSON.stringify(pair.evidence),
-          nowMs,
-        );
-      inserted = info.changes === 1;
-    } catch (err) {
-      logger.warn(
-        {
-          err: err instanceof Error ? err.message : String(err),
-          pair,
-        },
-        'auto-merge: suggestion insert failed',
+      )
+      .run(
+        suggestionId,
+        pair.entity_id_a,
+        pair.entity_id_b,
+        pair.confidence,
+        pair.reason_code,
+        JSON.stringify(pair.evidence),
+        nowMs,
       );
-      continue;
-    }
-
-    if (!inserted) {
-      // UNIQUE conflict — a pending suggestion for this pair already exists.
-      // Don't re-emit the event; the operator has already been told.
-      continue;
-    }
-
-    result.medium_conf_suggested += 1;
-
-    if (notifyChat) {
-      eventBus.emit('entity.merge.suggested', {
-        type: 'entity.merge.suggested',
-        timestamp: nowMs,
-        payload: {},
-        suggestion_id: suggestionId,
-        entity_id_a: pair.entity_id_a,
-        entity_id_b: pair.entity_id_b,
-        confidence: pair.confidence,
-        reason_code: pair.reason_code,
-        evidence: pair.evidence,
-      });
-    }
+    inserted = info.changes === 1;
+  } catch (err) {
+    logger.warn(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        pair,
+      },
+      'auto-merge: suggestion insert failed',
+    );
+    continue;
   }
+
+  if (!inserted) {
+    // UNIQUE conflict — a pending suggestion for this pair already exists.
+    // Don't re-emit the event; the operator has already been told.
+    continue;
+  }
+
+  result.medium_conf_suggested += 1;
+
+  if (notifyChat) {
+    eventBus.emit('entity.merge.suggested', {
+      type: 'entity.merge.suggested',
+      timestamp: nowMs,
+      payload: {},
+      suggestion_id: suggestionId,
+      entity_id_a: pair.entity_id_a,
+      entity_id_b: pair.entity_id_b,
+      confidence: pair.confidence,
+      reason_code: pair.reason_code,
+      evidence: pair.evidence,
+    });
+  }
+}
 ```
 
 Remove the three `void` placeholder lines.
@@ -1316,6 +1388,7 @@ git commit -m "feat(brain): runAutoMergeSweep — medium-confidence path with ev
 ## Task 11: Sweep — idempotency on re-run
 
 **Files:**
+
 - Test only: `src/brain/__tests__/auto-merge.test.ts`
 
 - [ ] **Step 1: Append the failing test**
@@ -1366,6 +1439,7 @@ git commit -m "test(brain): auto-merge sweep idempotency on re-run"
 ## Task 12: Sweep — env-gate (BRAIN_MERGE_AUTO_ENABLED=false)
 
 **Files:**
+
 - Test only: `src/brain/__tests__/auto-merge.test.ts`
 
 - [ ] **Step 1: Append the failing test**
@@ -1407,6 +1481,7 @@ git commit -m "test(brain): auto-merge sweep is a no-op when disabled"
 ## Task 13: Sweep — dry-run mode
 
 **Files:**
+
 - Test only: `src/brain/__tests__/auto-merge.test.ts`
 
 - [ ] **Step 1: Append the failing test**
@@ -1428,10 +1503,18 @@ describe('runAutoMergeSweep — dry-run', () => {
     expect(result.medium_conf_suggested).toBe(1);
 
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number }).n,
+      (
+        db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as {
+          n: number;
+        }
+      ).n,
     ).toBe(0);
     expect(
-      (db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`).get() as { n: number }).n,
+      (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suggestions`)
+          .get() as { n: number }
+      ).n,
     ).toBe(0);
   });
 });
@@ -1456,88 +1539,94 @@ git commit -m "test(brain): auto-merge sweep dry-run writes nothing"
 **Why:** If the auto-merge sweep silently merged two entities and the operator subsequently runs `claw unmerge`, that's an explicit signal the auto-decision was wrong. The next sweep would re-merge the same pair under the same hard-id rule. We must write a permanent suppression so the operator's correction sticks.
 
 **Files:**
+
 - Modify: `src/brain/identity-merge-handler.ts` (inside `handleEntityUnmergeRequested`, after the successful unmerge call around line 219)
 - Test: `src/brain/__tests__/identity-merge-handler.test.ts`
 
 - [ ] **Step 1: Append the failing test**
 
 ```typescript
-  it('writes a permanent suppression when unmerging an auto:high merge', async () => {
-    const db = getBrainDb();
-    seedPerson(db, 'e-aaa', 'Alice');
-    seedPerson(db, 'e-bbb', 'Alice');
-    db.prepare(
-      `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
+it('writes a permanent suppression when unmerging an auto:high merge', async () => {
+  const db = getBrainDb();
+  seedPerson(db, 'e-aaa', 'Alice');
+  seedPerson(db, 'e-bbb', 'Alice');
+  db.prepare(
+    `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
        VALUES ('al1','e-aaa','test','email','a@a.com','2026-04-28T00:00:00Z',1.0),
               ('al2','e-bbb','test','email','a@a.com','2026-04-28T00:00:00Z',1.0)`,
-    ).run();
+  ).run();
 
-    // Simulate the auto-merge sweep merging this pair.
-    const { runAutoMergeSweep } = await import('../auto-merge.js');
-    await runAutoMergeSweep({ db, enabled: true });
-    const log = db
-      .prepare(`SELECT merge_id, merged_by FROM entity_merge_log LIMIT 1`)
-      .get() as { merge_id: string; merged_by: string };
-    expect(log.merged_by).toBe('auto:high');
+  // Simulate the auto-merge sweep merging this pair.
+  const { runAutoMergeSweep } = await import('../auto-merge.js');
+  await runAutoMergeSweep({ db, enabled: true });
+  const log = db
+    .prepare(`SELECT merge_id, merged_by FROM entity_merge_log LIMIT 1`)
+    .get() as { merge_id: string; merged_by: string };
+  expect(log.merged_by).toBe('auto:high');
 
-    // Operator unmerges it.
-    const replies: string[] = [];
-    await handleEntityUnmergeRequested(
-      {
-        type: 'entity.unmerge.requested',
-        source: 'signal',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'signal',
-        chat_id: 'c1',
-        requested_by_handle: 'op',
-        merge_id_or_prefix: log.merge_id,
-      },
-      { db, sendReply: async (t) => { replies.push(t); } },
-    );
-    expect(replies[0]).toMatch(/rolled back/i);
-
-    // Suppression must exist, permanent.
-    const supp = db
-      .prepare(
-        `SELECT suppressed_until, reason FROM entity_merge_suppressions
-          WHERE entity_id_a='e-aaa' AND entity_id_b='e-bbb'`,
-      )
-      .get() as { suppressed_until: number | null; reason: string } | undefined;
-    expect(supp).toBeDefined();
-    expect(supp!.suppressed_until).toBeNull();
-    expect(supp!.reason).toBe('unmerged_by_operator');
-  });
-
-  it('does NOT write a suppression when unmerging a human-initiated merge', async () => {
-    const db = getBrainDb();
-    seedPerson(db, 'e-aaa', 'Alice');
-    seedPerson(db, 'e-bbb', 'Alice');
-    const { mergeEntities } = await import('../identity-merge.js');
-    const merge = await mergeEntities('e-aaa', 'e-bbb', {
-      evidence: { trigger: 'manual' },
-      confidence: 1.0,
-      mergedBy: 'human:op',
+  // Operator unmerges it.
+  const replies: string[] = [];
+  await handleEntityUnmergeRequested(
+    {
+      type: 'entity.unmerge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      merge_id_or_prefix: log.merge_id,
+    },
+    {
       db,
-    });
-    await handleEntityUnmergeRequested(
-      {
-        type: 'entity.unmerge.requested',
-        source: 'signal',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'signal',
-        chat_id: 'c1',
-        requested_by_handle: 'op',
-        merge_id_or_prefix: merge.merge_id,
+      sendReply: async (t) => {
+        replies.push(t);
       },
-      { db, sendReply: async () => {} },
-    );
-    const cnt = db
-      .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
-      .get() as { n: number };
-    expect(cnt.n).toBe(0);
+    },
+  );
+  expect(replies[0]).toMatch(/rolled back/i);
+
+  // Suppression must exist, permanent.
+  const supp = db
+    .prepare(
+      `SELECT suppressed_until, reason FROM entity_merge_suppressions
+          WHERE entity_id_a='e-aaa' AND entity_id_b='e-bbb'`,
+    )
+    .get() as { suppressed_until: number | null; reason: string } | undefined;
+  expect(supp).toBeDefined();
+  expect(supp!.suppressed_until).toBeNull();
+  expect(supp!.reason).toBe('unmerged_by_operator');
+});
+
+it('does NOT write a suppression when unmerging a human-initiated merge', async () => {
+  const db = getBrainDb();
+  seedPerson(db, 'e-aaa', 'Alice');
+  seedPerson(db, 'e-bbb', 'Alice');
+  const { mergeEntities } = await import('../identity-merge.js');
+  const merge = await mergeEntities('e-aaa', 'e-bbb', {
+    evidence: { trigger: 'manual' },
+    confidence: 1.0,
+    mergedBy: 'human:op',
+    db,
   });
+  await handleEntityUnmergeRequested(
+    {
+      type: 'entity.unmerge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      merge_id_or_prefix: merge.merge_id,
+    },
+    { db, sendReply: async () => {} },
+  );
+  const cnt = db
+    .prepare(`SELECT COUNT(*) AS n FROM entity_merge_suppressions`)
+    .get() as { n: number };
+  expect(cnt.n).toBe(0);
+});
 ```
 
 - [ ] **Step 2: Run the test and watch it fail**
@@ -1550,15 +1639,15 @@ Expected: FAIL — no suppression row written.
 Inside `handleEntityUnmergeRequested`, in the `try` block, after the successful `unmergeEntities` call and before `await reply(...)` (around line 220), add:
 
 ```typescript
-    // Auto-suppress: if this merge was created by the auto-sweep, the
-    // operator's unmerge is an explicit "this rule is wrong, don't try
-    // again". Write a permanent suppression so the next sweep skips it.
-    const wasAuto = await db
-      .prepare(`SELECT merged_by FROM entity_merge_log WHERE merge_id = ?`)
-      .get(row.merge_id) as { merged_by?: string } | undefined;
-    // Note: by this point the unmerge has already DELETEd the merge_log row,
-    // so we read the merged_by BEFORE calling unmergeEntities. Move the
-    // read above the call.
+// Auto-suppress: if this merge was created by the auto-sweep, the
+// operator's unmerge is an explicit "this rule is wrong, don't try
+// again". Write a permanent suppression so the next sweep skips it.
+const wasAuto = (await db
+  .prepare(`SELECT merged_by FROM entity_merge_log WHERE merge_id = ?`)
+  .get(row.merge_id)) as { merged_by?: string } | undefined;
+// Note: by this point the unmerge has already DELETEd the merge_log row,
+// so we read the merged_by BEFORE calling unmergeEntities. Move the
+// read above the call.
 ```
 
 Wait — that comment captures a real ordering problem. Restate the edit correctly:
@@ -1626,58 +1715,71 @@ git commit -m "feat(brain): auto-suppress entity pair when operator unmerges an 
 **Why:** Task 15 formats chat suggestions as `claw merge 01KQ8X 01KQ9H` using 6-char ULID prefixes. The existing `resolveHandle` from PR 45 only matches `entity_aliases.field_value` and `canonical->>'name'` — it does not look up entities by id prefix. Without this extension, operators copy-pasting the suggested command get "handle not found". Adding entity_id-prefix lookup as a third resolution tier fixes the suggestion flow AND benefits the existing `claw merge` flow (operators can now address entities by short id directly).
 
 **Files:**
+
 - Modify: `src/brain/identity-merge-handler.ts` — extend `resolveHandle` (around line 31)
 - Test: `src/brain/__tests__/identity-merge-handler.test.ts`
 
 - [ ] **Step 1: Append the failing test**
 
 ```typescript
-  it('claw merge resolves both handles via entity_id prefix', async () => {
-    const db = getBrainDb();
-    seedPerson(db, '01KQ8X5WSYDVRM28ZA3PZCVTGH', 'Alice');
-    seedPerson(db, '01KQ9HHRDY5RYADT03SBQG07D6', 'Alice W');
-    const replies: string[] = [];
-    await handleEntityMergeRequested(
-      {
-        type: 'entity.merge.requested',
-        source: 'signal',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'signal',
-        chat_id: 'c1',
-        requested_by_handle: 'op',
-        handle_a: '01KQ8X',
-        handle_b: '01KQ9H',
+it('claw merge resolves both handles via entity_id prefix', async () => {
+  const db = getBrainDb();
+  seedPerson(db, '01KQ8X5WSYDVRM28ZA3PZCVTGH', 'Alice');
+  seedPerson(db, '01KQ9HHRDY5RYADT03SBQG07D6', 'Alice W');
+  const replies: string[] = [];
+  await handleEntityMergeRequested(
+    {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: '01KQ8X',
+      handle_b: '01KQ9H',
+    },
+    {
+      db,
+      sendReply: async (t) => {
+        replies.push(t);
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
-    );
-    expect(replies[0]).toMatch(/merged/i);
-    const log = db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get() as { n: number };
-    expect(log.n).toBe(1);
-  });
+    },
+  );
+  expect(replies[0]).toMatch(/merged/i);
+  const log = db
+    .prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`)
+    .get() as { n: number };
+  expect(log.n).toBe(1);
+});
 
-  it('refuses an ambiguous entity_id prefix', async () => {
-    const db = getBrainDb();
-    seedPerson(db, '01KQ8XAA00000000000000', 'A');
-    seedPerson(db, '01KQ8XBB00000000000000', 'B');
-    seedPerson(db, '01KQ9HHHHH000000000000', 'C');
-    const replies: string[] = [];
-    await handleEntityMergeRequested(
-      {
-        type: 'entity.merge.requested',
-        source: 'signal',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'signal',
-        chat_id: 'c1',
-        requested_by_handle: 'op',
-        handle_a: '01KQ8X',
-        handle_b: '01KQ9H',
+it('refuses an ambiguous entity_id prefix', async () => {
+  const db = getBrainDb();
+  seedPerson(db, '01KQ8XAA00000000000000', 'A');
+  seedPerson(db, '01KQ8XBB00000000000000', 'B');
+  seedPerson(db, '01KQ9HHHHH000000000000', 'C');
+  const replies: string[] = [];
+  await handleEntityMergeRequested(
+    {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: '01KQ8X',
+      handle_b: '01KQ9H',
+    },
+    {
+      db,
+      sendReply: async (t) => {
+        replies.push(t);
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
-    );
-    expect(replies[0]).toMatch(/ambiguous/i);
-  });
+    },
+  );
+  expect(replies[0]).toMatch(/ambiguous/i);
+});
 ```
 
 - [ ] **Step 2: Run the test and watch it fail**
@@ -1690,27 +1792,27 @@ Expected: FAIL — first test reports "not found" because `resolveHandle` does n
 Inside `resolveHandle` (around line 31), after the `nameHits` block and before the dedup loop, add a third tier:
 
 ```typescript
-  // 3. Entity-id prefix match (used by chat-suggestion replies, where the
-  //    operator copy-pastes a short ULID prefix). Bounded to <=5 hits to
-  //    prevent runaway results when an operator types a very short prefix.
-  const prefixHits = db
-    .prepare(
-      `SELECT entity_id FROM entities
+// 3. Entity-id prefix match (used by chat-suggestion replies, where the
+//    operator copy-pastes a short ULID prefix). Bounded to <=5 hits to
+//    prevent runaway results when an operator types a very short prefix.
+const prefixHits = db
+  .prepare(
+    `SELECT entity_id FROM entities
         WHERE entity_id LIKE ? || '%'
         LIMIT 5`,
-    )
-    .all(handle.trim()) as Array<{ entity_id: string }>;
+  )
+  .all(handle.trim()) as Array<{ entity_id: string }>;
 ```
 
 Then in the existing dedup loop, add a third loop after the `nameHits` loop:
 
 ```typescript
-  for (const r of prefixHits) {
-    if (!seen.has(r.entity_id)) {
-      out.push({ entity_id: r.entity_id, reason: 'id_prefix' });
-      seen.add(r.entity_id);
-    }
+for (const r of prefixHits) {
+  if (!seen.has(r.entity_id)) {
+    out.push({ entity_id: r.entity_id, reason: 'id_prefix' });
+    seen.add(r.entity_id);
   }
+}
 ```
 
 Update the `ResolvedCandidate` type (around line 20):
@@ -1744,6 +1846,7 @@ git commit -m "feat(brain): resolveHandle accepts entity_id prefixes"
 ## Task 15: `entity.merge.suggested` chat formatter
 
 **Files:**
+
 - Modify: `src/brain/identity-merge-handler.ts` (add a new exported handler + bus subscription)
 - Test: `src/brain/__tests__/identity-merge-handler.test.ts`
 
@@ -1780,13 +1883,18 @@ describe('handleEntityMergeSuggested', () => {
           canonical_b: { name: 'Jonathan', signal_profile_name: 'Jonathan' },
         },
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
 
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatch(/Possible duplicate/i);
-    expect(replies[0]).toContain('e-aaaa');     // abbreviated id A
-    expect(replies[0]).toContain('e-bbbb');     // abbreviated id B
+    expect(replies[0]).toContain('e-aaaa'); // abbreviated id A
+    expect(replies[0]).toContain('e-bbbb'); // abbreviated id B
     expect(replies[0]).toContain('Jonathan');
     expect(replies[0]).toContain('claw merge ');
     expect(replies[0]).toContain('claw merge-reject ');
@@ -1826,8 +1934,10 @@ export async function handleEntityMergeSuggested(
   const reply = opts.sendReply ?? (async () => {});
   const a6 = evt.entity_id_a.slice(0, 6);
   const b6 = evt.entity_id_b.slice(0, 6);
-  const nameA = (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
-  const nameB = (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
+  const nameA =
+    (evt.evidence.canonical_a?.name as string | undefined) ?? '(unnamed)';
+  const nameB =
+    (evt.evidence.canonical_b?.name as string | undefined) ?? '(unnamed)';
   // Build a one-line "evidence tail" per side: pick the first non-name
   // canonical field for context. Falls back to empty.
   const tail = (canon: Record<string, unknown>): string => {
@@ -1870,35 +1980,35 @@ Then inside the `if (unsubMerge || unsubUnmerge) return;` guard, change the cond
 Then append:
 
 ```typescript
-  unsubSuggested = eventBus.on('entity.merge.suggested', async (evt) => {
-    try {
-      const reply: ((text: string) => Promise<void>) | undefined =
-        opts.sendReply ??
-        (channelReply
-          // Suggestions go to the main group's channel — they're not tied
+unsubSuggested = eventBus.on('entity.merge.suggested', async (evt) => {
+  try {
+    const reply: ((text: string) => Promise<void>) | undefined =
+      opts.sendReply ??
+      (channelReply
+        ? // Suggestions go to the main group's channel — they're not tied
           // to any specific chat_id. The channelReply signature requires
           // chat_id + platform; we use the literals 'main' / 'signal' as
           // a sentinel that the channel layer interprets as "default to
           // the main group". Index.ts wires this when registering.
-          ? (text: string) => channelReply!('main', 'signal', text)
-          : undefined);
-      await handleEntityMergeSuggested(evt, { sendReply: reply });
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), evt },
-        'identity-merge-handler: suggestion handler error',
-      );
-    }
-  });
+          (text: string) => channelReply!('main', 'signal', text)
+        : undefined);
+    await handleEntityMergeSuggested(evt, { sendReply: reply });
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), evt },
+      'identity-merge-handler: suggestion handler error',
+    );
+  }
+});
 ```
 
 Update `stopIdentityMergeHandler` to also clear `unsubSuggested`:
 
 ```typescript
-  if (unsubSuggested) {
-    unsubSuggested();
-    unsubSuggested = null;
-  }
+if (unsubSuggested) {
+  unsubSuggested();
+  unsubSuggested = null;
+}
 ```
 
 - [ ] **Step 6: Run the full handler test file**
@@ -1920,6 +2030,7 @@ git commit -m "feat(brain): handler + chat formatter for entity.merge.suggested"
 **CRITICAL: insert this block BEFORE the existing `claw merge` block** to avoid the regex collision noted at the top of this plan.
 
 **Files:**
+
 - Modify: `src/channels/signal.ts` (around line 330, before the existing `mergeMatch` block)
 - Test: `src/channels/signal.test.ts` (add a new case alongside the existing `claw merge` parser test)
 
@@ -1928,40 +2039,40 @@ git commit -m "feat(brain): handler + chat formatter for entity.merge.suggested"
 In `src/channels/signal.test.ts`, immediately after the existing `claw merge text emits entity.merge.requested with parsed handles` test (around line 795–824), add:
 
 ```typescript
-  it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
-    const opts = createInboundTestOpts();
-    const env = make1to1Envelope({
-      dataMessage: {
-        timestamp: 1700000000000,
-        message: 'claw merge-reject e-aaaaaa e-bbbbbb',
-        expiresInSeconds: 0,
-        viewOnce: false,
-      },
-    });
-    mockPollResponse(env);
-    const channel = new SignalChannel(API_URL, PHONE, opts);
-    await connectAndPoll(channel);
-
-    const rejectEmits = mockEventBusEmit.mock.calls.filter(
-      (c) => c[0] === 'entity.merge.reject.requested',
-    );
-    expect(rejectEmits).toHaveLength(1);
-    expect(rejectEmits[0][1]).toMatchObject({
-      type: 'entity.merge.reject.requested',
-      platform: 'signal',
-      handle_a: 'e-aaaaaa',
-      handle_b: 'e-bbbbbb',
-    });
-
-    // Critical: must NOT also emit entity.merge.requested. The existing
-    // `claw merge` regex would otherwise capture this body via \b matching.
-    const mergeEmits = mockEventBusEmit.mock.calls.filter(
-      (c) => c[0] === 'entity.merge.requested',
-    );
-    expect(mergeEmits).toHaveLength(0);
-
-    await channel.disconnect();
+it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
+  const opts = createInboundTestOpts();
+  const env = make1to1Envelope({
+    dataMessage: {
+      timestamp: 1700000000000,
+      message: 'claw merge-reject e-aaaaaa e-bbbbbb',
+      expiresInSeconds: 0,
+      viewOnce: false,
+    },
   });
+  mockPollResponse(env);
+  const channel = new SignalChannel(API_URL, PHONE, opts);
+  await connectAndPoll(channel);
+
+  const rejectEmits = mockEventBusEmit.mock.calls.filter(
+    (c) => c[0] === 'entity.merge.reject.requested',
+  );
+  expect(rejectEmits).toHaveLength(1);
+  expect(rejectEmits[0][1]).toMatchObject({
+    type: 'entity.merge.reject.requested',
+    platform: 'signal',
+    handle_a: 'e-aaaaaa',
+    handle_b: 'e-bbbbbb',
+  });
+
+  // Critical: must NOT also emit entity.merge.requested. The existing
+  // `claw merge` regex would otherwise capture this body via \b matching.
+  const mergeEmits = mockEventBusEmit.mock.calls.filter(
+    (c) => c[0] === 'entity.merge.requested',
+  );
+  expect(mergeEmits).toHaveLength(0);
+
+  await channel.disconnect();
+});
 ```
 
 - [ ] **Step 2: Run the test and watch it fail**
@@ -1983,33 +2094,33 @@ import type {
 Find the existing `// 4b. \`claw merge <a> <b>\` text trigger` block (around line 330). **Insert a new block immediately before it:**
 
 ```typescript
-    // 4a-bis. `claw merge-reject <a> <b>` text trigger — operator-issued
-    // suppression of a suggested merge. MUST come before the `claw merge`
-    // matcher because `\b` would otherwise let `claw merge-reject ...`
-    // fall into the merge handler.
-    const rejectMatch = body.match(/^claw\s+merge-reject\b\s*(.+)$/i);
-    if (rejectMatch) {
-      const args = parseMergeArgs(rejectMatch[1].trim());
-      if (args.length === 2) {
-        eventBus.emit('entity.merge.reject.requested', {
-          type: 'entity.merge.reject.requested',
-          source: 'signal',
-          timestamp: Date.now(),
-          payload: {},
-          platform: 'signal',
-          chat_id: chatId,
-          requested_by_handle: envelope.sourceName ?? sourceJid,
-          handle_a: args[0],
-          handle_b: args[1],
-        } satisfies EntityMergeRejectRequestedEvent);
-      } else {
-        logger.warn(
-          { body, parsed: args },
-          'signal: claw merge-reject needs exactly two handles — ignoring',
-        );
-      }
-      return;
-    }
+// 4a-bis. `claw merge-reject <a> <b>` text trigger — operator-issued
+// suppression of a suggested merge. MUST come before the `claw merge`
+// matcher because `\b` would otherwise let `claw merge-reject ...`
+// fall into the merge handler.
+const rejectMatch = body.match(/^claw\s+merge-reject\b\s*(.+)$/i);
+if (rejectMatch) {
+  const args = parseMergeArgs(rejectMatch[1].trim());
+  if (args.length === 2) {
+    eventBus.emit('entity.merge.reject.requested', {
+      type: 'entity.merge.reject.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: chatId,
+      requested_by_handle: envelope.sourceName ?? sourceJid,
+      handle_a: args[0],
+      handle_b: args[1],
+    } satisfies EntityMergeRejectRequestedEvent);
+  } else {
+    logger.warn(
+      { body, parsed: args },
+      'signal: claw merge-reject needs exactly two handles — ignoring',
+    );
+  }
+  return;
+}
 ```
 
 - [ ] **Step 4: Run the test and watch it pass**
@@ -2034,6 +2145,7 @@ git commit -m "feat(signal): claw merge-reject trigger emits entity.merge.reject
 ## Task 16b: Discord channel — `claw merge-reject` trigger
 
 **Files:**
+
 - Modify: `src/channels/discord.ts` (around line 65, before the existing `mergeMatch` block)
 - Test: `src/channels/discord.test.ts`
 
@@ -2042,33 +2154,33 @@ git commit -m "feat(signal): claw merge-reject trigger emits entity.merge.reject
 In `src/channels/discord.test.ts`, inside the existing `describe('MessageCreate claw merge text trigger', ...)` block (around line 1175), append:
 
 ```typescript
-    it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
+it('claw merge-reject emits entity.merge.reject.requested and NOT entity.merge.requested', async () => {
+  const opts = createTestOpts();
+  const channel = new DiscordChannel('test-token', opts);
+  await channel.connect();
 
-      const msg = createMessage({
-        messageId: 'msg_reject',
-        content: 'claw merge-reject e-aaaaaa e-bbbbbb',
-      });
-      await triggerMessage(msg);
+  const msg = createMessage({
+    messageId: 'msg_reject',
+    content: 'claw merge-reject e-aaaaaa e-bbbbbb',
+  });
+  await triggerMessage(msg);
 
-      const rejectEmits = mockEventBusEmit.mock.calls.filter(
-        (c) => c[0] === 'entity.merge.reject.requested',
-      );
-      expect(rejectEmits).toHaveLength(1);
-      expect(rejectEmits[0][1]).toMatchObject({
-        type: 'entity.merge.reject.requested',
-        platform: 'discord',
-        handle_a: 'e-aaaaaa',
-        handle_b: 'e-bbbbbb',
-      });
+  const rejectEmits = mockEventBusEmit.mock.calls.filter(
+    (c) => c[0] === 'entity.merge.reject.requested',
+  );
+  expect(rejectEmits).toHaveLength(1);
+  expect(rejectEmits[0][1]).toMatchObject({
+    type: 'entity.merge.reject.requested',
+    platform: 'discord',
+    handle_a: 'e-aaaaaa',
+    handle_b: 'e-bbbbbb',
+  });
 
-      const mergeEmits = mockEventBusEmit.mock.calls.filter(
-        (c) => c[0] === 'entity.merge.requested',
-      );
-      expect(mergeEmits).toHaveLength(0);
-    });
+  const mergeEmits = mockEventBusEmit.mock.calls.filter(
+    (c) => c[0] === 'entity.merge.requested',
+  );
+  expect(mergeEmits).toHaveLength(0);
+});
 ```
 
 - [ ] **Step 2: Run the test and watch it fail**
@@ -2083,35 +2195,33 @@ Add `EntityMergeRejectRequestedEvent` to the events-import block.
 Find the `// \`claw merge <a> <b>\` text trigger` block (around line 64). **Insert a new block immediately before it:**
 
 ```typescript
-      // `claw merge-reject <a> <b>` text trigger. MUST come before the
-      // `claw merge` matcher because `\b` would otherwise let
-      // `claw merge-reject ...` fall into the merge handler.
-      const rejectMatch = rawContent.match(/^claw\s+merge-reject\b\s*(.+)$/i);
-      if (rejectMatch) {
-        const args = parseMergeArgs(rejectMatch[1].trim());
-        if (args.length === 2) {
-          eventBus.emit('entity.merge.reject.requested', {
-            type: 'entity.merge.reject.requested',
-            source: 'discord',
-            timestamp: Date.now(),
-            payload: {},
-            platform: 'discord',
-            chat_id: message.channelId,
-            requested_by_handle:
-              message.member?.displayName ??
-              message.author?.username ??
-              'unknown',
-            handle_a: args[0],
-            handle_b: args[1],
-          } satisfies EntityMergeRejectRequestedEvent);
-        } else {
-          logger.warn(
-            { content: rawContent, parsed: args },
-            'discord: claw merge-reject needs exactly two handles — ignoring',
-          );
-        }
-        return;
-      }
+// `claw merge-reject <a> <b>` text trigger. MUST come before the
+// `claw merge` matcher because `\b` would otherwise let
+// `claw merge-reject ...` fall into the merge handler.
+const rejectMatch = rawContent.match(/^claw\s+merge-reject\b\s*(.+)$/i);
+if (rejectMatch) {
+  const args = parseMergeArgs(rejectMatch[1].trim());
+  if (args.length === 2) {
+    eventBus.emit('entity.merge.reject.requested', {
+      type: 'entity.merge.reject.requested',
+      source: 'discord',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'discord',
+      chat_id: message.channelId,
+      requested_by_handle:
+        message.member?.displayName ?? message.author?.username ?? 'unknown',
+      handle_a: args[0],
+      handle_b: args[1],
+    } satisfies EntityMergeRejectRequestedEvent);
+  } else {
+    logger.warn(
+      { content: rawContent, parsed: args },
+      'discord: claw merge-reject needs exactly two handles — ignoring',
+    );
+  }
+  return;
+}
 ```
 
 - [ ] **Step 4: Run the test and watch it pass**
@@ -2136,6 +2246,7 @@ git commit -m "feat(discord): claw merge-reject trigger emits entity.merge.rejec
 ## Task 17: `claw merge-reject` brain handler
 
 **Files:**
+
 - Modify: `src/brain/identity-merge-handler.ts` (new exported handler + bus subscription)
 - Test: `src/brain/__tests__/identity-merge-handler.test.ts`
 
@@ -2169,7 +2280,12 @@ describe('handleEntityMergeRejectRequested', () => {
         handle_a: 'e-aaaaaa',
         handle_b: 'e-bbbbbb',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
 
     expect(replies[0]).toMatch(/suppressed/i);
@@ -2183,7 +2299,9 @@ describe('handleEntityMergeRejectRequested', () => {
     expect(supp.reason).toBe('operator_rejected');
 
     const sugg = db
-      .prepare(`SELECT status FROM entity_merge_suggestions WHERE suggestion_id='s1'`)
+      .prepare(
+        `SELECT status FROM entity_merge_suggestions WHERE suggestion_id='s1'`,
+      )
       .get() as { status: string };
     expect(sugg.status).toBe('rejected');
   });
@@ -2228,7 +2346,12 @@ describe('handleEntityMergeRejectRequested', () => {
         handle_a: 'e-aaaaaa',
         handle_b: 'nonexistent',
       },
-      { db, sendReply: async (t) => { replies.push(t); } },
+      {
+        db,
+        sendReply: async (t) => {
+          replies.push(t);
+        },
+      },
     );
     expect(replies[0]).toMatch(/not found/i);
     const cnt = db
@@ -2292,7 +2415,9 @@ export async function handleEntityMergeRejectRequested(
   const aId = candA[0].entity_id;
   const bId = candB[0].entity_id;
   if (aId === bId) {
-    await reply(`claw merge-reject: '${evt.handle_a}' and '${evt.handle_b}' resolve to the same entity`);
+    await reply(
+      `claw merge-reject: '${evt.handle_a}' and '${evt.handle_b}' resolve to the same entity`,
+    );
     return;
   }
   const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
@@ -2326,21 +2451,21 @@ Update the early-return guard in `startIdentityMergeHandler` to include `unsubRe
 Inside `startIdentityMergeHandler`, after the `unsubSuggested` subscription, append:
 
 ```typescript
-  unsubReject = eventBus.on('entity.merge.reject.requested', async (evt) => {
-    try {
-      const reply: ((text: string) => Promise<void>) | undefined =
-        opts.sendReply ??
-        (channelReply
-          ? (text: string) => channelReply!(evt.chat_id, evt.platform, text)
-          : undefined);
-      await handleEntityMergeRejectRequested(evt, { sendReply: reply });
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), evt },
-        'identity-merge-handler: reject handler error',
-      );
-    }
-  });
+unsubReject = eventBus.on('entity.merge.reject.requested', async (evt) => {
+  try {
+    const reply: ((text: string) => Promise<void>) | undefined =
+      opts.sendReply ??
+      (channelReply
+        ? (text: string) => channelReply!(evt.chat_id, evt.platform, text)
+        : undefined);
+    await handleEntityMergeRejectRequested(evt, { sendReply: reply });
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), evt },
+      'identity-merge-handler: reject handler error',
+    );
+  }
+});
 ```
 
 Update `stopIdentityMergeHandler` to clear `unsubReject` similarly.
@@ -2362,6 +2487,7 @@ git commit -m "feat(brain): handler for claw merge-reject — writes suppression
 ## Task 18: `startAutoMergeSchedule` — daily cron via setInterval
 
 **Files:**
+
 - Modify: `src/brain/auto-merge.ts`
 - Test: `src/brain/__tests__/auto-merge.test.ts`
 
@@ -2377,16 +2503,18 @@ describe('startAutoMergeSchedule', () => {
     const stop = startAutoMergeSchedule({
       intervalMs: 1000,
       runOnStart: true,
-      run: async () => { calls.push(Date.now()); },
+      run: async () => {
+        calls.push(Date.now());
+      },
     });
-    expect(calls).toHaveLength(1);   // runOnStart fired
+    expect(calls).toHaveLength(1); // runOnStart fired
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toHaveLength(3);
     stop();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toHaveLength(3);   // stopped
+    expect(calls).toHaveLength(3); // stopped
     vi.useRealTimers();
   });
 
@@ -2396,7 +2524,9 @@ describe('startAutoMergeSchedule', () => {
     const stop = startAutoMergeSchedule({
       intervalMs: 1000,
       runOnStart: false,
-      run: async () => { calls.push(Date.now()); },
+      run: async () => {
+        calls.push(Date.now());
+      },
     });
     expect(calls).toHaveLength(0);
     stop();
@@ -2413,12 +2543,12 @@ Expected: FAIL — `startAutoMergeSchedule is not exported`.
 - [ ] **Step 3: Append to `src/brain/auto-merge.ts`**
 
 ```typescript
-const DEFAULT_AUTO_MERGE_INTERVAL_MS = 24 * 60 * 60 * 1000;   // 24h
+const DEFAULT_AUTO_MERGE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface AutoMergeScheduleOpts {
   intervalMs?: number;
-  runOnStart?: boolean;        // default: true (so first deploy doesn't wait 24h)
-  run?: () => Promise<unknown>;  // injected for tests; default: runAutoMergeSweep()
+  runOnStart?: boolean; // default: true (so first deploy doesn't wait 24h)
+  run?: () => Promise<unknown>; // injected for tests; default: runAutoMergeSweep()
 }
 
 /**
@@ -2462,6 +2592,7 @@ git commit -m "feat(brain): startAutoMergeSchedule — daily sweep with stop fun
 ## Task 19: Wire the schedule into `src/index.ts`
 
 **Files:**
+
 - Modify: `src/index.ts` (alongside the other `start*Schedule` calls around line 1390–1424)
 
 - [ ] **Step 1: Edit `src/index.ts` — add the import**
@@ -2477,17 +2608,17 @@ import { startAutoMergeSchedule } from './brain/auto-merge.js';
 Find `const stopReflectionSched = startReflectionSchedule();` (around line 1424). Add directly after it:
 
 ```typescript
-  // Brain auto-merge — nightly sweep over the entities table to detect
-  // duplicate persons. Gated by BRAIN_MERGE_AUTO_ENABLED (default off).
-  // Initial run on startup so a freshly-deployed env-var change is picked
-  // up without waiting 24h.
-  const stopAutoMergeSched = startAutoMergeSchedule();
+// Brain auto-merge — nightly sweep over the entities table to detect
+// duplicate persons. Gated by BRAIN_MERGE_AUTO_ENABLED (default off).
+// Initial run on startup so a freshly-deployed env-var change is picked
+// up without waiting 24h.
+const stopAutoMergeSched = startAutoMergeSchedule();
 ```
 
 Find the corresponding shutdown sequence (search for `stopReflectionSched(` — it should appear in a graceful shutdown handler). Add directly after it:
 
 ```typescript
-  stopAutoMergeSched();
+stopAutoMergeSched();
 ```
 
 - [ ] **Step 3: Verify it compiles**
@@ -2512,6 +2643,7 @@ git commit -m "feat(index): wire auto-merge nightly schedule"
 ## Task 20: `.env.example` updates
 
 **Files:**
+
 - Modify: `.env.example`
 
 - [ ] **Step 1: Read the current `.env.example` to find the brain section**
@@ -2588,36 +2720,37 @@ git status   # confirm clean working tree
 
 **1. Spec coverage check:**
 
-| Spec section | Task |
-| ------------ | ---- |
-| Architecture diagram (sweep + handler + claw merge-reject) | 9, 10, 15, 17 |
-| Confidence tiers — HIGH | 5 (classifier), 9 (sweep) |
-| Confidence tiers — MEDIUM | 6 (classifier), 10 (sweep) |
-| Confidence tiers — LOW | (deferred per spec — no task; sweep does not call low-tier) |
-| Hard-identifier list | 5 (`HARD_IDENTIFIER_FIELDS` constant) |
-| "Conflicting hard identifier" short-circuit | 6 (`hasConflictingIdentifier`) |
-| Schema: `entity_merge_suggestions` | 1 |
-| Schema: `entity_merge_suppressions` | 1 |
-| Lex-ordering invariant | 3 (helper), 8/14/15/17 (call sites) |
-| Entity-id prefix resolution for chat suggestions | 14b |
-| `entity.merge.suggested` event | 2 (type), 10 (emit), 15 (handle) |
-| `claw merge-reject` channel parsing | 16a (Signal), 16b (Discord) |
-| `claw merge-reject` brain handler | 17 |
-| `mergeEntities()` lifecycle hook | 8 |
-| Auto-suppression on unmerge of `auto:high` | 14 |
-| Env vars (5 in, 1 out) | 20 |
-| Dry-run mode | 9, 10 (impl), 13 (test) |
-| Idempotency on re-run | 11 |
-| Backfill via first sweep | (no dedicated task — first run IS the backfill, by design) |
-| Metrics (counters + duration) | 9, 10 (returned in `AutoMergeSweepResult`); detailed metrics-module wiring deferred to a follow-up |
-| Testing layers (1) classifier (2) sweep (3) handler | 5/6/7 (1), 9/10/11/12/13 (2), 15/17 (3) |
-| Schedule (`startAutoMergeSchedule`) | 18, 19 (wire) |
+| Spec section                                               | Task                                                                                               |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Architecture diagram (sweep + handler + claw merge-reject) | 9, 10, 15, 17                                                                                      |
+| Confidence tiers — HIGH                                    | 5 (classifier), 9 (sweep)                                                                          |
+| Confidence tiers — MEDIUM                                  | 6 (classifier), 10 (sweep)                                                                         |
+| Confidence tiers — LOW                                     | (deferred per spec — no task; sweep does not call low-tier)                                        |
+| Hard-identifier list                                       | 5 (`HARD_IDENTIFIER_FIELDS` constant)                                                              |
+| "Conflicting hard identifier" short-circuit                | 6 (`hasConflictingIdentifier`)                                                                     |
+| Schema: `entity_merge_suggestions`                         | 1                                                                                                  |
+| Schema: `entity_merge_suppressions`                        | 1                                                                                                  |
+| Lex-ordering invariant                                     | 3 (helper), 8/14/15/17 (call sites)                                                                |
+| Entity-id prefix resolution for chat suggestions           | 14b                                                                                                |
+| `entity.merge.suggested` event                             | 2 (type), 10 (emit), 15 (handle)                                                                   |
+| `claw merge-reject` channel parsing                        | 16a (Signal), 16b (Discord)                                                                        |
+| `claw merge-reject` brain handler                          | 17                                                                                                 |
+| `mergeEntities()` lifecycle hook                           | 8                                                                                                  |
+| Auto-suppression on unmerge of `auto:high`                 | 14                                                                                                 |
+| Env vars (5 in, 1 out)                                     | 20                                                                                                 |
+| Dry-run mode                                               | 9, 10 (impl), 13 (test)                                                                            |
+| Idempotency on re-run                                      | 11                                                                                                 |
+| Backfill via first sweep                                   | (no dedicated task — first run IS the backfill, by design)                                         |
+| Metrics (counters + duration)                              | 9, 10 (returned in `AutoMergeSweepResult`); detailed metrics-module wiring deferred to a follow-up |
+| Testing layers (1) classifier (2) sweep (3) handler        | 5/6/7 (1), 9/10/11/12/13 (2), 15/17 (3)                                                            |
+| Schedule (`startAutoMergeSchedule`)                        | 18, 19 (wire)                                                                                      |
 
 Missing: a dedicated metrics-module task (the spec lists six counters/histograms). The sweep does report counts in its return value, which is sufficient for v1; the spec's metrics integration can be picked up in a small follow-up after this lands. Adding it as a v1 task would expand scope without functional benefit. **Decision: defer to follow-up; not in this plan.**
 
 **2. Placeholder scan:** None of the No-Placeholder patterns appear. Every code step shows the actual code. The "Similar to Task N" pattern is avoided.
 
 **3. Type consistency:**
+
 - `lexOrdered` returns `[string, string]` — used identically in Tasks 6, 7, 8, 14, 17.
 - `HighConfidencePair.fields_matched: string[]` — same shape used in test assertions.
 - `MediumConfidencePair.evidence` shape matches `EntityMergeSuggestedEvent.evidence` shape in `src/events.ts`.
@@ -2625,6 +2758,7 @@ Missing: a dedicated metrics-module task (the spec lists six counters/histograms
 - `AutoMergeSweepResult` field names (`high_conf_merged`, `medium_conf_suggested`, `suppressed_skipped`) — used identically in tests.
 
 **4. Ambiguity check:**
+
 - Trigger ordering between `claw merge-reject` and `claw merge` is called out at the top of the plan AND in the in-task comment AND tested in 16a/16b.
 - Lex-ordering applies to BOTH new tables, called out in Task 1 schema comments and enforced in helper.
 - Suppression filter applies to BOTH high- and medium-tier candidates — encoded in Task 9's loop and Task 10's loop separately. Test in Task 9 covers the high-tier case explicitly.

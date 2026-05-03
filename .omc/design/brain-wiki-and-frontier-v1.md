@@ -24,29 +24,29 @@ This doc captures the consolidation plan, ranks adoptions by impact-vs-effort, a
 
 Three layers:
 
-| Layer | Role |
-|---|---|
-| `raw/` | Immutable source captures. LLM reads, never modifies. |
-| `wiki/` | LLM-synthesized cross-linked Markdown — the *compiled* knowledge. |
-| `CLAUDE.md` schema | Operating manual that constrains the LLM as a "disciplined wiki maintainer". |
-| `index.md` + `log.md` | Cheap deterministic context for cold-start sessions. |
-| `/ingest`, `/query`, `/lint` | Three operations. |
+| Layer                        | Role                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `raw/`                       | Immutable source captures. LLM reads, never modifies.                        |
+| `wiki/`                      | LLM-synthesized cross-linked Markdown — the _compiled_ knowledge.            |
+| `CLAUDE.md` schema           | Operating manual that constrains the LLM as a "disciplined wiki maintainer". |
+| `index.md` + `log.md`        | Cheap deterministic context for cold-start sessions.                         |
+| `/ingest`, `/query`, `/lint` | Three operations.                                                            |
 
 Karpathy's framing: **knowledge compilation, not retrieval**. Obsidian = IDE, LLM = programmer, wiki = codebase.
 
-We already have an `add-karpathy-llm-wiki` *NanoClaw* skill (instruction-only, per-group). It is a parallel system to `src/brain/`. **They have not been merged.** This doc is the merger.
+We already have an `add-karpathy-llm-wiki` _NanoClaw_ skill (instruction-only, per-group). It is a parallel system to `src/brain/`. **They have not been merged.** This doc is the merger.
 
 ### Input B — Frontier deep research (2025–2026 PKM)
 
 Top-5 patterns from frontier systems (Letta/MemGPT, Zep Graphiti, Mem0, LangMem, Cognee, A-MEM, Karpathy LLM Wiki, Granola, Reflect, Heptabase, Reor, Khoj, AnythingLLM, RAGFlow), ranked by impact / effort:
 
-| # | Pattern | Source | Impact | Effort | Adopt? |
-|---|---|---|---|---|---|
-| 1 | Active context paging via tool-calling | Letta/MemGPT | High | Medium | **v2 — design later** |
-| 2 | Async knowledge compilation | Karpathy LLM Wiki | High | High | **v1 — wiki projection layer** |
-| 3 | Procedural memory (LLM-written rules) | LangMem / A-MEM | Medium | Low | **v1 — `procedural_memory` table** |
-| 4 | Bi-temporal graph traversal (edge-embedded) | Zep Graphiti | High | High | **deferred — re-evaluate when entity-relationship queries become a need** |
-| 5 | Ephemeral OS-level ingestion | Granola / Limitless | Medium | High | **deferred — covered by Granola separately if/when** |
+| #   | Pattern                                     | Source              | Impact | Effort | Adopt?                                                                    |
+| --- | ------------------------------------------- | ------------------- | ------ | ------ | ------------------------------------------------------------------------- |
+| 1   | Active context paging via tool-calling      | Letta/MemGPT        | High   | Medium | **v2 — design later**                                                     |
+| 2   | Async knowledge compilation                 | Karpathy LLM Wiki   | High   | High   | **v1 — wiki projection layer**                                            |
+| 3   | Procedural memory (LLM-written rules)       | LangMem / A-MEM     | Medium | Low    | **v1 — `procedural_memory` table**                                        |
+| 4   | Bi-temporal graph traversal (edge-embedded) | Zep Graphiti        | High   | High   | **deferred — re-evaluate when entity-relationship queries become a need** |
+| 5   | Ephemeral OS-level ingestion                | Granola / Limitless | Medium | High   | **deferred — covered by Granola separately if/when**                      |
 
 Anti-patterns to avoid (all confirmed by both research passes):
 
@@ -59,18 +59,18 @@ Anti-patterns to avoid (all confirmed by both research passes):
 
 ### v1 scope (this design doc)
 
-1. **Source-citation enrichment on `/recall`** *(landing now — see "v1 down payment" below)*
+1. **Source-citation enrichment on `/recall`** _(landing now — see "v1 down payment" below)_
    - For every email hit, render `[<subject> · <date>](<gmail-url>)` instead of bare `_thread:_ <id>`.
    - Trust signal at the lowest cost — pulls subject from `raw_events.payload` (already on disk), reuses the alias-resolver pattern from the mini-app.
-2. **Wiki projection layer** *(separate PR — design pinned here)*
+2. **Wiki projection layer** _(separate PR — design pinned here)_
    - Per-entity Markdown pages under `groups/<group>/wiki/{Person|Company|Project|Topic}/<slug>.md`.
    - **Deterministic projection**, not free-form LLM writing. Body sections rendered from KU rows joined on `ku_entities`. LLM is allowed to write the human-prose summary at the top, capped at 4 sentences and regenerated only when the underlying KU set changes meaningfully (digest-trigger, not on every insert).
    - `wiki/index.md` + `wiki/log.md` auto-maintained from `system_state` + recent `knowledge_units`.
    - Reuses existing entity_id ULIDs as page slugs to keep the wiki and brain.db in lockstep — avoids the Mem0 "split-brain drift" anti-pattern.
-3. **`/wikilint` command** *(separate PR — design pinned here)*
+3. **`/wikilint` command** _(separate PR — design pinned here)_
    - Surface: duplicate KUs (high text similarity, same entity, overlapping `valid_*`), temporal contradictions (same predicate-object, contradictory facts, overlapping windows), orphan entities (<2 KUs), wiki pages whose backing KU set is empty.
    - Output: report only. No autonomous CRUD. Suggests merges; user confirms.
-4. **Brain reflection extending the existing `learned_rules` store** *(separate PR — design pinned here)*
+4. **Brain reflection extending the existing `learned_rules` store** _(separate PR — design pinned here)_
    - **Revised from initial draft.** A standalone `procedural_memory` table in `brain.db` would have been a parallel rule store next to the existing `src/learning/rules-engine.ts` (table `learned_rules` in `messages.db`) — the deep research's #1 anti-pattern (split-brain). Reuse the existing store instead.
    - **Schema migration** (idempotent ALTER on `learned_rules`):
      - `supersedes_id TEXT` — points to the rule this one replaces (NULL = original).
@@ -83,12 +83,12 @@ Anti-patterns to avoid (all confirmed by both research passes):
 
 ### Deferred (with re-eval triggers)
 
-| Feature | Trigger to reconsider |
-|---|---|
-| Letta-style tool-calling memory ops (`core_memory_append`, `archival_memory_search`) | When agent turns regularly need to *write* to brain mid-conversation, not just read. Today the brain ingests from email; the agent reads. |
-| Zep Graphiti edge-embedded bi-temporal graph | When `/recall` queries regularly require multi-hop reasoning ("who did I work with before X happened") and current `valid_from/until` filtering is empirically insufficient on the golden set. |
-| Granola/Limitless ambient capture | When meeting transcripts become a regular ingest source. Separate Granola integration likely owns this if it happens. |
-| Procedural memory → automatic prompt injection at agent turn | After `procedural_memory` table has been observed for 30 days and rules look stable. v1 starts read-only / digest-surfaced. |
+| Feature                                                                              | Trigger to reconsider                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Letta-style tool-calling memory ops (`core_memory_append`, `archival_memory_search`) | When agent turns regularly need to _write_ to brain mid-conversation, not just read. Today the brain ingests from email; the agent reads.                                                      |
+| Zep Graphiti edge-embedded bi-temporal graph                                         | When `/recall` queries regularly require multi-hop reasoning ("who did I work with before X happened") and current `valid_from/until` filtering is empirically insufficient on the golden set. |
+| Granola/Limitless ambient capture                                                    | When meeting transcripts become a regular ingest source. Separate Granola integration likely owns this if it happens.                                                                          |
+| Procedural memory → automatic prompt injection at agent turn                         | After `procedural_memory` table has been observed for 30 days and rules look stable. v1 starts read-only / digest-surfaced.                                                                    |
 
 ## Wiki projection layer — design
 
@@ -113,7 +113,7 @@ ULID slugs (not human-readable handles) avoid rename churn. Human handles live i
 ---
 entity_id: 01H...
 entity_type: person
-canonical: { name: "Alice Smith", email: "alice@…" }
+canonical: { name: 'Alice Smith', email: 'alice@…' }
 ku_count: 23
 last_synthesis_at: 2026-04-27T09:00:00Z
 synthesis_revision: 4
@@ -125,16 +125,19 @@ synthesis_revision: 4
 
 ## Facts
 
-- **<topic_key>** — <ku.text>  ([source](gmail-url) · 2026-04-12)
-- **<topic_key>** — <ku.text>  ([source](gmail-url) · 2026-04-19)
+- **<topic_key>** — <ku.text> ([source](gmail-url) · 2026-04-12)
+- **<topic_key>** — <ku.text> ([source](gmail-url) · 2026-04-19)
 
 ## Aliases
+
 …
 
 ## Relationships
+
 …
 
 ## Recent activity
+
 …
 ```
 
@@ -194,7 +197,7 @@ The CHECK constraint on `source` stays as-is (`outcome_pattern | user_feedback |
    - `learned_rules WHERE source='user_feedback' AND created_at >= window_start` — explicit user corrections from chat (already captured by `feedback-capture.ts`).
 2. **Reflection prompt** to Haiku 4.5 — same `defaultLlmCaller` pattern as `extract.ts`. Output schema: `{rules: [{rule: string, action_classes: string[], evidence: string[], confidence: number}]}`. Cap at 5 rules per window. Each rule must cite ≥2 evidence items by `ku_queries.id` or `learned_rules.id`.
 3. **Emit** via existing `addRule({source: 'agent_reported', subsource: 'brain_reflection', groupId: null, ...})`. `groupId=null` means agent-wide.
-4. **Supersession** *(v1: heuristic, no LLM judge)*: before insert, fetch active brain-reflection rules whose `action_classes` overlap. v1 treats *any* class overlap as a supersession candidate — coarser than the original "Haiku-judge" sketch but bounds cost and avoids non-determinism. The trade-off: a new rule about `email.draft` retires every prior brain-reflection rule on `email.draft` even if they're on different sub-topics. Acceptable because (a) brain-reflection rules are agent-wide and having two contradicting rules in the same class is worse than over-retiring, (b) the user can always re-emit a still-good rule next week, and (c) the supersession chain (`supersedes_id`) preserves audit. Upgrade to a Haiku-judge `isContradictory(old, new)` if the over-retirement rate becomes a problem in practice.
+4. **Supersession** _(v1: heuristic, no LLM judge)_: before insert, fetch active brain-reflection rules whose `action_classes` overlap. v1 treats _any_ class overlap as a supersession candidate — coarser than the original "Haiku-judge" sketch but bounds cost and avoids non-determinism. The trade-off: a new rule about `email.draft` retires every prior brain-reflection rule on `email.draft` even if they're on different sub-topics. Acceptable because (a) brain-reflection rules are agent-wide and having two contradicting rules in the same class is worse than over-retiring, (b) the user can always re-emit a still-good rule next week, and (c) the supersession chain (`supersedes_id`) preserves audit. Upgrade to a Haiku-judge `isContradictory(old, new)` if the over-retirement rate becomes a problem in practice.
 
 ### Surface
 
@@ -204,7 +207,7 @@ Brain weekly digest gains a "📐 New procedural rules" section that lists rules
 
 ### Why this matters (deep research)
 
-Per LangMem and A-MEM, agents that don't develop procedural memory plateau on user-fit quickly. The brain currently encodes *facts* (semantic) and *events* (episodic via raw_events). The existing `learning/` system encodes *behaviors at the group level* from outcome patterns and direct corrections. The missing piece is **batch reflection over query patterns** — looking across a week of `ku_queries` to spot knowledge gaps and recurring concerns that no single chat turn surfaces. That's the LangMem distinction the deep research called out.
+Per LangMem and A-MEM, agents that don't develop procedural memory plateau on user-fit quickly. The brain currently encodes _facts_ (semantic) and _events_ (episodic via raw_events). The existing `learning/` system encodes _behaviors at the group level_ from outcome patterns and direct corrections. The missing piece is **batch reflection over query patterns** — looking across a week of `ku_queries` to spot knowledge gaps and recurring concerns that no single chat turn surfaces. That's the LangMem distinction the deep research called out.
 
 ## v1 down payment — `/recall` source citations
 
@@ -224,7 +227,7 @@ The smallest concrete change in the consolidation, shipping with this doc:
 
 ## Sources
 
-- Karpathy, *LLM Wiki* gist — pattern primary source.
-- NextWork, *AI Second Brain with Claude Code & Obsidian* — adapted tutorial.
+- Karpathy, _LLM Wiki_ gist — pattern primary source.
+- NextWork, _AI Second Brain with Claude Code & Obsidian_ — adapted tutorial.
 - Frontier deep research report (interaction `v1_Chdqc252YWNEV0hzM2p6N0lQb1B6VHNBcxIXanNudmFjRFdIczNqejdJUG9QelRzQXM`, 2026-04-27) covering Letta, Zep Graphiti, Mem0, LangMem, Cognee, A-MEM, Granola, Reflect, Heptabase, Reor, Khoj, AnythingLLM, RAGFlow, et al.
 - [`.claude/skills/add-karpathy-llm-wiki/llm-wiki.md`](../../.claude/skills/add-karpathy-llm-wiki/llm-wiki.md) — existing per-group wiki skill (parallel system; merged into the brain via the projection layer above).

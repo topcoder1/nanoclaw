@@ -13,6 +13,7 @@
 ### Task 1: Export Qdrant functions and add collection initialization
 
 **Files:**
+
 - Modify: `src/memory/index.ts` (add exports)
 - Modify: `src/memory/knowledge-store.ts` (add `ensureQdrantCollection`)
 
@@ -103,6 +104,7 @@ git commit -m "feat(memory): export Qdrant functions and add collection initiali
 ### Task 2: Call `ensureQdrantCollection` at startup
 
 **Files:**
+
 - Modify: `src/index.ts` (add collection init call during startup)
 
 - [ ] **Step 1: Find the startup sequence**
@@ -143,6 +145,7 @@ git commit -m "feat(memory): init Qdrant collection at startup when QDRANT_URL s
 ### Task 3: Add `learn_fact` IPC type and upgrade storage path
 
 **Files:**
+
 - Modify: `src/ipc.ts` (add `learn_fact` case that calls `storeFactWithVector`)
 - Modify: `container/agent-runner/src/tool-bridge.ts` (add `learn_fact` tool)
 
@@ -214,6 +217,7 @@ git commit -m "feat(memory): add learn_fact IPC type with Qdrant vector storage"
 ### Task 4: Add `search_memory` IPC tool for semantic recall
 
 **Files:**
+
 - Modify: `container/agent-runner/src/tool-bridge.ts` (add `search_memory` tool)
 - Modify: `src/ipc.ts` (add `search_memory` IPC handler with response)
 
@@ -291,6 +295,7 @@ git commit -m "feat(memory): add search_memory IPC tool with semantic recall"
 ### Task 5: Add docker-compose for Qdrant
 
 **Files:**
+
 - Create: `docker-compose.qdrant.yml`
 
 - [ ] **Step 1: Create the compose file**
@@ -306,8 +311,8 @@ services:
     image: qdrant/qdrant:v1.14.0
     container_name: nanoclaw-qdrant
     ports:
-      - '6333:6333'  # REST API
-      - '6334:6334'  # gRPC
+      - '6333:6333' # REST API
+      - '6334:6334' # gRPC
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
@@ -335,6 +340,7 @@ git commit -m "infra: add docker-compose for optional Qdrant vector memory"
 ### Task 6: Fix `queryFactsSemantic` groupId filter
 
 **Files:**
+
 - Modify: `src/memory/knowledge-store.ts` (add groupId to Qdrant filter)
 
 - [ ] **Step 1: Write the failing test**
@@ -344,10 +350,20 @@ Add to `src/memory/knowledge-store.test.ts`:
 ```typescript
 describe('queryFactsSemantic groupId filter', () => {
   it('passes groupId filter to FTS5 fallback when Qdrant unavailable', async () => {
-    storeFact({ text: 'Alpha fact for group A', source: 'test', groupId: 'group-a' });
-    storeFact({ text: 'Alpha fact for group B', source: 'test', groupId: 'group-b' });
+    storeFact({
+      text: 'Alpha fact for group A',
+      source: 'test',
+      groupId: 'group-a',
+    });
+    storeFact({
+      text: 'Alpha fact for group B',
+      source: 'test',
+      groupId: 'group-b',
+    });
 
-    const results = await queryFactsSemantic('Alpha fact', { groupId: 'group-a' });
+    const results = await queryFactsSemantic('Alpha fact', {
+      groupId: 'group-a',
+    });
     expect(results.every((f) => f.group_id === 'group-a')).toBe(true);
   });
 });
@@ -374,9 +390,7 @@ if (opts?.groupId) {
 const results = await client.search(COLLECTION_NAME, {
   vector,
   limit: opts?.limit ?? 10,
-  filter: filterConditions.length > 0
-    ? { must: filterConditions }
-    : undefined,
+  filter: filterConditions.length > 0 ? { must: filterConditions } : undefined,
 });
 ```
 
@@ -417,6 +431,7 @@ git commit -m "fix(memory): add groupId filter to Qdrant search and fix fake row
 ### Task 7: Inject matched procedure context into agent system prompt
 
 **Files:**
+
 - Modify: `src/index.ts` (inject procedure hints into the agent prompt)
 
 - [ ] **Step 1: Understand current flow**
@@ -442,10 +457,14 @@ if (groupProcs.length > 0) {
     .slice(0, 5);
 
   if (relevant.length > 0) {
-    procedureContext = '\n\n<learned_procedures>\n' +
-      relevant.map((p) =>
-        `- "${p.trigger}": ${p.description || p.steps.map(s => s.action).join(' → ')} (${p.success_count} successes)`
-      ).join('\n') +
+    procedureContext =
+      '\n\n<learned_procedures>\n' +
+      relevant
+        .map(
+          (p) =>
+            `- "${p.trigger}": ${p.description || p.steps.map((s) => s.action).join(' → ')} (${p.success_count} successes)`,
+        )
+        .join('\n') +
       '\n</learned_procedures>';
   }
 }
@@ -488,6 +507,7 @@ git commit -m "feat(learning): inject learned procedures into agent context"
 ### Task 8: Scope teach command to current group
 
 **Files:**
+
 - Modify: `src/memory/cost-dashboard.ts` (accept groupId in teach handler)
 - Modify: `src/index.ts` (pass groupId when executing assistant command)
 
@@ -512,14 +532,17 @@ saveProcedure({
   auto_execute: false,
   created_at: now,
   updated_at: now,
-  groupId,   // <-- add this
+  groupId, // <-- add this
 });
 ```
 
 - [ ] **Step 2: Update `executeAssistantCommand` signature**
 
 ```typescript
-export function executeAssistantCommand(command: AssistantCommand, groupId?: string): string {
+export function executeAssistantCommand(
+  command: AssistantCommand,
+  groupId?: string,
+): string {
   switch (command.type) {
     case 'cost_report':
       return formatCostReport(command.days);
@@ -576,6 +599,7 @@ git commit -m "feat(learning): scope teach command to current group"
 ### Task 9: Add `findProcedure` fuzzy matching
 
 **Files:**
+
 - Modify: `src/memory/procedure-store.ts` (add fuzzy trigger matching)
 - Modify: `src/memory/procedure-store.test.ts`
 
@@ -629,13 +653,19 @@ export function findProcedure(
   const triggerWords = normalizedTrigger.split(/\s+/).filter(Boolean);
 
   function scoreMatch(proc: Procedure): number {
-    const procWords = proc.trigger.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const procWords = proc.trigger
+      .toLowerCase()
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
     // Exact match
     if (proc.trigger.toLowerCase().trim() === normalizedTrigger) return 1.0;
     // Word overlap score
     const matchingWords = triggerWords.filter((w) => procWords.includes(w));
     if (matchingWords.length === 0) return 0;
-    return matchingWords.length / Math.max(triggerWords.length, procWords.length);
+    return (
+      matchingWords.length / Math.max(triggerWords.length, procWords.length)
+    );
   }
 
   const FUZZY_THRESHOLD = 0.5;
@@ -684,6 +714,7 @@ git commit -m "feat(learning): add fuzzy trigger matching for procedures"
 ### Task 10: Full integration test
 
 **Files:**
+
 - Run existing tests to verify nothing broke
 
 - [ ] **Step 1: Run all memory tests**

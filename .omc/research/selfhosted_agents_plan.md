@@ -1,9 +1,11 @@
 # Research Plan: Self-Hosted Personal AI Agent Frameworks 2025-2026
 
 ## Scope
+
 Top 5-7 competitors in the self-hosted personal AI agent space, with detailed architectural comparison.
 
 ## Candidate frameworks to investigate
+
 - Open Interpreter / OpenHands (formerly OpenDevin)
 - AutoGPT
 - AgentGPT / Reworkd
@@ -25,6 +27,7 @@ Top 5-7 competitors in the self-hosted personal AI agent space, with detailed ar
 - Msty
 
 ## Key dimensions
+
 1. GitHub stars / adoption
 2. Core value prop
 3. Architecture (how agents run, isolation model, LLM support)

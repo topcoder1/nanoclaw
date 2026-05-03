@@ -42,12 +42,13 @@ A `mcp__video-research__research_deep` pass on chat→RAG patterns produced thes
 
 ## Trigger UX
 
-| Platform | Public group/channel | Private 1:1 with bot |
-|---|---|---|
-| Discord | 🧠 react (default); `/save` available with ephemeral response | `/save <text>`, or just send content |
-| Signal  | 🧠 react (default) | reply `claw save`, or just send content |
+| Platform | Public group/channel                                          | Private 1:1 with bot                    |
+| -------- | ------------------------------------------------------------- | --------------------------------------- |
+| Discord  | 🧠 react (default); `/save` available with ephemeral response | `/save <text>`, or just send content    |
+| Signal   | 🧠 react (default)                                            | reply `claw save`, or just send content |
 
 Notes:
+
 - The 🧠 emoji is the canonical trigger; configurable via `BRAIN_SAVE_EMOJI` env (default `🧠`).
 - Discord `/save` invocations are visible in-channel; the bot's reply is ephemeral. Discord-DMs and 🧠-react are the discreet paths.
 - Signal has no slash commands; the literal text `claw save` is visible to the chat. Discreet path on Signal is 🧠-react.
@@ -69,14 +70,16 @@ Signal ───┘                   ├─ recent-msg cache (24h) ────
 Small SQLite table — `chat_messages(platform, chat_id, message_id, sent_at, sender, text, attachments_json, reply_to_id, edited_at)` — feeding both triggers. TTL = `max(CHAT_CACHE_TTL_HOURS, EDIT_SYNC_TTL_HOURS)` (default 24h), pruned on a daily timer. Lives in the existing nanoclaw DB, not the brain DB.
 
 The cache is necessary because:
+
 - Signal reaction events deliver only `targetSentTimestamp`, not message body.
 - Window flushers need to read N messages of context at flush time.
 - Discord reaction events also benefit from a local lookup vs. fetching message-by-message.
-- Edit-sync needs the *previous* version of a message to detect the change and locate the affected KU(s).
+- Edit-sync needs the _previous_ version of a message to detect the change and locate the affected KU(s).
 
 #### 2. Channel-side hooks
 
 In `src/channels/discord.ts`:
+
 - Subscribe to `Events.MessageCreate` (already present) → also write to `chat-message-cache` with attachments persisted to disk.
 - Subscribe to `Events.MessageUpdate` (new) → update cache, set `edited_at`, emit `ChatMessageEditedEvent` (see §Edit sync).
 - Subscribe to `Events.MessageReactionAdd` (new) → if emoji matches `BRAIN_SAVE_EMOJI`, look up the target in the cache and emit `ChatMessageSavedEvent`.
@@ -84,6 +87,7 @@ In `src/channels/discord.ts`:
 - Required intents: `GuildMessageReactions`, `DirectMessageReactions` (non-privileged). `MessageContent` is already enabled today for the `@nano` trigger.
 
 In `src/channels/signal.ts`:
+
 - Existing message poller → also write to `chat-message-cache` and download attachments via `/v1/attachments/<id>`.
 - Detect `dataMessage.reaction` events → if emoji matches, look up via `targetSentTimestamp` and emit `ChatMessageSavedEvent`.
 - Detect text body matching `^claw save\b` (case-insensitive) → emit `ChatMessageSavedEvent` with the quoted message body if any, else the trailing text.
@@ -96,12 +100,12 @@ Stored under `data/chat-attachments/<platform>/<chat_id>/<message_id>/<filename>
 
 Per-type handling at brain-ingest time (in the `ChatMessageSavedEvent` / `ChatWindowFlushedEvent` handlers):
 
-| Type | Handling |
-|---|---|
-| `application/pdf` | Run `pdftotext` (already used by `/add-pdf-reader`); concatenate first 50 pages of text into the extraction input prefixed by `[Attachment: <filename>]`. |
-| `image/*` | Default (`BRAIN_IMAGE_VISION=true`): single Claude Haiku vision call produces a one-sentence caption appended as `[Attachment image: <filename> — <caption>]`, plus EXIF date if present. If disabled, placeholder-only `[Attachment image: <filename>]`. |
-| `audio/*` (voice notes) | If `/add-voice-transcription` skill is installed and `OPENAI_API_KEY` available, transcribe via Whisper; transcript is appended. Otherwise placeholder only. |
-| Other (zip, docx, etc.) | Placeholder `[Attachment: <filename>, <size>]`; not extracted in v1. |
+| Type                    | Handling                                                                                                                                                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `application/pdf`       | Run `pdftotext` (already used by `/add-pdf-reader`); concatenate first 50 pages of text into the extraction input prefixed by `[Attachment: <filename>]`.                                                                                                 |
+| `image/*`               | Default (`BRAIN_IMAGE_VISION=true`): single Claude Haiku vision call produces a one-sentence caption appended as `[Attachment image: <filename> — <caption>]`, plus EXIF date if present. If disabled, placeholder-only `[Attachment image: <filename>]`. |
+| `audio/*` (voice notes) | If `/add-voice-transcription` skill is installed and `OPENAI_API_KEY` available, transcribe via Whisper; transcript is appended. Otherwise placeholder only.                                                                                              |
+| Other (zip, docx, etc.) | Placeholder `[Attachment: <filename>, <size>]`; not extracted in v1.                                                                                                                                                                                      |
 
 Attachments are kept on disk indefinitely (they are evidence). Cache eviction touches only the `chat_messages` index row; the attachment files survive and remain referenced from `knowledge_units.source_ref`.
 
@@ -112,11 +116,13 @@ Storage cost ceiling: a `BRAIN_ATTACHMENT_MAX_BYTES` env (default 25 MB per file
 Per-`(platform, chat_id)` state machine living host-side, driven by a single `setInterval` tick. State is in-memory (not persisted across restarts — windows are short-lived; a restart simply forfeits the current open window).
 
 Flush triggers (whichever fires first):
+
 - **Idle** — no new message in the chat for `WINDOW_IDLE_MS` (default 15 min).
 - **Cap** — message count in the open window reaches `WINDOW_CAP` (default 50).
 - **Daily** — at `WINDOW_DAILY_FLUSH_HOUR` (default 23, local time), all open windows flush.
 
 On flush:
+
 1. Collect cached messages for the window range.
 2. Concatenate into a single transcript with sender + timestamp.
 3. Emit `ChatWindowFlushedEvent` with the transcript and metadata.
@@ -125,9 +131,9 @@ Opt-in is per-chat. Read from `groups/<name>/CLAUDE.md` frontmatter:
 
 ```yaml
 ---
-brain_ingest: window     # one of: off (default), window
-window_idle_min: 15      # optional override
-window_cap: 50           # optional override
+brain_ingest: window # one of: off (default), window
+window_idle_min: 15 # optional override
+window_cap: 50 # optional override
 ---
 ```
 
@@ -143,10 +149,10 @@ export interface ChatMessageSavedEvent extends NanoClawEvent {
   platform: 'discord' | 'signal';
   chat_id: string;
   chat_name?: string;
-  message_id: string;            // platform-specific (snowflake or ts)
+  message_id: string; // platform-specific (snowflake or ts)
   sender: string;
   sender_display?: string;
-  sent_at: string;               // ISO
+  sent_at: string; // ISO
   text: string;
   attachments?: ChatAttachment[];
   context_before?: { sender: string; text: string; sent_at: string }[];
@@ -162,8 +168,8 @@ export interface ChatWindowFlushedEvent extends NanoClawEvent {
   window_started_at: string;
   window_ended_at: string;
   message_count: number;
-  transcript: string;            // formatted "[ts] sender: text\n..."
-  message_ids: string[];         // for edit-sync lookups
+  transcript: string; // formatted "[ts] sender: text\n..."
+  message_ids: string[]; // for edit-sync lookups
   attachments?: ChatAttachment[];
   flush_reason: 'idle' | 'cap' | 'daily';
 }
@@ -206,6 +212,7 @@ Today `ingest.ts` registers a single `eventBus.on('email.received', ...)` handle
 - `eventBus.on('chat.message.deleted', handleChatMessageDeleted)` — delegates to edit-sync (§7).
 
 Both handlers:
+
 1. Insert into `raw_events` with new `source_type` values: `'discord_message' | 'signal_message' | 'discord_window' | 'signal_window'`. Use `${chat_id}:${message_id}` (or `${chat_id}:${window_started_at}`) as `source_ref` so the existing UNIQUE constraint deduplicates retries.
 2. Run `extractPipeline` on the text (single message) or the transcript (window). Window path uses a slightly different prompt that asks the LLM for distinct factual claims/decisions across the whole transcript rather than treating it as a single statement.
 3. Map sender → entity using existing `createPersonFromEmail` / new `createPersonFromHandle` helper. Discord sender = `username#discriminator` or display name; Signal sender = phone number or profile name. These get their own alias namespace (`source_type='discord'` / `'signal'` in `entity_aliases`).
@@ -224,7 +231,7 @@ Account bucket: chat-sourced KUs default to `'personal'`. (Future: per-chat conf
 
 **Race resolution: 🧠-react inside an open window.** When a `ChatMessageSavedEvent` arrives for a chat that has `brain_ingest: window` and an open window covering the message:
 
-1. The single-message save runs immediately (operator intent is explicit — they want this *now*).
+1. The single-message save runs immediately (operator intent is explicit — they want this _now_).
 2. The window flusher records the message_id in a per-window `excluded_message_ids: Set<string>`.
 3. At flush time, transcript generation skips excluded ids. The window KU still summarizes everything else.
 
@@ -238,13 +245,13 @@ This avoids duplicate KUs while preserving both signals: the deliberate save and
 
 **Entity-alias namespace** (resolves the `entity_aliases.field_name` ambiguity):
 
-| Platform | field_name | field_value | Normalization |
-|---|---|---|---|
-| Discord | `discord_username` | lowercase canonical username (`alice`, post-pomelo) | strip `#discriminator` if present |
-| Discord | `discord_snowflake` | numeric snowflake string | as-is |
-| Signal | `signal_phone` | E.164 (`+15551234567`) | strip whitespace, ensure leading `+` |
-| Signal | `signal_uuid` | UUID string | lowercase |
-| Signal | `signal_profile_name` | display name | trim, NFC-normalize |
+| Platform | field_name            | field_value                                         | Normalization                        |
+| -------- | --------------------- | --------------------------------------------------- | ------------------------------------ |
+| Discord  | `discord_username`    | lowercase canonical username (`alice`, post-pomelo) | strip `#discriminator` if present    |
+| Discord  | `discord_snowflake`   | numeric snowflake string                            | as-is                                |
+| Signal   | `signal_phone`        | E.164 (`+15551234567`)                              | strip whitespace, ensure leading `+` |
+| Signal   | `signal_uuid`         | UUID string                                         | lowercase                            |
+| Signal   | `signal_profile_name` | display name                                        | trim, NFC-normalize                  |
 
 Both forms are written when available so YAML can reference either.
 
@@ -259,7 +266,7 @@ people:
   - canonical: alice@example.com
     aliases:
       - discord:alice#1234
-      - discord:123456789012345678         # snowflake form also supported
+      - discord:123456789012345678 # snowflake form also supported
       - signal:+15551234567
       - signal:profile:Alice K.
   - canonical: bob@example.com
@@ -269,6 +276,7 @@ people:
 ```
 
 On startup and on file change:
+
 1. For each block, ensure the canonical entity exists; create it if missing.
 2. For each alias, resolve or create the alias entity, then merge into the canonical via the existing entity-merge code path. Every merge writes a row to `entity_merge_log` (table already in `schema.sql:49`).
 3. Subsequent ingest of `discord:alice#1234` resolves through `entity_aliases` to the canonical entity automatically — no per-handler logic needed.
@@ -278,11 +286,12 @@ On startup and on file change:
 **C. Conflict handling**: a merge that would unify two entities each holding distinct `entity_relationships` records is logged but executed (the merge log preserves the prior state for audit). No interactive resolution UI in v1.
 
 **D. YAML validation at load**: reject the entire file (keep prior state) if any of the following fail, log a single structured error:
+
 - Cycles (alias chain returns to a canonical).
 - Same alias listed under two different canonicals (would silently steal entities on reload).
 - Type mismatch — `aliases` not a list, `canonical` not a string, missing required keys.
 - Canonical resolves to a non-`person` entity kind (e.g., a company alias being merged into a person).
-Successful merges from prior loads are not rolled back; a bad reload simply doesn't add new ones.
+  Successful merges from prior loads are not rolled back; a bad reload simply doesn't add new ones.
 
 #### 7. Edit & delete sync (`src/brain/edit-sync.ts`)
 
@@ -403,34 +412,36 @@ Per-chat opt-in lives in `groups/<name>/CLAUDE.md` YAML frontmatter (parsed at s
 
 ## Failure modes & handling
 
-| Failure | Handling |
-|---|---|
-| Reaction fires but message not in cache (older than 24h) | Log warn, no save. Document as a known limit. |
-| Signal poller drops connection | Existing reconnect logic; cached messages survive. Open window resumes on reconnect. |
-| Discord rate limit on slash command response | Already handled by discord.js; ephemeral reply may be delayed but save still emits. |
-| Extraction returns 0 claims for a window | Insert raw_events row with `processed_at` set so we don't retry; skip KU insert. Same as today's email-with-no-claims path. |
-| Process restart with open window | Window flusher's `stop()` is wired into the existing `stopBrainIngest()` shutdown path. On SIGTERM it iterates open windows and emits `ChatWindowFlushedEvent` with `flush_reason='shutdown'` so in-flight context isn't lost. Hard crash still forfeits the buffer (acceptable v1). |
-| Chat extraction starves email LLM budget | The shared daily LLM budget (`extract.ts:239`, default $0.05) is partitioned: `BRAIN_LLM_BUDGET_USD` (overall) plus `BRAIN_LLM_BUDGET_CHAT_PCT` (default 30%). Chat extraction calls check the chat slice; email retains its existing path. Both share the overall ceiling. |
-| Attachment download fails | Cache row written without `local_path`; `attachment_download_attempts` counter incremented. A periodic retry sweep (every 30 min, capped at 3 attempts in the 24h window) re-tries pending downloads. After 3 failures, ingest proceeds with a `[Attachment unavailable: <filename>]` placeholder. |
-| Two attachments with same content (sha256 collision) | `local_path` keyed by `sha256` so dedup is automatic; cache row references the shared path. |
-| Edit/delete within `EDIT_SYNC_TTL_HOURS` | edit-sync pipeline supersedes the affected KU(s). |
-| Edit/delete after `EDIT_SYNC_TTL_HOURS` | Ignored. Snapshot is immutable. Documented. |
-| Attachment download fails | Cache row written without `local_path`; placeholder used in extraction; warn logged. Retry loop on next ingest cycle. |
-| Attachment over `BRAIN_ATTACHMENT_MAX_BYTES` | Skip download; `[Attachment too large: <filename>, <size>]` placeholder in extraction. |
-| Identity-merge YAML references unknown alias | Created on the fly during merge resolution; first-sighting metadata copied from canonical's bucket. |
-| Identity-merge cycle in YAML (A→B, B→A) | Detected at load time; logged and the entire YAML is rejected (previous merges remain in place). |
-| Bot reacts to its own 🧠 (loop risk) | Ignore reactions where `user_id == bot_user_id`. |
-| Same message saved twice (react then `/save`) | `raw_events` UNIQUE on `(source_type, source_ref)` dedupes; second insert is a no-op. |
+| Failure                                                  | Handling                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reaction fires but message not in cache (older than 24h) | Log warn, no save. Document as a known limit.                                                                                                                                                                                                                                                      |
+| Signal poller drops connection                           | Existing reconnect logic; cached messages survive. Open window resumes on reconnect.                                                                                                                                                                                                               |
+| Discord rate limit on slash command response             | Already handled by discord.js; ephemeral reply may be delayed but save still emits.                                                                                                                                                                                                                |
+| Extraction returns 0 claims for a window                 | Insert raw_events row with `processed_at` set so we don't retry; skip KU insert. Same as today's email-with-no-claims path.                                                                                                                                                                        |
+| Process restart with open window                         | Window flusher's `stop()` is wired into the existing `stopBrainIngest()` shutdown path. On SIGTERM it iterates open windows and emits `ChatWindowFlushedEvent` with `flush_reason='shutdown'` so in-flight context isn't lost. Hard crash still forfeits the buffer (acceptable v1).               |
+| Chat extraction starves email LLM budget                 | The shared daily LLM budget (`extract.ts:239`, default $0.05) is partitioned: `BRAIN_LLM_BUDGET_USD` (overall) plus `BRAIN_LLM_BUDGET_CHAT_PCT` (default 30%). Chat extraction calls check the chat slice; email retains its existing path. Both share the overall ceiling.                        |
+| Attachment download fails                                | Cache row written without `local_path`; `attachment_download_attempts` counter incremented. A periodic retry sweep (every 30 min, capped at 3 attempts in the 24h window) re-tries pending downloads. After 3 failures, ingest proceeds with a `[Attachment unavailable: <filename>]` placeholder. |
+| Two attachments with same content (sha256 collision)     | `local_path` keyed by `sha256` so dedup is automatic; cache row references the shared path.                                                                                                                                                                                                        |
+| Edit/delete within `EDIT_SYNC_TTL_HOURS`                 | edit-sync pipeline supersedes the affected KU(s).                                                                                                                                                                                                                                                  |
+| Edit/delete after `EDIT_SYNC_TTL_HOURS`                  | Ignored. Snapshot is immutable. Documented.                                                                                                                                                                                                                                                        |
+| Attachment download fails                                | Cache row written without `local_path`; placeholder used in extraction; warn logged. Retry loop on next ingest cycle.                                                                                                                                                                              |
+| Attachment over `BRAIN_ATTACHMENT_MAX_BYTES`             | Skip download; `[Attachment too large: <filename>, <size>]` placeholder in extraction.                                                                                                                                                                                                             |
+| Identity-merge YAML references unknown alias             | Created on the fly during merge resolution; first-sighting metadata copied from canonical's bucket.                                                                                                                                                                                                |
+| Identity-merge cycle in YAML (A→B, B→A)                  | Detected at load time; logged and the entire YAML is rejected (previous merges remain in place).                                                                                                                                                                                                   |
+| Bot reacts to its own 🧠 (loop risk)                     | Ignore reactions where `user_id == bot_user_id`.                                                                                                                                                                                                                                                   |
+| Same message saved twice (react then `/save`)            | `raw_events` UNIQUE on `(source_type, source_ref)` dedupes; second insert is a no-op.                                                                                                                                                                                                              |
 
 ## Testing strategy
 
 Unit:
+
 - `chat-message-cache` insert/read/prune.
 - Window flusher state machine — feed synthetic message timeline, assert flush on idle/cap/daily.
 - Reaction handler — emoji match, bot-self ignore, cache miss.
 - Slash/text fallback — payload extraction.
 
 Integration (with mocked discord.js client and signal-cli HTTP):
+
 - Discord: simulate `MessageReactionAdd` → assert `ChatMessageSavedEvent` emitted with correct context.
 - Signal: simulate poller payload with reaction → same assertion.
 - End-to-end: emit `ChatMessageSavedEvent` → assert `raw_events` row, KU created, Qdrant point upserted. Mirror the existing email-pipeline test.
@@ -475,6 +486,7 @@ The work is large; each PR below is independently shippable and reviewable. Phas
 ## Open questions
 
 None blocking. Documented for future work:
+
 - Auto-suggesting identity merges from co-occurrence patterns (e.g., same display name across platforms with high overlap of conversation partners). Currently fully manual.
 - Whether to surface a `/brainwindow flush <chat>` admin command for manual flush.
 - Voice channel real-time transcription (Discord) — separate workstream.

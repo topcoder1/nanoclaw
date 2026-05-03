@@ -72,6 +72,7 @@ This container skill writes raw SuperPilot labels and email metadata to the
 all classification decisions (push/digest/resolved).
 
 When writing to tracked_items, include:
+
 - source: 'gmail'
 - source_id: the Gmail thread_id
 - superpilot_label: the raw SuperPilot classification ('needs-attention', 'fyi', 'newsletter', 'transactional')

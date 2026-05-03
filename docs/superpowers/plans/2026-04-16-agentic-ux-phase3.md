@@ -15,6 +15,7 @@
 The IPC handler in `ipc.ts` has the email metadata (`thread_id`, `account`) but the `onResult` callback only receives `text: string`. We need to pass the email list through so the trigger callback in `index.ts` can attach archive buttons.
 
 **Files:**
+
 - Modify: `src/ipc.ts:27-45` (IpcDeps interface) and `src/ipc.ts:593-627` (email_trigger handler)
 - Test: `src/__tests__/email-trigger-pipeline.test.ts` (create)
 
@@ -164,6 +165,7 @@ git commit -m "feat(ux): pass email metadata through IPC to email trigger callba
 The email trigger's `onOutput` callback currently calls `formatOutbound()` only. Add `classifyAndFormat()` to get classification, truncation, and action buttons, then send via the channel's `sendMessageWithActions` when available.
 
 **Files:**
+
 - Modify: `src/index.ts:1588-1605` (onOutput callback in email trigger)
 - Modify: `src/ipc.ts:625-627` (onResult callback to accept and use meta)
 - Test: `src/__tests__/email-trigger-pipeline.test.ts` (extend)
@@ -194,7 +196,8 @@ Alice`;
   });
 
   it('should pass through non-email agent output unchanged', () => {
-    const normalText = 'I checked your calendar and you have no meetings today.';
+    const normalText =
+      'I checked your calendar and you have no meetings today.';
     const { text, meta } = classifyAndFormat(normalText);
 
     expect(meta.category).not.toBe('email');
@@ -284,7 +287,13 @@ if (clean) {
     'sendMessageWithActions' in channel
   ) {
     const msgId = await (
-      channel as { sendMessageWithActions: (jid: string, text: string, actions: Action[]) => Promise<number> }
+      channel as {
+        sendMessageWithActions: (
+          jid: string,
+          text: string,
+          actions: Action[],
+        ) => Promise<number>;
+      }
     ).sendMessageWithActions(chatJid, formatted, meta.actions);
   } else {
     await onResult(formatted, triggerEmails);
@@ -317,6 +326,7 @@ git commit -m "feat(ux): pipe email trigger output through classifyAndFormat wit
 When the agent responds to an email trigger, attach archive buttons using the trigger's email metadata (thread_id, account) regardless of whether classifyAndFormat detected the email category. Also record emails in archiveTracker so the archive callback can look up the thread.
 
 **Files:**
+
 - Modify: `src/index.ts:1598-1604` (onOutput callback, same area as Task 2)
 - Test: `src/__tests__/email-trigger-pipeline.test.ts` (extend)
 
@@ -479,6 +489,7 @@ git commit -m "feat(ux): force-attach archive buttons from email trigger metadat
 Replace the `evaluateEnrichment` stub in `index.ts` with a real implementation that submits eligible drafts to the executor pool as `proactive`-priority tasks. The task runs a focused agent prompt and parses the response.
 
 **Files:**
+
 - Modify: `src/index.ts:1342-1351` (evaluateEnrichment callback)
 - Test: `src/__tests__/draft-enrichment-executor.test.ts` (create)
 
@@ -785,6 +796,7 @@ git commit -m "feat(ux): wire draft enrichment to executor pool with proactive p
 End-to-end test verifying the full email trigger pipeline: SSE trigger → IPC → agent output → classifyAndFormat → archive buttons → channel send with actions.
 
 **Files:**
+
 - Test: `src/__tests__/email-trigger-pipeline.test.ts` (extend)
 
 - [ ] **Step 1: Write integration test**
@@ -819,7 +831,11 @@ describe('email trigger pipeline — end-to-end', () => {
     // Force-attach archive buttons from trigger metadata
     for (const email of triggerEmails) {
       const emailId = email.thread_id;
-      if (!meta.actions.some((a) => a.callbackData?.startsWith(`archive:${emailId}`))) {
+      if (
+        !meta.actions.some((a) =>
+          a.callbackData?.startsWith(`archive:${emailId}`),
+        )
+      ) {
         meta.actions.push({
           label: '🗄 Archive',
           callbackData: `archive:${emailId}`,

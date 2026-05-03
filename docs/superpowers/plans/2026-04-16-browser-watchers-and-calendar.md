@@ -13,6 +13,7 @@
 ### Task 1: Watcher Config Storage (DB table + CRUD)
 
 **Files:**
+
 - Modify: `src/db.ts` — add `browser_watchers` table to schema
 - Create: `src/watchers/watcher-store.ts` — CRUD functions
 - Create: `src/watchers/watcher-store.test.ts` — unit tests
@@ -192,9 +193,20 @@ export function addWatcher(input: {
   db.prepare(
     `INSERT INTO browser_watchers (id, url, selector, group_id, interval_ms, label, last_value, checked_at, enabled, created_at)
      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1, ?)`,
-  ).run(id, input.url, input.selector, input.groupId, input.intervalMs, input.label, now);
+  ).run(
+    id,
+    input.url,
+    input.selector,
+    input.groupId,
+    input.intervalMs,
+    input.label,
+    now,
+  );
 
-  logger.info({ id, url: input.url, groupId: input.groupId }, 'Browser watcher added');
+  logger.info(
+    { id, url: input.url, groupId: input.groupId },
+    'Browser watcher added',
+  );
 
   return {
     id,
@@ -212,11 +224,16 @@ export function addWatcher(input: {
 
 export function getWatcher(id: string): StoredWatcher | undefined {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM browser_watchers WHERE id = ?').get(id) as WatcherRow | undefined;
+  const row = db
+    .prepare('SELECT * FROM browser_watchers WHERE id = ?')
+    .get(id) as WatcherRow | undefined;
   return row ? rowToWatcher(row) : undefined;
 }
 
-export function listWatchers(groupId: string, enabledOnly = false): StoredWatcher[] {
+export function listWatchers(
+  groupId: string,
+  enabledOnly = false,
+): StoredWatcher[] {
   const db = getDb();
   const sql = enabledOnly
     ? 'SELECT * FROM browser_watchers WHERE group_id = ? AND enabled = 1 ORDER BY created_at'
@@ -228,15 +245,18 @@ export function listWatchers(groupId: string, enabledOnly = false): StoredWatche
 export function listAllEnabledWatchers(): StoredWatcher[] {
   const db = getDb();
   const rows = db
-    .prepare('SELECT * FROM browser_watchers WHERE enabled = 1 ORDER BY created_at')
+    .prepare(
+      'SELECT * FROM browser_watchers WHERE enabled = 1 ORDER BY created_at',
+    )
     .all() as WatcherRow[];
   return rows.map(rowToWatcher);
 }
 
 export function updateWatcherValue(id: string, value: string): void {
   const db = getDb();
-  db.prepare('UPDATE browser_watchers SET last_value = ?, checked_at = ? WHERE id = ?')
-    .run(value, Date.now(), id);
+  db.prepare(
+    'UPDATE browser_watchers SET last_value = ?, checked_at = ? WHERE id = ?',
+  ).run(value, Date.now(), id);
 }
 
 export function removeWatcher(id: string): void {
@@ -263,6 +283,7 @@ git commit -m "feat: add browser_watchers DB table and CRUD store"
 ### Task 2: Playwright-based Extract Function
 
 **Files:**
+
 - Create: `src/watchers/extract-text.ts` — extract function using BrowserSessionManager
 - Create: `src/watchers/extract-text.test.ts` — unit tests with mocked Playwright
 
@@ -296,9 +317,16 @@ describe('createExtractFn', () => {
     const extract = createExtractFn(mockSessionManager as any, 'test-group');
     const result = await extract('https://example.com', '.price');
 
-    expect(mockSessionManager.acquireContext).toHaveBeenCalledWith('test-group');
-    expect(mockPage.goto).toHaveBeenCalledWith('https://example.com', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    expect(mockPage.textContent).toHaveBeenCalledWith('.price', { timeout: 10_000 });
+    expect(mockSessionManager.acquireContext).toHaveBeenCalledWith(
+      'test-group',
+    );
+    expect(mockPage.goto).toHaveBeenCalledWith('https://example.com', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    });
+    expect(mockPage.textContent).toHaveBeenCalledWith('.price', {
+      timeout: 10_000,
+    });
     expect(mockPage.close).toHaveBeenCalled();
     expect(result).toBe('$42.00');
   });
@@ -336,7 +364,9 @@ describe('createExtractFn', () => {
     };
 
     const extract = createExtractFn(mockSessionManager as any, 'test-group');
-    await expect(extract('https://example.com', '.bad')).rejects.toThrow('selector not found');
+    await expect(extract('https://example.com', '.bad')).rejects.toThrow(
+      'selector not found',
+    );
     expect(mockPage.close).toHaveBeenCalled();
   });
 });
@@ -398,6 +428,7 @@ git commit -m "feat: add Playwright-based extract function for browser watchers"
 ### Task 3: Watcher Polling Loop
 
 **Files:**
+
 - Create: `src/watchers/watcher-poller.ts` — polling loop that evaluates all enabled watchers
 - Create: `src/watchers/watcher-poller.test.ts` — unit tests
 
@@ -524,7 +555,8 @@ describe('pollAllWatchers', () => {
       label: 'Stock',
     });
 
-    const extract = vi.fn()
+    const extract = vi
+      .fn()
       .mockRejectedValueOnce(new Error('timeout'))
       .mockResolvedValueOnce('In Stock');
 
@@ -571,7 +603,10 @@ export async function pollAllWatchers(
     // Skip if interval hasn't elapsed
     if (watcher.checkedAt && now - watcher.checkedAt < watcher.intervalMs) {
       logger.debug(
-        { watcherId: watcher.id, nextCheckIn: watcher.intervalMs - (now - watcher.checkedAt) },
+        {
+          watcherId: watcher.id,
+          nextCheckIn: watcher.intervalMs - (now - watcher.checkedAt),
+        },
         'Watcher poll: skipping, interval not elapsed',
       );
       continue;
@@ -656,6 +691,7 @@ git commit -m "feat: add watcher polling loop with interval-aware scheduling"
 ### Task 4: Wire Watcher Poller and Event Consumer into index.ts
 
 **Files:**
+
 - Modify: `src/index.ts` — import and start watcher poller, subscribe to `watcher.changed`
 
 - [ ] **Step 1: Add imports to index.ts**
@@ -663,7 +699,10 @@ git commit -m "feat: add watcher polling loop with interval-aware scheduling"
 Add these imports near the other watcher imports (around line 95-97):
 
 ```typescript
-import { startWatcherPoller, stopWatcherPoller } from './watchers/watcher-poller.js';
+import {
+  startWatcherPoller,
+  stopWatcherPoller,
+} from './watchers/watcher-poller.js';
 import { createExtractFn } from './watchers/extract-text.js';
 ```
 
@@ -672,47 +711,50 @@ import { createExtractFn } from './watchers/extract-text.js';
 In the startup section of `main()`, after the `startCalendarPoller()` call (around line 1488), add:
 
 ```typescript
-  // Browser watcher polling
-  if (browserSessionManager) {
-    // Use a shared groupId for watcher extractions — watchers are cross-group
-    const watcherExtract = createExtractFn(browserSessionManager, '__watchers__');
-    startWatcherPoller(watcherExtract);
+// Browser watcher polling
+if (browserSessionManager) {
+  // Use a shared groupId for watcher extractions — watchers are cross-group
+  const watcherExtract = createExtractFn(browserSessionManager, '__watchers__');
+  startWatcherPoller(watcherExtract);
+}
+
+// Notify user when a browser watcher detects a change
+eventBus.on('watcher.changed', (event) => {
+  const payload = event.payload as {
+    watcherId: string;
+    url: string;
+    selector: string;
+    previousValue: string | null;
+    newValue: string | null;
+    groupId: string;
+  };
+
+  const groupJid = Object.keys(registeredGroups).find(
+    (jid) => registeredGroups[jid].folder === payload.groupId,
+  );
+  if (!groupJid) {
+    logger.warn({ payload }, 'watcher.changed: no group found for groupId');
+    return;
   }
 
-  // Notify user when a browser watcher detects a change
-  eventBus.on('watcher.changed', (event) => {
-    const payload = event.payload as {
-      watcherId: string;
-      url: string;
-      selector: string;
-      previousValue: string | null;
-      newValue: string | null;
-      groupId: string;
-    };
+  const channel = findChannel(channels, groupJid);
+  if (!channel) {
+    logger.warn({ groupJid }, 'watcher.changed: no channel for JID');
+    return;
+  }
 
-    const groupJid = Object.keys(registeredGroups).find(
-      (jid) => registeredGroups[jid].folder === payload.groupId,
+  const msg =
+    `🔔 **Watcher update** (${payload.watcherId})\n` +
+    `URL: ${payload.url}\n` +
+    `Changed: ${payload.previousValue ?? '(first check)'} → ${payload.newValue}`;
+
+  channel.sendMessage(groupJid, msg).catch((err: unknown) => {
+    logger.error(
+      { err, groupJid },
+      'watcher.changed: failed to send notification',
     );
-    if (!groupJid) {
-      logger.warn({ payload }, 'watcher.changed: no group found for groupId');
-      return;
-    }
-
-    const channel = findChannel(channels, groupJid);
-    if (!channel) {
-      logger.warn({ groupJid }, 'watcher.changed: no channel for JID');
-      return;
-    }
-
-    const msg =
-      `🔔 **Watcher update** (${payload.watcherId})\n` +
-      `URL: ${payload.url}\n` +
-      `Changed: ${payload.previousValue ?? '(first check)'} → ${payload.newValue}`;
-
-    channel.sendMessage(groupJid, msg).catch((err: unknown) => {
-      logger.error({ err, groupJid }, 'watcher.changed: failed to send notification');
-    });
   });
+});
 ```
 
 - [ ] **Step 3: Add cleanup on shutdown**
@@ -720,7 +762,7 @@ In the startup section of `main()`, after the `startCalendarPoller()` call (arou
 In the shutdown/cleanup section of `main()`, find where `stopCalendarPoller()` is called and add `stopWatcherPoller()` nearby:
 
 ```typescript
-  stopWatcherPoller();
+stopWatcherPoller();
 ```
 
 - [ ] **Step 4: Run full test suite to verify nothing breaks**
@@ -744,11 +786,12 @@ git commit -m "feat: wire browser watcher poller and change notifications into m
 **Important:** OneCLI lives OUTSIDE the nanoclaw repo. This task documents exactly what needs to be built. If the OneCLI repo is accessible locally at `~/dev/onecli`, implement there. Otherwise, create a standalone implementation file that can be dropped in.
 
 **Files:**
+
 - Create: `docs/onecli-calendar-endpoint.md` — specification document for the OneCLI team/future self
 
 - [ ] **Step 1: Write the OneCLI endpoint specification**
 
-```markdown
+````markdown
 // docs/onecli-calendar-endpoint.md
 
 # OneCLI Calendar Endpoint Specification
@@ -778,6 +821,7 @@ git commit -m "feat: wire browser watcher poller and change notifications into m
   ]
 }
 ```
+````
 
 ## Implementation Notes
 
@@ -791,6 +835,7 @@ git commit -m "feat: wire browser watcher poller and change notifications into m
 ## NanoClaw Integration
 
 The NanoClaw calendar poller (`src/calendar-poller.ts`) already:
+
 - Calls this endpoint every 5 minutes
 - Handles 404 gracefully (logs debug, returns)
 - Parses `summary` OR `title` fields
@@ -799,20 +844,22 @@ The NanoClaw calendar poller (`src/calendar-poller.ts`) already:
 - Stores events in the `calendar_events` SQLite table
 - Emits `calendar.synced` event
 - Meeting briefings check for events starting within 15 minutes
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add docs/onecli-calendar-endpoint.md
 git commit -m "docs: add OneCLI calendar endpoint specification"
-```
+````
 
 ---
 
 ### Task 6: Calendar Poller Hardening Tests
 
 **Files:**
+
 - Modify: `src/__tests__/calendar-poller.test.ts` — add tests for pollCalendar() with mocked fetch
 
 - [ ] **Step 1: Write additional tests for pollCalendar**
@@ -939,6 +986,7 @@ git commit -m "test: add pollCalendar and cleanupOldEvents tests"
 ### Task 7: Integration Test — Watcher End-to-End
 
 **Files:**
+
 - Create: `src/__tests__/watcher-integration.test.ts` — end-to-end test: add watcher → poll → detect change → event emitted
 
 - [ ] **Step 1: Write the integration test**
@@ -1051,7 +1099,9 @@ describe('Browser Watcher Integration', () => {
       label: 'Product price',
     });
 
-    const extract = vi.fn().mockRejectedValue(new Error('DNS resolution failed'));
+    const extract = vi
+      .fn()
+      .mockRejectedValue(new Error('DNS resolution failed'));
     const results = await pollAllWatchers(extract);
 
     expect(results).toHaveLength(1);
@@ -1090,6 +1140,7 @@ git commit -m "test: add browser watcher end-to-end integration test"
 **Context:** PR #1795 is open at `origin` (topcoder1/nanoclaw) with no reviews yet. Reviewers gavrielc and gabi-simons are pending. No code changes needed — this task sets up a monitoring check.
 
 **Files:**
+
 - No code changes
 
 - [ ] **Step 1: Check current PR status**
@@ -1103,6 +1154,7 @@ Expected: `state: "OPEN"`, `reviews: []`, `reviewRequests` includes the pending 
 - [ ] **Step 2: If reviews exist, create a follow-up task**
 
 If any review comments are present:
+
 - Read each comment with `gh api repos/topcoder1/nanoclaw/pulls/1795/comments`
 - For each actionable comment, create a task to address it
 - Run `/qodo-pr-resolver 1795` to batch-process any Qodo review issues
