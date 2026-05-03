@@ -124,7 +124,13 @@ Avoid second Telegram account. Register a synthetic channel in
   "trigger": {
     "type": "direct_call",
     "call": "pushAttentionItem",
-    "args": { "chatId": "test:0", "itemId": "<setup.id>", "title": "Account alert", "sender": "chase@chase.com", "reason": "test" }
+    "args": {
+      "chatId": "test:0",
+      "itemId": "<setup.id>",
+      "title": "Account alert",
+      "sender": "chase@chase.com",
+      "reason": "test"
+    }
   },
   "expect": {
     "outbound": {
@@ -132,7 +138,12 @@ Avoid second Telegram account. Register a synthetic channel in
       "inline_keyboard": {
         "rows": 1,
         "buttons": 4,
-        "callback_data_patterns": ["triage:snooze:1h:", "triage:snooze:tomorrow:", "triage:dismiss:", "triage:archive:"]
+        "callback_data_patterns": [
+          "triage:snooze:1h:",
+          "triage:snooze:tomorrow:",
+          "triage:dismiss:",
+          "triage:archive:"
+        ]
       }
     }
   }
@@ -170,9 +181,9 @@ don't need an LLM. For the ~20% that do (e.g., "response is clear and
 non-redundant"), use a small Claude call with:
 
 - Prompt template: `You are a QA judge. Here is the scenario goal,
-  the input, and the system's response. Return JSON { ok: boolean,
-  reasons: string[] }. Be strict — flag any failure mode the goal
-  implies.`
+the input, and the system's response. Return JSON { ok: boolean,
+reasons: string[] }. Be strict — flag any failure mode the goal
+implies.`
 - Model: `claude-haiku-4-5` (fast + cheap, same as triage tier 1).
 - Cache the scenario goal + rubric as a prompt-cache breakpoint so
   replays are cheap.
@@ -250,7 +261,7 @@ Automated, cheap heuristics first; LLM only for ambiguous cases.
 ### Approval flow
 
 - `[✓ Merge]` — server runs `git checkout main && git merge --ff-only
-  <branch> && git push && <build-and-restart>`. Posts ` 🚀 merged`
+<branch> && git push && <build-and-restart>`. Posts ` 🚀 merged`
   confirmation.
 - `[✕ Close]` — deletes the worktree and the remote branch. Logs
   rejection reason if user adds one via reply.
@@ -299,7 +310,7 @@ Automated, cheap heuristics first; LLM only for ambiguous cases.
 ### Failure modes
 
 - Agent produces empty diff → post ` 🤷 QA: couldn't produce a fix
-  for <invariant>` with transcript link.
+for <invariant>` with transcript link.
 - Agent produces a diff that fails tests → same as above, plus test
   output in the Telegram message.
 - Risk classifier misclassifies → start conservative (err toward HIGH),

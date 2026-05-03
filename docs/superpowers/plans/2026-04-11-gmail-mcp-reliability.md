@@ -7,12 +7,14 @@
 **Architecture:** Three layers of defense in priority order. (1) **Restart** the currently-stuck Telegram-main container so the next trigger gets a clean Gmail MCP — free, immediate. (2) **Diagnose** the actual failure mode by capturing live logs and OAuth state on the next drop. (3) **Auto-reconnect** by adding a wrapper around the Gmail MCP launch that pre-refreshes OAuth tokens and a host-side health monitor that recycles the container when Gmail MCP starts erroring. (4) **Tomorrow's briefing test** verifies the full new stack — evidence discipline, tool narration, discord-digest, and Gmail MCP reliability — on real morning data.
 
 **Tech Stack:**
+
 - Container side: `@gongrzhe/server-gmail-autoauth-mcp` (npx-launched MCP), Node 22, mounted `~/.gmail-mcp*` OAuth credential dirs
 - Host side: TypeScript, `src/container-runner.ts` (mounts), `src/index.ts` (enqueueEmailTrigger), `src/email-sse.ts` (trigger plumbing)
 - OAuth tokens: Google `access_token` (1h lifetime) + `refresh_token` (long-lived) in `credentials.json`
 - Diagnostic capture: structured logging via pino, container stderr already piped to `groups/{name}/logs/`
 
 **Current evidence (root-cause hypotheses, ranked):**
+
 1. **OAuth access_token expiry mid-session** (most likely): personal account credentials.json shows `expiry_date` ≈34 minutes in the future. Briefings + email triggers run for >30 minutes against the same MCP server instance, so tokens routinely expire mid-call. The autoauth-mcp's refresh logic may be silently failing inside the container (no host display, no manual `auth` re-run possible from headless container).
 2. **Multi-account credential fragmentation**: only `personal` and `jonathan` (whoisxml) have `credentials.json`. `attaxion` and `dev` only have `gcp-oauth.keys.json` — no granted tokens. If the agent searches the attaxion or dev account, MCP throws "no credentials" not "expired."
 3. **MCP stdio crash**: the gmail MCP is launched via `npx -y @gongrzhe/server-gmail-autoauth-mcp` per container. If the npx fetch fails (network blip), the MCP tools become unavailable for the entire container session — exactly the symptom Jonathan reported ("3 emails I've been unable to process").
@@ -21,30 +23,32 @@
 
 ## File Structure
 
-| File | Responsibility | Action |
-|---|---|---|
-| `scripts/refresh-gmail-tokens.py` | Pre-emptively refresh Google OAuth tokens for all 4 Gmail accounts (personal, jonathan, attaxion, dev). Runs on host before container spawn. | **Create** |
-| `scripts/check-gmail-mcp.sh` | Diagnostic script: probe gmail-mcp inside a running container, dump OAuth state, test a basic API call. | **Create** |
-| `src/gmail-token-refresh.ts` | Host-side helper: read each `~/.gmail-mcp*/credentials.json`, check expiry, trigger refresh by shelling to `refresh-gmail-tokens.py`. Called from `enqueueEmailTrigger` and the morning-briefing task path. | **Create** |
-| `src/container-runner.ts` | Already mounts the Gmail credential dirs. Ensure `attaxion` and `dev` mounts are conditional only if `credentials.json` exists; otherwise warn at spawn time. | **Modify** |
-| `src/index.ts:782` | `enqueueEmailTrigger`: add a token-pre-refresh step before the agent spawns. Existing close-delay/progress-handle logic untouched. | **Modify** |
-| `src/task-scheduler.ts` | `runTask`: same token-pre-refresh for the morning-briefing scheduled task. | **Modify** |
-| `container/agent-runner/src/index.ts:546-549` | Gmail MCP launch: add `env` carrying explicit `GMAIL_MCP_HOME=/home/node/.gmail-mcp` so the autoauth-mcp doesn't fall back to defaults. Leave the MCP server itself alone — fixes are host-side. | **Modify** |
-| `container/skills/morning-briefing/SKILL.md` | Add "If Gmail tools become unavailable mid-briefing, do NOT continue silently — emit a clearly-labeled `GMAIL-DEGRADED:` line with the exact tool error and skip Gmail-dependent sections rather than guessing." | **Modify** |
-| `groups/main/CLAUDE.md` | Add a Gmail MCP failure mode entry to the Evidence discipline section: subject-only classification is permitted but must be labeled `[CLASSIFIED FROM SUBJECT ONLY — body unavailable]` so the user can spot degraded output. | **Modify** |
-| `tests/gmail-token-refresh.test.ts` | Unit tests for token-expiry math and the refresh-needed predicate. | **Create** |
-| `docs/RUNBOOK-gmail-mcp.md` | One-page operator runbook: how to manually re-auth a Gmail account, what the diagnostic logs look like, how to recover. | **Create** |
+| File                                          | Responsibility                                                                                                                                                                                                                | Action     |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `scripts/refresh-gmail-tokens.py`             | Pre-emptively refresh Google OAuth tokens for all 4 Gmail accounts (personal, jonathan, attaxion, dev). Runs on host before container spawn.                                                                                  | **Create** |
+| `scripts/check-gmail-mcp.sh`                  | Diagnostic script: probe gmail-mcp inside a running container, dump OAuth state, test a basic API call.                                                                                                                       | **Create** |
+| `src/gmail-token-refresh.ts`                  | Host-side helper: read each `~/.gmail-mcp*/credentials.json`, check expiry, trigger refresh by shelling to `refresh-gmail-tokens.py`. Called from `enqueueEmailTrigger` and the morning-briefing task path.                   | **Create** |
+| `src/container-runner.ts`                     | Already mounts the Gmail credential dirs. Ensure `attaxion` and `dev` mounts are conditional only if `credentials.json` exists; otherwise warn at spawn time.                                                                 | **Modify** |
+| `src/index.ts:782`                            | `enqueueEmailTrigger`: add a token-pre-refresh step before the agent spawns. Existing close-delay/progress-handle logic untouched.                                                                                            | **Modify** |
+| `src/task-scheduler.ts`                       | `runTask`: same token-pre-refresh for the morning-briefing scheduled task.                                                                                                                                                    | **Modify** |
+| `container/agent-runner/src/index.ts:546-549` | Gmail MCP launch: add `env` carrying explicit `GMAIL_MCP_HOME=/home/node/.gmail-mcp` so the autoauth-mcp doesn't fall back to defaults. Leave the MCP server itself alone — fixes are host-side.                              | **Modify** |
+| `container/skills/morning-briefing/SKILL.md`  | Add "If Gmail tools become unavailable mid-briefing, do NOT continue silently — emit a clearly-labeled `GMAIL-DEGRADED:` line with the exact tool error and skip Gmail-dependent sections rather than guessing."              | **Modify** |
+| `groups/main/CLAUDE.md`                       | Add a Gmail MCP failure mode entry to the Evidence discipline section: subject-only classification is permitted but must be labeled `[CLASSIFIED FROM SUBJECT ONLY — body unavailable]` so the user can spot degraded output. | **Modify** |
+| `tests/gmail-token-refresh.test.ts`           | Unit tests for token-expiry math and the refresh-needed predicate.                                                                                                                                                            | **Create** |
+| `docs/RUNBOOK-gmail-mcp.md`                   | One-page operator runbook: how to manually re-auth a Gmail account, what the diagnostic logs look like, how to recover.                                                                                                       | **Create** |
 
 ---
 
 ## Task 1: Restart the stuck Telegram-main container (free, immediate)
 
 **Files:**
+
 - None (operational only — uses host CLI)
 
 - [ ] **Step 1: List currently running NanoClaw containers**
 
 Run:
+
 ```bash
 docker ps --filter name=nanoclaw- --format '{{.Names}} {{.Status}}'
 ```
@@ -101,6 +105,7 @@ No code changes — skip the commit.
 ## Task 2: Write `scripts/refresh-gmail-tokens.py` to pre-emptively refresh OAuth
 
 **Files:**
+
 - Create: `scripts/refresh-gmail-tokens.py`
 
 - [ ] **Step 1: Create the script**
@@ -258,17 +263,20 @@ python3 scripts/refresh-gmail-tokens.py
 ```
 
 Expected output:
+
 ```
 [OK] personal: token valid for 34 more min
 [OK] jonathan: token valid for ... more min
 [MISSING] attaxion: no credentials.json (not authorized)
 [MISSING] dev: no credentials.json (not authorized)
 ```
+
 Exit code 2 (at least one missing — expected).
 
 - [ ] **Step 4: Force a refresh by lying about expiry**
 
 Test the refresh path against a real Google endpoint without breaking anything:
+
 ```bash
 python3 -c "
 import json, time
@@ -284,6 +292,7 @@ python3 scripts/refresh-gmail-tokens.py
 ```
 
 Expected:
+
 ```
 [OK] personal: refreshed (now valid for ~60 min)
 [MISSING] attaxion: ...
@@ -325,12 +334,14 @@ Standalone for now — wired into container spawn paths in next commits."
 ## Task 3: Write the host-side TypeScript helper `src/gmail-token-refresh.ts`
 
 **Files:**
+
 - Create: `src/gmail-token-refresh.ts`
 - Create: `src/gmail-token-refresh.test.ts`
 
 - [ ] **Step 1: Write the failing test first**
 
 Create `src/gmail-token-refresh.test.ts`:
+
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -413,6 +424,7 @@ Expected: `Cannot find module './gmail-token-refresh.js'` — all 5 tests fail.
 - [ ] **Step 3: Implement the helper**
 
 Create `src/gmail-token-refresh.ts`:
+
 ```typescript
 import { execFile } from 'child_process';
 import path from 'path';
@@ -547,6 +559,7 @@ script-crash exit, and timeout. 5 new tests, full suite green."
 ## Task 4: Wire token refresh into `enqueueEmailTrigger`
 
 **Files:**
+
 - Modify: `src/index.ts:782` (the `enqueueEmailTrigger` factory)
 
 - [ ] **Step 1: Read the current enqueueEmailTrigger code (already touched in 9d169c8 + 5b75b5b)**
@@ -560,6 +573,7 @@ Goal: insert a `refreshGmailTokens()` call between the group lookup and the prog
 - [ ] **Step 2: Add the import**
 
 In `src/index.ts`, after the existing imports (around line 50), add:
+
 ```typescript
 import { refreshGmailTokens } from './gmail-token-refresh.js';
 ```
@@ -567,45 +581,47 @@ import { refreshGmailTokens } from './gmail-token-refresh.js';
 - [ ] **Step 3: Insert the refresh call inside enqueueEmailTrigger**
 
 Find this block (around line 790):
-```typescript
-        const group = registeredGroups[chatJid];
-        if (!group) {
-          logger.warn({ chatJid }, 'No group for email trigger');
-          return;
-        }
 
-        // System-injected progress message: email triggers routinely take
+```typescript
+const group = registeredGroups[chatJid];
+if (!group) {
+  logger.warn({ chatJid }, 'No group for email trigger');
+  return;
+}
+
+// System-injected progress message: email triggers routinely take
 ```
 
 Replace with:
+
 ```typescript
-        const group = registeredGroups[chatJid];
-        if (!group) {
-          logger.warn({ chatJid }, 'No group for email trigger');
-          return;
-        }
+const group = registeredGroups[chatJid];
+if (!group) {
+  logger.warn({ chatJid }, 'No group for email trigger');
+  return;
+}
 
-        // Pre-refresh Gmail OAuth tokens before spawning the container.
-        // Tokens have a 1-hour lifetime and routinely expire mid-session,
-        // causing the gmail-mcp inside the container to silently lose its
-        // ability to read email bodies. Refreshing here is fast (<200ms
-        // when nothing needs refresh) and never blocks the spawn — even on
-        // refresh failure we proceed with subject-only classification
-        // rather than dropping the trigger.
-        const refreshResult = await refreshGmailTokens();
-        if (refreshResult.status === 'error') {
-          logger.warn(
-            { chatJid, summary: refreshResult.summary },
-            'Gmail token refresh failed before email trigger — agent may degrade to subject-only',
-          );
-        } else if (refreshResult.status === 'missing') {
-          logger.debug(
-            { chatJid, summary: refreshResult.summary },
-            'Some Gmail accounts not authorized — proceeding with available accounts',
-          );
-        }
+// Pre-refresh Gmail OAuth tokens before spawning the container.
+// Tokens have a 1-hour lifetime and routinely expire mid-session,
+// causing the gmail-mcp inside the container to silently lose its
+// ability to read email bodies. Refreshing here is fast (<200ms
+// when nothing needs refresh) and never blocks the spawn — even on
+// refresh failure we proceed with subject-only classification
+// rather than dropping the trigger.
+const refreshResult = await refreshGmailTokens();
+if (refreshResult.status === 'error') {
+  logger.warn(
+    { chatJid, summary: refreshResult.summary },
+    'Gmail token refresh failed before email trigger — agent may degrade to subject-only',
+  );
+} else if (refreshResult.status === 'missing') {
+  logger.debug(
+    { chatJid, summary: refreshResult.summary },
+    'Some Gmail accounts not authorized — proceeding with available accounts',
+  );
+}
 
-        // System-injected progress message: email triggers routinely take
+// System-injected progress message: email triggers routinely take
 ```
 
 - [ ] **Step 4: Run typecheck**
@@ -645,6 +661,7 @@ mid-session OAuth token expiry that triggers the gmail-mcp drop."
 ## Task 5: Wire token refresh into the morning-briefing scheduled task path
 
 **Files:**
+
 - Modify: `src/task-scheduler.ts` (the `runScheduledTask` function)
 
 - [ ] **Step 1: Read the current runTask code**
@@ -664,32 +681,34 @@ import { refreshGmailTokens } from './gmail-token-refresh.js';
 - [ ] **Step 3: Insert refresh call before runContainerAgent**
 
 Find this block (around line 124):
+
 ```typescript
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
+logger.info(
+  { taskId: task.id, group: task.group_folder },
+  'Running scheduled task',
+);
 ```
 
 Replace with:
-```typescript
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
 
-  // Pre-refresh Gmail tokens for tasks that may touch email (morning
-  // briefing, weekly review). Cheap and harmless for tasks that don't
-  // touch Gmail; the refresh script is fast and only does network work
-  // when something is actually about to expire. We don't gate this on
-  // task name because users can rename briefings.
-  const gmailRefresh = await refreshGmailTokens();
-  if (gmailRefresh.status === 'error') {
-    logger.warn(
-      { taskId: task.id, summary: gmailRefresh.summary },
-      'Gmail token refresh failed before scheduled task — Gmail-dependent sections may degrade',
-    );
-  }
+```typescript
+logger.info(
+  { taskId: task.id, group: task.group_folder },
+  'Running scheduled task',
+);
+
+// Pre-refresh Gmail tokens for tasks that may touch email (morning
+// briefing, weekly review). Cheap and harmless for tasks that don't
+// touch Gmail; the refresh script is fast and only does network work
+// when something is actually about to expire. We don't gate this on
+// task name because users can rename briefings.
+const gmailRefresh = await refreshGmailTokens();
+if (gmailRefresh.status === 'error') {
+  logger.warn(
+    { taskId: task.id, summary: gmailRefresh.summary },
+    'Gmail token refresh failed before scheduled task — Gmail-dependent sections may degrade',
+  );
+}
 ```
 
 - [ ] **Step 4: Run typecheck and tests**
@@ -717,68 +736,72 @@ tokens valid for the entire briefing window."
 ## Task 6: Make `attaxion` and `dev` Gmail mounts conditional + add explicit GMAIL_MCP_HOME env
 
 **Files:**
+
 - Modify: `src/container-runner.ts:200-216` (the gmailDirs loop)
 - Modify: `container/agent-runner/src/index.ts:546-549` (Gmail MCP launch)
 
 - [ ] **Step 1: Update container-runner mount logic**
 
 Find this block in `src/container-runner.ts`:
+
 ```typescript
-  // Gmail credentials directories (multi-account: personal, whoisxml, attaxion)
-  const homeDir = os.homedir();
-  const gmailDirs = [
-    { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
-    { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
-    { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
-  ];
-  for (const gd of gmailDirs) {
-    const gmailDir = path.join(homeDir, gd.hostDir);
-    if (fs.existsSync(gmailDir)) {
-      mounts.push({
-        hostPath: gmailDir,
-        containerPath: `/home/node/${gd.containerDir}`,
-        readonly: false, // MCP may need to refresh OAuth tokens
-      });
-    }
+// Gmail credentials directories (multi-account: personal, whoisxml, attaxion)
+const homeDir = os.homedir();
+const gmailDirs = [
+  { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
+  { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
+  { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
+];
+for (const gd of gmailDirs) {
+  const gmailDir = path.join(homeDir, gd.hostDir);
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: `/home/node/${gd.containerDir}`,
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
   }
+}
 ```
 
 Replace with:
+
 ```typescript
-  // Gmail credentials directories (multi-account: personal, whoisxml/jonathan,
-  // attaxion, dev). Only mount accounts that have a credentials.json — mounting
-  // a directory with only gcp-oauth.keys.json gives the gmail-mcp something
-  // to discover but no usable token, which produces confusing "no credentials"
-  // errors mid-session. Better to omit the account entirely so the agent
-  // never thinks it can search there.
-  const homeDir = os.homedir();
-  const gmailDirs = [
-    { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
-    { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
-    { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
-    { hostDir: '.gmail-mcp-dev', containerDir: '.gmail-mcp-dev' },
-  ];
-  for (const gd of gmailDirs) {
-    const gmailDir = path.join(homeDir, gd.hostDir);
-    const credsFile = path.join(gmailDir, 'credentials.json');
-    if (fs.existsSync(gmailDir) && fs.existsSync(credsFile)) {
-      mounts.push({
-        hostPath: gmailDir,
-        containerPath: `/home/node/${gd.containerDir}`,
-        readonly: false, // MCP may need to refresh OAuth tokens
-      });
-    } else if (fs.existsSync(gmailDir)) {
-      logger.debug(
-        { gmailDir },
-        'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet)',
-      );
-    }
+// Gmail credentials directories (multi-account: personal, whoisxml/jonathan,
+// attaxion, dev). Only mount accounts that have a credentials.json — mounting
+// a directory with only gcp-oauth.keys.json gives the gmail-mcp something
+// to discover but no usable token, which produces confusing "no credentials"
+// errors mid-session. Better to omit the account entirely so the agent
+// never thinks it can search there.
+const homeDir = os.homedir();
+const gmailDirs = [
+  { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
+  { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
+  { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
+  { hostDir: '.gmail-mcp-dev', containerDir: '.gmail-mcp-dev' },
+];
+for (const gd of gmailDirs) {
+  const gmailDir = path.join(homeDir, gd.hostDir);
+  const credsFile = path.join(gmailDir, 'credentials.json');
+  if (fs.existsSync(gmailDir) && fs.existsSync(credsFile)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: `/home/node/${gd.containerDir}`,
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  } else if (fs.existsSync(gmailDir)) {
+    logger.debug(
+      { gmailDir },
+      'Gmail account directory present but no credentials.json — skipping mount (account not authorized yet)',
+    );
   }
+}
 ```
 
 - [ ] **Step 2: Update agent-runner Gmail MCP launch to set explicit env**
 
 In `container/agent-runner/src/index.ts`, find:
+
 ```typescript
         gmail: {
           command: 'npx',
@@ -787,6 +810,7 @@ In `container/agent-runner/src/index.ts`, find:
 ```
 
 Replace with:
+
 ```typescript
         gmail: {
           command: 'npx',
@@ -842,6 +866,7 @@ Two related Gmail-MCP reliability fixes:
 ## Task 7: Add the `GMAIL-DEGRADED:` skill rule + Evidence-discipline note
 
 **Files:**
+
 - Modify: `container/skills/morning-briefing/SKILL.md`
 - Modify: `groups/main/CLAUDE.md`
 
@@ -902,6 +927,7 @@ failures are visible instead of hallucinated."
 ## Task 8: Write `scripts/check-gmail-mcp.sh` diagnostic script
 
 **Files:**
+
 - Create: `scripts/check-gmail-mcp.sh`
 
 - [ ] **Step 1: Create the script**
@@ -1001,11 +1027,12 @@ no longer available'."
 ## Task 9: Write `docs/RUNBOOK-gmail-mcp.md` operator runbook
 
 **Files:**
+
 - Create: `docs/RUNBOOK-gmail-mcp.md`
 
 - [ ] **Step 1: Create the runbook**
 
-```markdown
+````markdown
 # Gmail MCP Runbook
 
 What to do when the agent says it can't read email bodies, or when
@@ -1025,13 +1052,13 @@ cd ~/dev/nanoclaw
 
 This dumps the OAuth token state and runs a probe. Possible outcomes:
 
-| Output | Cause | Fix |
-|---|---|---|
-| `(directory missing inside container)` | Container started without the Gmail mount. Almost certainly a bug — check `src/container-runner.ts` mount logic. | Restart the host service. |
-| `minutes_until_expiry: -X.X` (negative) | Access token expired and the in-container refresh failed. | Run `python3 scripts/refresh-gmail-tokens.py` on the host (rewrites the credentials.json that's bind-mounted into the container). |
-| `(probe failed — see error above)` with "ECONNREFUSED" or "fetch failed" | Container has no outbound network OR the npx fetch for the gmail-mcp package failed. | Check `docker logs <container>` for npm errors. May need to pre-bake the gmail-mcp into the container image (separate task). |
-| `(credentials.json missing)` | Account was never authorized OR credentials file was deleted. | Re-authorize manually (see section 2 below). |
-| Tool list returns successfully but the agent still says "unavailable" | The MCP is healthy but the agent's model context lost the tool registration. | Send the agent a new message — the next container spawn will re-register tools. |
+| Output                                                                   | Cause                                                                                                            | Fix                                                                                                                               |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `(directory missing inside container)`                                   | Container started without the Gmail mount. Almost certainly a bug — check `src/container-runner.ts` mount logic. | Restart the host service.                                                                                                         |
+| `minutes_until_expiry: -X.X` (negative)                                  | Access token expired and the in-container refresh failed.                                                        | Run `python3 scripts/refresh-gmail-tokens.py` on the host (rewrites the credentials.json that's bind-mounted into the container). |
+| `(probe failed — see error above)` with "ECONNREFUSED" or "fetch failed" | Container has no outbound network OR the npx fetch for the gmail-mcp package failed.                             | Check `docker logs <container>` for npm errors. May need to pre-bake the gmail-mcp into the container image (separate task).      |
+| `(credentials.json missing)`                                             | Account was never authorized OR credentials file was deleted.                                                    | Re-authorize manually (see section 2 below).                                                                                      |
+| Tool list returns successfully but the agent still says "unavailable"    | The MCP is healthy but the agent's model context lost the tool registration.                                     | Send the agent a new message — the next container spawn will re-register tools.                                                   |
 
 ## 1. Pre-emptively refresh tokens (no downtime)
 
@@ -1044,11 +1071,12 @@ python3 ~/dev/nanoclaw/scripts/refresh-gmail-tokens.py
 \`\`\`
 
 Exit codes:
+
 - 0: All accounts checked, all good
 - 2: At least one account is missing credentials.json (expected for
-     accounts you haven't authorized yet — attaxion, dev)
+  accounts you haven't authorized yet — attaxion, dev)
 - 3: At least one refresh failed (refresh_token revoked, network, etc.)
-     — see section 2 to manually re-auth that account
+  — see section 2 to manually re-auth that account
 
 ## 2. Manually re-authorize a Gmail account
 
@@ -1057,15 +1085,19 @@ password, sign out everywhere, or hit the "Manage third-party access"
 revoke button), the only fix is to re-run the OAuth flow from scratch.
 
 \`\`\`bash
+
 # 1. Make sure the OAuth client config is in place
-ls ~/.gmail-mcp/gcp-oauth.keys.json   # personal
-ls ~/.gmail-mcp-jonathan/gcp-oauth.keys.json   # whoisxml
+
+ls ~/.gmail-mcp/gcp-oauth.keys.json # personal
+ls ~/.gmail-mcp-jonathan/gcp-oauth.keys.json # whoisxml
 
 # 2. Run the gmail-mcp's auth helper (opens a browser)
+
 cd ~/.gmail-mcp
 npx -y @gongrzhe/server-gmail-autoauth-mcp auth
 
 # Repeat for each account, copying the keys.json into the right dir first
+
 \`\`\`
 
 After re-auth, `credentials.json` will be regenerated with a fresh
@@ -1076,13 +1108,17 @@ refresh_token. Confirm with section 1's refresh script.
 If the container is wedged but you don't want to bounce the whole host:
 
 \`\`\`bash
+
 # Find the stuck container
+
 docker ps --filter name=nanoclaw- --format '{{.Names}}'
 
 # Send the close sentinel (graceful)
-touch ~/dev/nanoclaw/data/ipc/<group>/input/_close
+
+touch ~/dev/nanoclaw/data/ipc/<group>/input/\_close
 
 # Hard stop if it doesn't exit within 30s
+
 docker stop -t 5 <container-name>
 \`\`\`
 
@@ -1093,7 +1129,7 @@ The next agent trigger will spawn a fresh container with refreshed tokens.
 \`\`\`bash
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 sleep 5
-launchctl list | grep com.nanoclaw   # should show a new PID
+launchctl list | grep com.nanoclaw # should show a new PID
 tail -f ~/dev/nanoclaw/logs/nanoclaw.log
 \`\`\`
 
@@ -1107,7 +1143,7 @@ After this runbook's commits ship, the morning briefing should:
   affected email with `[CLASSIFIED FROM SUBJECT ONLY]`
 - The host log should show `gmail-token-refresh: all accounts ok` (debug
   level) before each email-trigger spawn
-\`\`\`
+  \`\`\`
 
 - [ ] **Step 2: Commit**
 
@@ -1125,12 +1161,14 @@ Single-page runbook covering:
 Pairs with the diagnostic script and refresh script added in earlier
 commits in this plan."
 ```
+````
 
 ---
 
 ## Task 10: Build, push, restart, and verify the full stack
 
 **Files:**
+
 - None (operational)
 
 - [ ] **Step 1: Run the full test suite one more time**
@@ -1199,11 +1237,13 @@ Expected: `NanoClaw running` line + `SSE connected to superpilot` line. No error
 - [ ] **Step 8: Trigger a manual test (send "hi" to the bot on Telegram)**
 
 Watch the log:
+
 ```bash
 tail -f ~/dev/nanoclaw/logs/nanoclaw.log
 ```
 
 Expected sequence:
+
 1. `Telegram message stored`
 2. `Spawning container agent`
 3. (No gmail-token-refresh log line for a plain "hi" — the refresh only fires from email triggers and scheduled tasks)
@@ -1232,11 +1272,13 @@ cp /tmp/synthetic-trigger.json ~/dev/nanoclaw/data/ipc/whatsapp_main/tasks/sse_t
 ```
 
 Watch:
+
 ```bash
 tail -f ~/dev/nanoclaw/logs/nanoclaw.log
 ```
 
 Expected sequence:
+
 1. `Email trigger enqueued for agent processing`
 2. `gmail-token-refresh: all accounts ok` (or `missing` for unauthorized accounts)
 3. `Spawning container agent`
@@ -1257,6 +1299,7 @@ Wait until ~7:35 AM local. Check Telegram for the briefing. Compare against the 
 - [ ] `session_costs` table has a new row with a real SDK cost (cents, not the old $1.85 flat number)
 
 If any item fails, capture:
+
 - The full briefing message text
 - `tail -100 ~/dev/nanoclaw/logs/nanoclaw.log`
 - The output of `./scripts/check-gmail-mcp.sh`
@@ -1271,6 +1314,7 @@ No commit needed. The plan is complete when the morning briefing passes the rubr
 ## Self-Review Checklist
 
 **Spec coverage:**
+
 - ✓ Restart stuck container (Task 1)
 - ✓ Diagnose root cause (Tasks 2, 8 — refresh script + diagnostic script give us live OAuth state and probe results)
 - ✓ Auto-reconnect (Tasks 2-5: pre-refresh tokens before every spawn that touches email)
@@ -1284,6 +1328,7 @@ No commit needed. The plan is complete when the morning briefing passes the rubr
 **Type consistency:** `GmailRefreshResult` interface defined in Task 3, used unchanged in Tasks 4 and 5. Status enum (`'ok' | 'missing' | 'error'`) matches the Python script's exit codes (0, 2, 3) consistently. The Python script writes `[OK]` / `[MISSING]` / `[ERROR]` prefixes that the runbook references in the same form.
 
 **Risk notes:**
+
 - Task 4 and 5 add a network call (`refresh-gmail-tokens.py`) before every email-trigger or scheduled-task spawn. The refresh is no-op when nothing needs refreshing, but if Google's OAuth endpoint is down, every trigger will wait the full 15s timeout. Acceptable: failures fall through to spawn-anyway behavior, and Google's OAuth uptime is famously good. If this becomes a problem we can shorten the timeout or cache "no refresh needed" decisions.
 - Task 6 changes mount logic. Containers spawned before this commit won't have the new behavior. Operator must restart the host service after merging Task 6.
 - Task 8's diagnostic script calls `npx -y @gongrzhe/server-gmail-autoauth-mcp` inside the container, which fetches the package on every run. If outbound npm is unavailable, the probe will fail — which is itself diagnostic information.

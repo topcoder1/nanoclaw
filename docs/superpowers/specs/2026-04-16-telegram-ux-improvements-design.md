@@ -16,17 +16,20 @@ Four UX issues observed in production Telegram messages (2026-04-16):
 `GmailOpsRouter` gains a reverse map from email addresses to aliases. When `register(alias, channel)` is called, it also stores `channel.emailAddress → alias`. The Gmail channel already knows its OAuth email address.
 
 `getChannel(account)` resolution order:
+
 1. Exact match on alias (e.g., `personal`) — current behavior
 2. Exact match on email→alias map (e.g., `topcoder1@gmail.com` → `personal`)
 3. Throw `Error` — preserves error for genuinely unknown accounts
 
 **Error recovery in callback router:** When `confirm_archive` fails:
+
 1. Log the error
 2. Show "⚠️ Archive failed — retrying..."
 3. Attempt alias resolution and retry once
 4. If still failing: "⚠️ Couldn't archive. Try again later." with a Retry button (`retry_archive:entityId`)
 
 **Changes:**
+
 - `src/gmail-ops.ts` — add `emailAddress` to `GmailOpsProvider` interface, add reverse map in `GmailOpsRouter`, update `getChannel()` resolution
 - `src/channels/gmail.ts` — expose `emailAddress` getter (from OAuth profile)
 - `src/callback-router.ts` — add retry logic in `confirm_archive`, add `retry_archive` case
@@ -37,6 +40,7 @@ Four UX issues observed in production Telegram messages (2026-04-16):
 When the agent container produces multiple output chunks in a single run, subsequent chunks edit the original Telegram message instead of sending new ones.
 
 **Mechanism:**
+
 - First output chunk: send as new message via `sendMessageWithActions()`, save returned `message_id`
 - Subsequent chunks from same container run: call `editMessageTextAndButtons()` on the original message, appending new text and updating buttons
 - If edit fails (message too old, deleted, etc.): fall back to sending a new message
@@ -44,6 +48,7 @@ When the agent container produces multiple output chunks in a single run, subseq
 **Scope boundary:** Only consolidates chunks within a single container run (identified by run ID). Cross-run deduplication is handled by the existing EmailTriggerDebouncer.
 
 **Changes:**
+
 - `src/index.ts` — track `lastMessageId` per container run in the `onData` callback, decide send-vs-edit
 
 ### 3. Actionable Buttons (Forward, Open URL, RSVP)
@@ -52,11 +57,11 @@ A new action detection layer extracts structured actions from agent output and a
 
 **Action detection** — regex patterns on agent output text, similar to `question-detector.ts`:
 
-| Pattern | Action | Button |
-|---------|--------|--------|
-| `forward.*to\s+(\S+@\S+)` | Forward email to extracted address | `📨 Forward to user@...` |
-| `RSVP.*(?:yes\|attend\|going)` | RSVP yes to calendar event | `✅ RSVP Yes` / `❌ Decline` |
-| `click.*link\|open.*link\|magic.*link` | Open URL via browser sidecar | `🔗 Open Link` |
+| Pattern                                | Action                             | Button                       |
+| -------------------------------------- | ---------------------------------- | ---------------------------- |
+| `forward.*to\s+(\S+@\S+)`              | Forward email to extracted address | `📨 Forward to user@...`     |
+| `RSVP.*(?:yes\|attend\|going)`         | RSVP yes to calendar event         | `✅ RSVP Yes` / `❌ Decline` |
+| `click.*link\|open.*link\|magic.*link` | Open URL via browser sidecar       | `🔗 Open Link`               |
 
 **Priority:** Action-specific buttons replace generic Yes/No buttons from the question detector. If `action-detector` returns results, those take priority. If not, `question-detector` runs as fallback.
 
@@ -69,11 +74,13 @@ A new action detection layer extracts structured actions from agent output and a
 - **`confirm_open_url:encodedUrl`** → triggers browser sidecar to open URL, edits message to "✅ Opened"
 
 **Safety:**
+
 - Forward: two-step confirmation (same pattern as archive)
 - Open URL: always shows full URL for inspection before confirming
 - RSVP: executes immediately (low-risk, reversible)
 
 **Changes:**
+
 - New `src/action-detector.ts` — `detectActions(text, meta): DetectedAction[]`
 - `src/callback-router.ts` — new cases: `forward`, `confirm_forward`, `cancel_forward`, `rsvp`, `open_url`, `confirm_open_url`
 - `src/gmail-ops.ts` — add `forwardThread(account, threadId, recipient)` to `GmailOps` interface and `GmailOpsRouter`
@@ -84,6 +91,7 @@ A new action detection layer extracts structured actions from agent output and a
 ### 4. Mini App Discoverability
 
 **Menu button:** On Telegram bot startup, call `setChatMenuButton` to set a persistent Web App button:
+
 - Label: "📱 App"
 - URL: `MINI_APP_URL` (Cloudflare tunnel)
 - Opens mini app dashboard (root `/` route)
@@ -95,6 +103,7 @@ A new action detection layer extracts structured actions from agent output and a
 Button order on email messages: [Action buttons] → [🌐 Full Email] → [🗄 Archive]
 
 **Changes:**
+
 - `src/channels/telegram.ts` — call `bot.api.setChatMenuButton()` during connection setup
 - `src/router.ts` — always attach Full Email button for email-category messages
 
@@ -129,20 +138,20 @@ callback-router.ts
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `src/action-detector.ts` | New — detect forward/RSVP/open-URL actions from agent text |
-| `src/calendar-ops.ts` | New — CalendarOps interface + RSVP via Google Calendar API |
-| `src/gmail-ops.ts` | Add `forwardThread` to interface, add email→alias reverse map |
-| `src/channels/gmail.ts` | Implement `forwardThread`, expose `emailAddress` getter |
-| `src/channels/telegram.ts` | Call `setChatMenuButton` on startup |
-| `src/callback-router.ts` | New cases: forward, rsvp, open_url, retry_archive; archive error recovery |
-| `src/router.ts` | Run action detection, always attach Full Email button for email messages |
-| `src/index.ts` | Track lastMessageId per container run for edit-in-place; pass email to register() |
-| `src/__tests__/action-detector.test.ts` | New — unit tests for action detection |
-| `src/__tests__/callback-router.test.ts` | Tests for forward, rsvp, open_url, retry_archive |
-| `src/__tests__/gmail-ops.test.ts` | Tests for email→alias resolution, forwardThread |
-| `src/__tests__/calendar-ops.test.ts` | New — tests for RSVP |
+| File                                    | Change                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| `src/action-detector.ts`                | New — detect forward/RSVP/open-URL actions from agent text                        |
+| `src/calendar-ops.ts`                   | New — CalendarOps interface + RSVP via Google Calendar API                        |
+| `src/gmail-ops.ts`                      | Add `forwardThread` to interface, add email→alias reverse map                     |
+| `src/channels/gmail.ts`                 | Implement `forwardThread`, expose `emailAddress` getter                           |
+| `src/channels/telegram.ts`              | Call `setChatMenuButton` on startup                                               |
+| `src/callback-router.ts`                | New cases: forward, rsvp, open_url, retry_archive; archive error recovery         |
+| `src/router.ts`                         | Run action detection, always attach Full Email button for email messages          |
+| `src/index.ts`                          | Track lastMessageId per container run for edit-in-place; pass email to register() |
+| `src/__tests__/action-detector.test.ts` | New — unit tests for action detection                                             |
+| `src/__tests__/callback-router.test.ts` | Tests for forward, rsvp, open_url, retry_archive                                  |
+| `src/__tests__/gmail-ops.test.ts`       | Tests for email→alias resolution, forwardThread                                   |
+| `src/__tests__/calendar-ops.test.ts`    | New — tests for RSVP                                                              |
 
 ## Edge Cases
 

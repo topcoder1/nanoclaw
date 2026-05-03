@@ -9,6 +9,7 @@
 Turn NanoClaw into an always-on email triage agent that extracts knowledge, routes attention, and — when confident — takes well-scoped actions on the user's behalf (append to a project's `docs/inbox/`, open a draft PR for a bug report, file a follow-up). The agent works from the SuperPilot classification stream already in production; NanoClaw runs a second, user-specific pass that knows the user's repos, preferences, and standing rules.
 
 Three user-facing surfaces in Telegram:
+
 1. **Attention queue** (`#attention` topic) — real-time push, per-email, pinned live dashboard
 2. **Archive queue** (`#archive-queue` topic) — pull digest + daily 8am PT post, pinned dashboard, never auto-archive
 3. **Action outcomes** — extracted-fact commits, draft PRs, scheduled follow-ups, posted back to `#attention` with links
@@ -68,12 +69,12 @@ Target cache hit rate: ≥85% within 5-min windows. Every new triage call shares
 
 ### 2. Three-tier model routing by confidence
 
-| Tier | Model | When | Approx. % |
-|---|---|---|---|
-| 0 | Rules only (no LLM) | Bulk/promo + skip-list hits | ~40% |
-| 1 | Haiku 4.5 + cache | First-pass on everything else | ~50% |
-| 2 | Sonnet 4.6 | Haiku confidence 0.3–0.75, OR thread escalation | ~8% |
-| 3 | Opus 4.7 | Sonnet still unsure, OR action_intent=auto_fix | ~2% |
+| Tier | Model               | When                                            | Approx. % |
+| ---- | ------------------- | ----------------------------------------------- | --------- |
+| 0    | Rules only (no LLM) | Bulk/promo + skip-list hits                     | ~40%      |
+| 1    | Haiku 4.5 + cache   | First-pass on everything else                   | ~50%      |
+| 2    | Sonnet 4.6          | Haiku confidence 0.3–0.75, OR thread escalation | ~8%       |
+| 3    | Opus 4.7            | Sonnet still unsure, OR action_intent=auto_fix  | ~2%       |
 
 Escalation = re-run with **more context** (full thread, deeper repo info, calendar state), not just a bigger model.
 
@@ -83,17 +84,22 @@ Cost envelope target: **<$1/day at 100 emails/day** on the primary account. Exce
 
 ```typescript
 interface TriageDecision {
-  queue: "attention" | "archive_candidate" | "action" | "ignore";
-  confidence: number;           // 0–1
-  reasons: string[];            // ≥2 required; retry if fewer
+  queue: 'attention' | 'archive_candidate' | 'action' | 'ignore';
+  confidence: number; // 0–1
+  reasons: string[]; // ≥2 required; retry if fewer
   action_intent?:
-    | "bug_report" | "sentry_alert" | "dependabot"
-    | "security_alert" | "deadline" | "receipt"
-    | "knowledge_extract" | "none";
+    | 'bug_report'
+    | 'sentry_alert'
+    | 'dependabot'
+    | 'security_alert'
+    | 'deadline'
+    | 'receipt'
+    | 'knowledge_extract'
+    | 'none';
   facts_extracted: { key: string; value: string; source_span: string }[];
   repo_candidates: { repo: string; score: number; signal: string }[];
-  attention_reason?: string;    // required if queue=attention
-  archive_category?: string;    // required if queue=archive_candidate
+  attention_reason?: string; // required if queue=attention
+  archive_category?: string; // required if queue=archive_candidate
 }
 ```
 
@@ -103,13 +109,13 @@ Malformed output → retry with stricter instruction → escalate to next tier.
 
 Every user action writes to `triage.db` with the delta vs. agent recommendation. That delta drives:
 
-| User signal | Updates |
-|---|---|
-| Archive click | `skip_list` (sender pattern) after 5 consistent hits |
-| "Which repo?" answer | `thread_repo_map` + re-embed keyword vector |
-| Dismiss from attention | Lower attention threshold for similar senders |
-| Override queue routing | Negative example added to context |
-| Close dispatched PR without merge | Sender → `no_autofix` cool-off |
+| User signal                       | Updates                                              |
+| --------------------------------- | ---------------------------------------------------- |
+| Archive click                     | `skip_list` (sender pattern) after 5 consistent hits |
+| "Which repo?" answer              | `thread_repo_map` + re-embed keyword vector          |
+| Dismiss from attention            | Lower attention threshold for similar senders        |
+| Override queue routing            | Negative example added to context                    |
+| Close dispatched PR without merge | Sender → `no_autofix` cool-off                       |
 
 Nightly job computes agent_agreement_rate per slice (sender-class, confidence band, queue). Drop below threshold → calibration alert posted to `#attention`.
 
@@ -131,21 +137,21 @@ Run Anthropic Batch API on last 5,000 archived emails + last 500 inbox emails ov
 
 ## Components
 
-| Component | File | Responsibility |
-|---|---|---|
-| SSE consumer | `src/email-sse.ts` (extend) | Receive classifications, dedupe, hand to triage |
-| Pre-filter | `src/triage/prefilter.ts` | SP bulk flags + skip-list lookup |
-| Triage worker | `src/triage/worker.ts` | Tier-routed classifier calls with caching |
-| Structured output | `src/triage/schema.ts` | Schema + validation + retry-on-malformed |
-| Attachment parser | `src/triage/attachments.ts` | Route to PDF/image/docx/xlsx extractors |
-| Repo indexer | `scripts/build-repo-index.ts` | Scan `~/dev/*/`, write Weaviate profiles |
-| Repo resolver | `src/triage/repo-resolver.ts` | 5-signal scoring, confidence gate |
-| Queue surfaces | `src/triage/telegram-queues.ts` | Pinned dashboards, push messages, inline buttons |
-| Action dispatcher | `src/triage/dispatcher.ts` | Route to knowledge-extract / docs-inbox / agent-container |
-| Agent-dispatch | `src/triage/agent-dispatch.ts` | Spawn container on repo worktree for auto-fix |
-| Learning store | `src/triage/learning.ts` | Skip-list, thread→repo, keyword vectors |
-| Observability | `src/triage/traces.ts` | MLflow trace emission + scorer registration |
-| Eval harness | `src/triage/eval.ts` | Shadow-mode, replay, agreement-rate computation |
+| Component         | File                            | Responsibility                                            |
+| ----------------- | ------------------------------- | --------------------------------------------------------- |
+| SSE consumer      | `src/email-sse.ts` (extend)     | Receive classifications, dedupe, hand to triage           |
+| Pre-filter        | `src/triage/prefilter.ts`       | SP bulk flags + skip-list lookup                          |
+| Triage worker     | `src/triage/worker.ts`          | Tier-routed classifier calls with caching                 |
+| Structured output | `src/triage/schema.ts`          | Schema + validation + retry-on-malformed                  |
+| Attachment parser | `src/triage/attachments.ts`     | Route to PDF/image/docx/xlsx extractors                   |
+| Repo indexer      | `scripts/build-repo-index.ts`   | Scan `~/dev/*/`, write Weaviate profiles                  |
+| Repo resolver     | `src/triage/repo-resolver.ts`   | 5-signal scoring, confidence gate                         |
+| Queue surfaces    | `src/triage/telegram-queues.ts` | Pinned dashboards, push messages, inline buttons          |
+| Action dispatcher | `src/triage/dispatcher.ts`      | Route to knowledge-extract / docs-inbox / agent-container |
+| Agent-dispatch    | `src/triage/agent-dispatch.ts`  | Spawn container on repo worktree for auto-fix             |
+| Learning store    | `src/triage/learning.ts`        | Skip-list, thread→repo, keyword vectors                   |
+| Observability     | `src/triage/traces.ts`          | MLflow trace emission + scorer registration               |
+| Eval harness      | `src/triage/eval.ts`            | Shadow-mode, replay, agreement-rate computation           |
 
 ## Data Model
 
@@ -259,6 +265,7 @@ One collection `repo_profiles` with embedding of README + CLAUDE.md + top-level 
 ### Action outcomes
 
 Posted back to `#attention` as replies under the original email's push message:
+
 - Knowledge extracted → "📝 Facts added to group `<name>/knowledge.md`"
 - Docs-inbox commit (v2) → "📄 Committed to `<repo>@<branch>`" + link
 - Draft PR (v3) → "🔧 Draft PR opened: `<url>`" + `[View PR]` button
@@ -267,13 +274,13 @@ Posted back to `#attention` as replies under the original email's push message:
 
 ### Signals
 
-| # | Signal | Weight | Source |
-|---|---|---|---|
-| 1 | Explicit GitHub URL / repo keyword / stack-trace filepath match | 1.0 | Email body |
-| 2 | Sender-based (GitHub headers, Sentry project, Dependabot subject) | 0.8 | Headers + sender |
-| 3 | Thread history (prior `thread_repo_map` entry) | 0.6 | SQLite |
-| 4 | Keyword embedding similarity vs `repo_profiles` | 0.4 | Weaviate |
-| 5 | Ask user | — | Fallback |
+| #   | Signal                                                            | Weight | Source           |
+| --- | ----------------------------------------------------------------- | ------ | ---------------- |
+| 1   | Explicit GitHub URL / repo keyword / stack-trace filepath match   | 1.0    | Email body       |
+| 2   | Sender-based (GitHub headers, Sentry project, Dependabot subject) | 0.8    | Headers + sender |
+| 3   | Thread history (prior `thread_repo_map` entry)                    | 0.6    | SQLite           |
+| 4   | Keyword embedding similarity vs `repo_profiles`                   | 0.4    | Weaviate         |
+| 5   | Ask user                                                          | —      | Fallback         |
 
 ### Resolution gate
 
@@ -288,6 +295,7 @@ else:
 ### Seeding the repo index
 
 **Auto-scan on setup.** For each `~/dev/*/`:
+
 - `package.json` / `pyproject.toml` → name, description, keywords
 - `README.md` first 500 chars
 - `CLAUDE.md` full
@@ -297,6 +305,7 @@ else:
 - Last commit date — **active filter: last 90 days only**
 
 **One-shot user confirmation.** Telegram message with extracted profiles; user edits or approves. Explicitly asked:
+
 1. Auto-fix allowlist (which repos may receive dispatched draft PRs)
 2. Sender → repo mappings for services that don't self-identify (Sentry project names, etc.)
 3. Aliases / nicknames ("the email thing" = superpilot)
@@ -357,29 +366,29 @@ Deferred: draft email replies, calendar event creation, Notion/Linear tickets, m
 
 ### Must use (leverage, not replaceable)
 
-| Skill | Where | Why |
-|---|---|---|
-| `claude-api` | Classifier | Prompt caching — 5–10× cost/latency win, non-obvious setup |
-| `superpowers:writing-plans` | Build-time | Next step after this spec |
-| `superpowers:test-driven-development` | Build-time | Deterministic logic (pre-filter, resolver, skip-list promotion) |
-| `mlflow-traces` | Runtime | Foundation for calibration, drift detection, LLM-judge scoring |
-| `/investigate` | v3 containers | Forces systematic debug flow when unsupervised |
-| `/freeze` | v3 containers | Scopes edits to one repo — real guardrail |
-| `/careful` | v3 containers | Blocks destructive commands — real guardrail |
-| `security-reviewer` (agent) | v3 PR gate | Independent scan before `gh pr create --draft` |
-| `/add-pdf-reader` | NanoClaw | Unlocks ~30% of signal (receipts, invoices, contracts) |
-| `/add-image-vision` | NanoClaw | Unlocks bug screenshots, photographed receipts |
+| Skill                                 | Where         | Why                                                             |
+| ------------------------------------- | ------------- | --------------------------------------------------------------- |
+| `claude-api`                          | Classifier    | Prompt caching — 5–10× cost/latency win, non-obvious setup      |
+| `superpowers:writing-plans`           | Build-time    | Next step after this spec                                       |
+| `superpowers:test-driven-development` | Build-time    | Deterministic logic (pre-filter, resolver, skip-list promotion) |
+| `mlflow-traces`                       | Runtime       | Foundation for calibration, drift detection, LLM-judge scoring  |
+| `/investigate`                        | v3 containers | Forces systematic debug flow when unsupervised                  |
+| `/freeze`                             | v3 containers | Scopes edits to one repo — real guardrail                       |
+| `/careful`                            | v3 containers | Blocks destructive commands — real guardrail                    |
+| `security-reviewer` (agent)           | v3 PR gate    | Independent scan before `gh pr create --draft`                  |
+| `/add-pdf-reader`                     | NanoClaw      | Unlocks ~30% of signal (receipts, invoices, contracts)          |
+| `/add-image-vision`                   | NanoClaw      | Unlocks bug screenshots, photographed receipts                  |
 
 ### Nice to use (save implementation time)
 
-| Skill | Where | Why |
-|---|---|---|
-| `/ship` | v3 PR creation | Reuse existing PR flow |
-| `/review` | v3 self-review | Pre-check diff before opening PR |
-| `/defuddle` | URL content | Cheaper/cleaner than WebFetch |
-| `/checkpoint` | v3 long-running | Recover mid-run if container dies |
-| `git-master` (agent) | v2 + v3 commits | Atomic, well-named commits |
-| `anthropic-skills:consolidate-memory` | Weekly cron | Prune skip-list, dedupe mappings |
+| Skill                                 | Where           | Why                               |
+| ------------------------------------- | --------------- | --------------------------------- |
+| `/ship`                               | v3 PR creation  | Reuse existing PR flow            |
+| `/review`                             | v3 self-review  | Pre-check diff before opening PR  |
+| `/defuddle`                           | URL content     | Cheaper/cleaner than WebFetch     |
+| `/checkpoint`                         | v3 long-running | Recover mid-run if container dies |
+| `git-master` (agent)                  | v2 + v3 commits | Atomic, well-named commits        |
+| `anthropic-skills:consolidate-memory` | Weekly cron     | Prune skip-list, dedupe mappings  |
 
 ### Explicit skip
 
@@ -467,6 +476,7 @@ EMAIL_INTEL_TG_ARCHIVE_TOPIC=<topic_id>
 ## Open Questions
 
 None blocking. To revisit post-v1:
+
 - Obsidian vault mirroring of extracted facts — user has not indicated Obsidian usage; defer.
 - Meeting-time proposer — requires calendar-state integration; defer to v4.
 - Subscription / bill tracker — low volume, manual handling acceptable until proven otherwise.

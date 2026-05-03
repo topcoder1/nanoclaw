@@ -16,34 +16,34 @@
 
 ### New files
 
-| Path | Responsibility |
-|---|---|
-| `migrations/2026-04-19-ux-expansion.sql` | Tables + columns + CHECK updates |
-| `src/triage/sender-kind.ts` | Bot/human + transactional classification (pure) |
-| `src/triage/mute-filter.ts` | SSE intake filter + cascade-resolve helper |
-| `src/triage/snooze-scheduler.ts` | 60s wake-tick loop |
-| `src/triage/unsubscribe-executor.ts` | Header parse + method picker + exec |
-| `src/mini-app/actions.ts` | Action route handlers (mounted in server.ts) |
-| `src/mini-app/templates/action-row.ts` | Classification-aware button row renderer |
-| `src/triage/__tests__/sender-kind.test.ts` | |
-| `src/triage/__tests__/mute-filter.test.ts` | |
-| `src/triage/__tests__/snooze-scheduler.test.ts` | |
-| `src/triage/__tests__/unsubscribe-executor.test.ts` | |
-| `src/__tests__/mini-app-actions.test.ts` | Route tests |
-| `src/__tests__/miniapp-ux-expansion-integration.test.ts` | End-to-end |
+| Path                                                     | Responsibility                                  |
+| -------------------------------------------------------- | ----------------------------------------------- |
+| `migrations/2026-04-19-ux-expansion.sql`                 | Tables + columns + CHECK updates                |
+| `src/triage/sender-kind.ts`                              | Bot/human + transactional classification (pure) |
+| `src/triage/mute-filter.ts`                              | SSE intake filter + cascade-resolve helper      |
+| `src/triage/snooze-scheduler.ts`                         | 60s wake-tick loop                              |
+| `src/triage/unsubscribe-executor.ts`                     | Header parse + method picker + exec             |
+| `src/mini-app/actions.ts`                                | Action route handlers (mounted in server.ts)    |
+| `src/mini-app/templates/action-row.ts`                   | Classification-aware button row renderer        |
+| `src/triage/__tests__/sender-kind.test.ts`               |                                                 |
+| `src/triage/__tests__/mute-filter.test.ts`               |                                                 |
+| `src/triage/__tests__/snooze-scheduler.test.ts`          |                                                 |
+| `src/triage/__tests__/unsubscribe-executor.test.ts`      |                                                 |
+| `src/__tests__/mini-app-actions.test.ts`                 | Route tests                                     |
+| `src/__tests__/miniapp-ux-expansion-integration.test.ts` | End-to-end                                      |
 
 ### Modified files
 
-| Path | Change |
-|---|---|
-| `src/mini-app/server.ts` | Wire `actions.ts` routes |
-| `src/mini-app/templates/email-full.ts` | Swap static row for `renderActionRow()` |
-| `src/email-sse.ts` | Call `muteFilter`, populate `sender_kind` + `subtype` |
-| `src/tracked-items.ts` | Add `sender_kind`, `subtype` columns + types |
-| `src/index.ts` | Start `startSnoozeScheduler` alongside reconcilers |
-| `src/gmail-ops.ts` | Add `sendEmail` method on `GmailOps` + `GmailOpsProvider` |
-| `src/channels/gmail.ts` | Implement `sendEmail` via `gmail.users.messages.send` |
-| `scripts/qa/invariants.ts` | Register `muted-threads-never-visible` |
+| Path                                   | Change                                                    |
+| -------------------------------------- | --------------------------------------------------------- |
+| `src/mini-app/server.ts`               | Wire `actions.ts` routes                                  |
+| `src/mini-app/templates/email-full.ts` | Swap static row for `renderActionRow()`                   |
+| `src/email-sse.ts`                     | Call `muteFilter`, populate `sender_kind` + `subtype`     |
+| `src/tracked-items.ts`                 | Add `sender_kind`, `subtype` columns + types              |
+| `src/index.ts`                         | Start `startSnoozeScheduler` alongside reconcilers        |
+| `src/gmail-ops.ts`                     | Add `sendEmail` method on `GmailOps` + `GmailOpsProvider` |
+| `src/channels/gmail.ts`                | Implement `sendEmail` via `gmail.users.messages.send`     |
+| `scripts/qa/invariants.ts`             | Register `muted-threads-never-visible`                    |
 
 ---
 
@@ -52,6 +52,7 @@
 ### Task 1: Add tables, columns, and CHECK updates
 
 **Files:**
+
 - Create: `migrations/2026-04-19-ux-expansion.sql`
 - Modify: `src/db.ts` (register the migration in the runner)
 
@@ -67,7 +68,13 @@ import path from 'node:path';
 
 describe('2026-04-19 ux expansion migration', () => {
   const sql = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'migrations', '2026-04-19-ux-expansion.sql'),
+    path.join(
+      __dirname,
+      '..',
+      '..',
+      'migrations',
+      '2026-04-19-ux-expansion.sql',
+    ),
     'utf8',
   );
 
@@ -93,7 +100,9 @@ describe('2026-04-19 ux expansion migration', () => {
   it('creates muted_threads table with expected columns', () => {
     const db = seed();
     db.exec(sql);
-    const cols = db.prepare("PRAGMA table_info('muted_threads')").all() as Array<{
+    const cols = db
+      .prepare("PRAGMA table_info('muted_threads')")
+      .all() as Array<{
       name: string;
       notnull: number;
       pk: number;
@@ -154,9 +163,7 @@ describe('2026-04-19 ux expansion migration', () => {
     db.exec(sql);
     expect(() =>
       db
-        .prepare(
-          'INSERT INTO tracked_items (id, state) VALUES (?, ?)',
-        )
+        .prepare('INSERT INTO tracked_items (id, state) VALUES (?, ?)')
         .run('t1', 'snoozed'),
     ).not.toThrow();
   });
@@ -317,6 +324,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 1"
 ### Task 2: Pure classification helpers
 
 **Files:**
+
 - Create: `src/triage/sender-kind.ts`
 - Test: `src/triage/__tests__/sender-kind.test.ts`
 
@@ -357,21 +365,33 @@ describe('classifySender', () => {
   });
 
   it('returns bot when From local-part is a no-reply variant', () => {
-    expect(classifySender({ from: 'no-reply@stripe.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'noreply@apple.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'do-not-reply@bank.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'notifications@github.com', headers: {} })).toBe('bot');
+    expect(classifySender({ from: 'no-reply@stripe.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'noreply@apple.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'do-not-reply@bank.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(
+      classifySender({ from: 'notifications@github.com', headers: {} }),
+    ).toBe('bot');
   });
 
   it('returns bot when sender domain matches known ESP', () => {
-    expect(classifySender({ from: 'x@mail.mailchimp.com', headers: {} })).toBe('bot');
-    expect(classifySender({ from: 'bounce@amazonses.com', headers: {} })).toBe('bot');
+    expect(classifySender({ from: 'x@mail.mailchimp.com', headers: {} })).toBe(
+      'bot',
+    );
+    expect(classifySender({ from: 'bounce@amazonses.com', headers: {} })).toBe(
+      'bot',
+    );
   });
 
   it('returns human for an ordinary personal address with no bot signals', () => {
-    expect(
-      classifySender({ from: 'jane@personal.com', headers: {} }),
-    ).toBe('human');
+    expect(classifySender({ from: 'jane@personal.com', headers: {} })).toBe(
+      'human',
+    );
   });
 
   it('returns human when inconclusive (fail-open)', () => {
@@ -567,6 +587,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 2"
 ### Task 3: Mute filter + cascade-resolve helper
 
 **Files:**
+
 - Create: `src/triage/mute-filter.ts`
 - Test: `src/triage/__tests__/mute-filter.test.ts`
 
@@ -709,10 +730,7 @@ export function muteThread(
   return { muted: true, cascaded: res.changes };
 }
 
-export function unmuteThread(
-  db: Database.Database,
-  threadId: string,
-): boolean {
+export function unmuteThread(db: Database.Database, threadId: string): boolean {
   const res = db
     .prepare('DELETE FROM muted_threads WHERE thread_id = ?')
     .run(threadId);
@@ -741,6 +759,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 3"
 ### Task 4: Hook mute-filter into SSE intake
 
 **Files:**
+
 - Modify: `src/email-sse.ts` (locate the tracked_items INSERT path; add filter call before insert)
 
 - [ ] **Step 1: Write the failing test**
@@ -783,8 +802,13 @@ describe('processIncomingEmail mute integration', () => {
     });
 
     expect(result.action).toBe('muted_skip');
-    expect(archiveThread).toHaveBeenCalledWith('alice@example.com', 'muted-thread');
-    const count = db.prepare('SELECT COUNT(*) AS n FROM tracked_items').get() as { n: number };
+    expect(archiveThread).toHaveBeenCalledWith(
+      'alice@example.com',
+      'muted-thread',
+    );
+    const count = db
+      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
+      .get() as { n: number };
     expect(count.n).toBe(0);
   });
 });
@@ -824,7 +848,10 @@ if (isThreadMuted(opts.db, event.threadId)) {
 }
 
 // Then, when inserting tracked_items, add sender_kind + subtype columns:
-const sender_kind = classifySender({ from: event.from, headers: event.headers });
+const sender_kind = classifySender({
+  from: event.from,
+  headers: event.headers,
+});
 const subtype = classifySubtype({
   from: event.from,
   gmailCategory: event.gmailCategory ?? null,
@@ -864,6 +891,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 3"
 ### Task 5: Mute route handlers
 
 **Files:**
+
 - Create: `src/mini-app/actions.ts`
 - Modify: `src/mini-app/server.ts` (mount the actions router)
 - Test: `src/__tests__/mini-app-actions.test.ts`
@@ -1024,13 +1052,11 @@ export interface ActionDeps {
 export function createActionsRouter(deps: ActionDeps): express.Router {
   const router = express.Router();
 
-  function lookupItem(id: string):
-    | { id: string; thread_id: string | null; account: string | null }
-    | null {
+  function lookupItem(
+    id: string,
+  ): { id: string; thread_id: string | null; account: string | null } | null {
     const row = deps.db
-      .prepare(
-        'SELECT id, thread_id, metadata FROM tracked_items WHERE id = ?',
-      )
+      .prepare('SELECT id, thread_id, metadata FROM tracked_items WHERE id = ?')
       .get(id) as
       | { id: string; thread_id: string | null; metadata: string | null }
       | undefined;
@@ -1038,7 +1064,8 @@ export function createActionsRouter(deps: ActionDeps): express.Router {
     let account: string | null = null;
     if (row.metadata) {
       try {
-        account = (JSON.parse(row.metadata) as { account?: string }).account ?? null;
+        account =
+          (JSON.parse(row.metadata) as { account?: string }).account ?? null;
       } catch {
         logger.debug(
           { id, component: 'mini-app-actions' },
@@ -1129,6 +1156,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 3"
 ### Task 6: Muted-threads-never-visible invariant
 
 **Files:**
+
 - Modify: `scripts/qa/invariants.ts` (add new predicate)
 - Test: `src/__tests__/invariants-runtime-proof.test.ts` (extend)
 
@@ -1158,7 +1186,9 @@ describe('muted-threads-never-visible', () => {
     `);
     // Import the predicate from invariants-predicates.ts
     // Predicate name: mutedThreadsNeverVisible (or the name you choose)
-    const { mutedThreadsNeverVisible } = require('../../scripts/qa/invariant-predicates.js');
+    const {
+      mutedThreadsNeverVisible,
+    } = require('../../scripts/qa/invariant-predicates.js');
     const result = mutedThreadsNeverVisible(db);
     expect(result.ok).toBe(false);
     expect(result.violations).toHaveLength(1);
@@ -1179,7 +1209,9 @@ describe('muted-threads-never-visible', () => {
       INSERT INTO muted_threads (thread_id, account, muted_at)
         VALUES ('T1', 'x', 1000);
     `);
-    const { mutedThreadsNeverVisible } = require('../../scripts/qa/invariant-predicates.js');
+    const {
+      mutedThreadsNeverVisible,
+    } = require('../../scripts/qa/invariant-predicates.js');
     expect(mutedThreadsNeverVisible(db).ok).toBe(true);
   });
 });
@@ -1195,9 +1227,10 @@ Expected: FAIL — predicate not exported.
 In `scripts/qa/invariant-predicates.ts` — add:
 
 ```ts
-export function mutedThreadsNeverVisible(
-  db: Database.Database,
-): { ok: boolean; violations: Array<{ id: string; thread_id: string }> } {
+export function mutedThreadsNeverVisible(db: Database.Database): {
+  ok: boolean;
+  violations: Array<{ id: string; thread_id: string }>;
+} {
   const rows = db
     .prepare(
       `SELECT ti.id, ti.thread_id
@@ -1236,6 +1269,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 3"
 ### Task 7: Snooze scheduler
 
 **Files:**
+
 - Create: `src/triage/snooze-scheduler.ts`
 - Test: `src/triage/__tests__/snooze-scheduler.test.ts`
 
@@ -1275,7 +1309,7 @@ describe('snooze-scheduler', () => {
     bus.on('email.snooze.waked', (e) => emitted.push(e));
 
     db.prepare(
-      "INSERT INTO tracked_items (id, state, queue, title) VALUES (?,?,?,?)",
+      'INSERT INTO tracked_items (id, state, queue, title) VALUES (?,?,?,?)',
     ).run('i1', 'snoozed', null, 'Payroll');
     const past = Date.now() - 1000;
     db.prepare(
@@ -1283,14 +1317,20 @@ describe('snooze-scheduler', () => {
        VALUES (?,?,?,?,?)`,
     ).run('i1', past - 1000, past, 'pushed', 'attention');
 
-    const stop = startSnoozeScheduler({ db, eventBus: bus as any, intervalMs: 60000 });
+    const stop = startSnoozeScheduler({
+      db,
+      eventBus: bus as any,
+      intervalMs: 60000,
+    });
     await vi.advanceTimersByTimeAsync(60_000);
 
-    const item = db.prepare('SELECT state, queue FROM tracked_items WHERE id=?').get('i1') as
-      | { state: string; queue: string | null }
-      | undefined;
+    const item = db
+      .prepare('SELECT state, queue FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string; queue: string | null } | undefined;
     expect(item).toEqual({ state: 'pushed', queue: 'attention' });
-    const remaining = db.prepare('SELECT COUNT(*) AS n FROM snoozed_items').get() as { n: number };
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS n FROM snoozed_items')
+      .get() as { n: number };
     expect(remaining.n).toBe(0);
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ itemId: 'i1', subject: 'Payroll' });
@@ -1301,20 +1341,29 @@ describe('snooze-scheduler', () => {
   it('future wake_at is skipped', async () => {
     const db = freshDb();
     const bus = new EventEmitter();
-    db.prepare(
-      "INSERT INTO tracked_items (id, state) VALUES (?,?)",
-    ).run('i1', 'snoozed');
+    db.prepare('INSERT INTO tracked_items (id, state) VALUES (?,?)').run(
+      'i1',
+      'snoozed',
+    );
     db.prepare(
       `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state)
        VALUES (?,?,?,?)`,
     ).run('i1', Date.now(), Date.now() + 3600_000, 'pushed');
 
-    const stop = startSnoozeScheduler({ db, eventBus: bus as any, intervalMs: 60000 });
+    const stop = startSnoozeScheduler({
+      db,
+      eventBus: bus as any,
+      intervalMs: 60000,
+    });
     await vi.advanceTimersByTimeAsync(60_000);
 
-    const item = db.prepare('SELECT state FROM tracked_items WHERE id=?').get('i1') as { state: string };
+    const item = db
+      .prepare('SELECT state FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string };
     expect(item.state).toBe('snoozed');
-    const remaining = db.prepare('SELECT COUNT(*) AS n FROM snoozed_items').get() as { n: number };
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS n FROM snoozed_items')
+      .get() as { n: number };
     expect(remaining.n).toBe(1);
 
     stop();
@@ -1325,12 +1374,19 @@ describe('snooze-scheduler', () => {
     const bus = new EventEmitter();
     const emitted: any[] = [];
     bus.on('email.snooze.waked', (e) => emitted.push(e));
-    db.prepare("INSERT INTO tracked_items (id, state) VALUES (?,?)").run('i1', 'snoozed');
+    db.prepare('INSERT INTO tracked_items (id, state) VALUES (?,?)').run(
+      'i1',
+      'snoozed',
+    );
     db.prepare(
       `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state) VALUES (?,?,?,?)`,
     ).run('i1', Date.now(), Date.now() + 30_000, 'pushed');
 
-    const stop = startSnoozeScheduler({ db, eventBus: bus as any, intervalMs: 60000 });
+    const stop = startSnoozeScheduler({
+      db,
+      eventBus: bus as any,
+      intervalMs: 60000,
+    });
     stop();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(emitted).toHaveLength(0);
@@ -1443,9 +1499,11 @@ eventBus.on('email.snooze.waked', (event) => {
   const [mainJid] = mainGroupEntry;
   const channel = findChannel(channels, mainJid);
   const text = `⏰ Reminder: ${event.payload.subject}`;
-  channel?.sendText(mainJid, text).catch((err) =>
-    logger.error({ err }, 'Failed to post snooze wake notification'),
-  );
+  channel
+    ?.sendText(mainJid, text)
+    .catch((err) =>
+      logger.error({ err }, 'Failed to post snooze wake notification'),
+    );
 });
 ```
 
@@ -1465,6 +1523,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 4"
 ### Task 8: Snooze action routes
 
 **Files:**
+
 - Modify: `src/mini-app/actions.ts` (add snooze/unsnooze)
 - Modify: `src/__tests__/mini-app-actions.test.ts` (extend)
 
@@ -1496,12 +1555,20 @@ describe('mini-app actions — snooze', () => {
     expect(res.body.wake_at).toBeLessThanOrEqual(now + 3600_000 + 5000);
 
     const snooze = db
-      .prepare('SELECT wake_at, original_state, original_queue FROM snoozed_items WHERE item_id=?')
-      .get('i1') as { wake_at: number; original_state: string; original_queue: string };
+      .prepare(
+        'SELECT wake_at, original_state, original_queue FROM snoozed_items WHERE item_id=?',
+      )
+      .get('i1') as {
+      wake_at: number;
+      original_state: string;
+      original_queue: string;
+    };
     expect(snooze.original_state).toBe('pushed');
     expect(snooze.original_queue).toBe('attention');
 
-    const item = db.prepare('SELECT state FROM tracked_items WHERE id=?').get('i1') as { state: string };
+    const item = db
+      .prepare('SELECT state FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string };
     expect(item.state).toBe('snoozed');
   });
 
@@ -1543,7 +1610,10 @@ describe('mini-app actions — snooze', () => {
 
   it('DELETE /api/email/:id/snooze restores state', async () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
-    db.prepare('UPDATE tracked_items SET state=? WHERE id=?').run('snoozed', 'i1');
+    db.prepare('UPDATE tracked_items SET state=? WHERE id=?').run(
+      'snoozed',
+      'i1',
+    );
     db.prepare(
       `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state, original_queue)
        VALUES (?,?,?,?,?)`,
@@ -1552,13 +1622,17 @@ describe('mini-app actions — snooze', () => {
 
     const res = await request(app).delete('/api/email/i1/snooze');
     expect(res.status).toBe(200);
-    const item = db.prepare('SELECT state, queue FROM tracked_items WHERE id=?').get('i1') as {
+    const item = db
+      .prepare('SELECT state, queue FROM tracked_items WHERE id=?')
+      .get('i1') as {
       state: string;
       queue: string;
     };
     expect(item.state).toBe('pushed');
     expect(item.queue).toBe('attention');
-    const count = db.prepare('SELECT COUNT(*) AS n FROM snoozed_items').get() as { n: number };
+    const count = db
+      .prepare('SELECT COUNT(*) AS n FROM snoozed_items')
+      .get() as { n: number };
     expect(count.n).toBe(0);
   });
 });
@@ -1592,7 +1666,7 @@ function resolveWakeAt(
     }
     case 'next-monday-8am': {
       const d = new Date(now);
-      const daysUntilMonday = ((1 - d.getDay() + 7) % 7) || 7;
+      const daysUntilMonday = (1 - d.getDay() + 7) % 7 || 7;
       d.setDate(d.getDate() + daysUntilMonday);
       d.setHours(8, 0, 0, 0);
       return { ok: true, wake_at: d.getTime() };
@@ -1608,7 +1682,8 @@ function resolveWakeAt(
       const t = Date.parse(customIso);
       if (Number.isNaN(t))
         return { ok: false, reason: 'invalid wake_at ISO string' };
-      if (t <= now) return { ok: false, reason: 'wake_at must be in the future' };
+      if (t <= now)
+        return { ok: false, reason: 'wake_at must be in the future' };
       if (t > now + MAX_SNOOZE_MS)
         return { ok: false, reason: 'wake_at exceeds 90-day cap' };
       return { ok: true, wake_at: t };
@@ -1646,24 +1721,24 @@ router.post('/api/email/:id/snooze', (req, res) => {
   }
 
   const existing = deps.db
-    .prepare(
-      'SELECT state, queue FROM tracked_items WHERE id = ?',
-    )
+    .prepare('SELECT state, queue FROM tracked_items WHERE id = ?')
     .get(item.id) as { state: string; queue: string | null };
 
   const tx = deps.db.transaction(() => {
-    deps.db.prepare(
-      `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state, original_queue)
+    deps.db
+      .prepare(
+        `INSERT INTO snoozed_items (item_id, snoozed_at, wake_at, original_state, original_queue)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(item_id) DO UPDATE SET
          snoozed_at = excluded.snoozed_at,
          wake_at = excluded.wake_at,
          original_state = excluded.original_state,
          original_queue = excluded.original_queue`,
-    ).run(item.id, Date.now(), parsed.wake_at, existing.state, existing.queue);
-    deps.db.prepare(
-      `UPDATE tracked_items SET state = 'snoozed' WHERE id = ?`,
-    ).run(item.id);
+      )
+      .run(item.id, Date.now(), parsed.wake_at, existing.state, existing.queue);
+    deps.db
+      .prepare(`UPDATE tracked_items SET state = 'snoozed' WHERE id = ?`)
+      .run(item.id);
   });
   tx();
 
@@ -1688,13 +1763,13 @@ router.delete('/api/email/:id/snooze', (req, res) => {
     | { original_state: string; original_queue: string | null }
     | undefined;
   if (!snooze) {
-    res.json({ ok: true });  // idempotent
+    res.json({ ok: true }); // idempotent
     return;
   }
   const tx = deps.db.transaction(() => {
-    deps.db.prepare(
-      `UPDATE tracked_items SET state = ?, queue = ? WHERE id = ?`,
-    ).run(snooze.original_state, snooze.original_queue, item.id);
+    deps.db
+      .prepare(`UPDATE tracked_items SET state = ?, queue = ? WHERE id = ?`)
+      .run(snooze.original_state, snooze.original_queue, item.id);
     deps.db.prepare(`DELETE FROM snoozed_items WHERE item_id = ?`).run(item.id);
   });
   tx();
@@ -1728,6 +1803,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 4"
 ### Task 9: Add `sendEmail` to GmailOps
 
 **Files:**
+
 - Modify: `src/gmail-ops.ts`
 - Modify: `src/channels/gmail.ts`
 - Test: `src/channels/gmail.test.ts` (extend)
@@ -1740,7 +1816,7 @@ Add to `src/channels/gmail.test.ts`:
 describe('GmailChannel.sendEmail', () => {
   it('calls gmail.users.messages.send with base64url-encoded MIME', async () => {
     const send = vi.fn().mockResolvedValue({ data: { id: 'sent-1' } });
-    const channel = makeChannelWithSendMock(send);  // existing harness; adapt
+    const channel = makeChannelWithSendMock(send); // existing harness; adapt
 
     await channel.sendEmail({
       to: 'unsub@example.com',
@@ -1753,7 +1829,9 @@ describe('GmailChannel.sendEmail', () => {
     expect(payload.userId).toBe('me');
     expect(typeof payload.requestBody.raw).toBe('string');
     // decode to verify header
-    const decoded = Buffer.from(payload.requestBody.raw, 'base64url').toString('utf-8');
+    const decoded = Buffer.from(payload.requestBody.raw, 'base64url').toString(
+      'utf-8',
+    );
     expect(decoded).toMatch(/To: unsub@example.com/);
     expect(decoded).toMatch(/Subject: unsubscribe/);
   });
@@ -1849,6 +1927,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 5"
 ### Task 10: Unsubscribe executor
 
 **Files:**
+
 - Create: `src/triage/unsubscribe-executor.ts`
 - Test: `src/triage/__tests__/unsubscribe-executor.test.ts`
 
@@ -1856,7 +1935,10 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 5"
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
-import { pickUnsubscribeMethod, executeUnsubscribe } from '../unsubscribe-executor.js';
+import {
+  pickUnsubscribeMethod,
+  executeUnsubscribe,
+} from '../unsubscribe-executor.js';
 
 describe('pickUnsubscribeMethod', () => {
   it('picks one-click when List-Unsubscribe-Post present', () => {
@@ -1864,7 +1946,10 @@ describe('pickUnsubscribeMethod', () => {
       'List-Unsubscribe': '<https://news.example.com/unsub/abc>',
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
     });
-    expect(m).toEqual({ kind: 'one-click', url: 'https://news.example.com/unsub/abc' });
+    expect(m).toEqual({
+      kind: 'one-click',
+      url: 'https://news.example.com/unsub/abc',
+    });
   });
 
   it('picks mailto when only mailto: URI present', () => {
@@ -1887,14 +1972,21 @@ describe('pickUnsubscribeMethod', () => {
         '<mailto:u@x.com>, <https://news.example.com/unsub/abc>',
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
     });
-    expect(m).toEqual({ kind: 'one-click', url: 'https://news.example.com/unsub/abc' });
+    expect(m).toEqual({
+      kind: 'one-click',
+      url: 'https://news.example.com/unsub/abc',
+    });
   });
 
   it('rejects javascript: and data: schemes', () => {
-    expect(pickUnsubscribeMethod({ 'List-Unsubscribe': '<javascript:alert(1)>' })).toEqual({
+    expect(
+      pickUnsubscribeMethod({ 'List-Unsubscribe': '<javascript:alert(1)>' }),
+    ).toEqual({
       kind: 'none',
     });
-    expect(pickUnsubscribeMethod({ 'List-Unsubscribe': '<data:text/html,foo>' })).toEqual({
+    expect(
+      pickUnsubscribeMethod({ 'List-Unsubscribe': '<data:text/html,foo>' }),
+    ).toEqual({
       kind: 'none',
     });
   });
@@ -1958,13 +2050,14 @@ describe('executeUnsubscribe', () => {
   });
 
   it('timeout → status 0, error set', async () => {
-    const fetchMock = vi.fn((_u, opts) =>
-      new Promise((_resolve, reject) => {
-        // simulate AbortController triggering
-        opts.signal.addEventListener('abort', () =>
-          reject(new Error('AbortError')),
-        );
-      }),
+    const fetchMock = vi.fn(
+      (_u, opts) =>
+        new Promise((_resolve, reject) => {
+          // simulate AbortController triggering
+          opts.signal.addEventListener('abort', () =>
+            reject(new Error('AbortError')),
+          );
+        }),
     );
     const gmailOps = { sendEmail: vi.fn() };
     const res = await executeUnsubscribe({
@@ -1972,7 +2065,7 @@ describe('executeUnsubscribe', () => {
       account: 'a@x.com',
       fetch: fetchMock as any,
       gmailOps: gmailOps as any,
-      timeoutMs: 10,  // force fast timeout
+      timeoutMs: 10, // force fast timeout
     });
     expect(res.status).toBe(0);
     expect(res.error).toMatch(/abort|timeout/i);
@@ -1998,7 +2091,7 @@ export type UnsubscribeMethod =
 
 export interface UnsubscribeResult {
   method: UnsubscribeMethod['kind'];
-  status: number;  // 0 on network error
+  status: number; // 0 on network error
   url?: string;
   error?: string;
 }
@@ -2115,6 +2208,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 5"
 ### Task 11: Unsubscribe action route
 
 **Files:**
+
 - Modify: `src/mini-app/actions.ts` (add unsubscribe route)
 - Modify: `src/__tests__/mini-app-actions.test.ts` (extend)
 
@@ -2153,7 +2247,12 @@ describe('mini-app actions — unsubscribe', () => {
     );
     // supply a fetch double via the server's DI
     const fetchMock = vi.fn().mockResolvedValue({ status: 200, ok: true });
-    const app = createMiniAppServer({ port: 0, db, gmailOps, fetchImpl: fetchMock as any });
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps,
+      fetchImpl: fetchMock as any,
+    });
 
     const res = await request(app).post('/api/email/i1/unsubscribe');
     expect(res.status).toBe(200);
@@ -2177,7 +2276,12 @@ describe('mini-app actions — unsubscribe', () => {
 
   it('POST /api/email/:id/unsubscribe returns NO_UNSUBSCRIBE_HEADER when absent', async () => {
     gmailOps.getMessageMeta = vi.fn().mockResolvedValue({
-      subject: '', from: '', to: '', date: '', body: '', headers: {},
+      subject: '',
+      from: '',
+      to: '',
+      date: '',
+      body: '',
+      headers: {},
     });
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     const app = createMiniAppServer({ port: 0, db, gmailOps });
@@ -2207,20 +2311,27 @@ And pass through to `createActionsRouter({..., fetchImpl: opts.fetchImpl ?? fetc
 In `src/mini-app/actions.ts` (requires the `getMessageMeta` now returns headers — confirm and possibly extend `EmailMeta.headers?: Record<string,string>` in `gmail-ops.ts`):
 
 ```ts
-import { pickUnsubscribeMethod, executeUnsubscribe } from '../triage/unsubscribe-executor.js';
+import {
+  pickUnsubscribeMethod,
+  executeUnsubscribe,
+} from '../triage/unsubscribe-executor.js';
 
 // Inside createActionsRouter, after snooze routes:
 router.post('/api/email/:id/unsubscribe', async (req, res) => {
   const item = lookupItem(req.params.id);
   if (!item || !item.thread_id || !item.account) {
     res.status(404).json({
-      ok: false, error: 'Tracked item not found', code: 'ITEM_NOT_FOUND',
+      ok: false,
+      error: 'Tracked item not found',
+      code: 'ITEM_NOT_FOUND',
     });
     return;
   }
   if (!deps.gmailOps) {
     res.status(503).json({
-      ok: false, error: 'Gmail not configured', code: 'GMAIL_UNAVAILABLE',
+      ok: false,
+      error: 'Gmail not configured',
+      code: 'GMAIL_UNAVAILABLE',
     });
     return;
   }
@@ -2232,7 +2343,7 @@ router.post('/api/email/:id/unsubscribe', async (req, res) => {
   const rawGmailId = row?.source_id ?? null;
   const gmailId = rawGmailId?.startsWith('gmail:')
     ? rawGmailId.slice('gmail:'.length)
-    : rawGmailId ?? item.thread_id;
+    : (rawGmailId ?? item.thread_id);
 
   let headers: Record<string, string> = {};
   try {
@@ -2262,17 +2373,19 @@ router.post('/api/email/:id/unsubscribe', async (req, res) => {
     gmailOps: deps.gmailOps,
   });
 
-  deps.db.prepare(
-    `INSERT INTO unsubscribe_log (item_id, method, url, status, error, attempted_at)
+  deps.db
+    .prepare(
+      `INSERT INTO unsubscribe_log (item_id, method, url, status, error, attempted_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    req.params.id,
-    result.method,
-    result.url ?? null,
-    result.status,
-    result.error ?? null,
-    Date.now(),
-  );
+    )
+    .run(
+      req.params.id,
+      result.method,
+      result.url ?? null,
+      result.status,
+      result.error ?? null,
+      Date.now(),
+    );
 
   // Archive regardless — user intent is "done with this sender"
   try {
@@ -2338,6 +2451,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 5"
 ### Task 12: Classification-aware row renderer
 
 **Files:**
+
 - Create: `src/mini-app/templates/action-row.ts`
 - Test: `src/mini-app/templates/__tests__/action-row.test.ts`
 
@@ -2365,7 +2479,7 @@ describe('renderActionRow', () => {
     expect(html).toContain('data-action="draft-prompt"');
     expect(html).toContain('data-action="archive"');
     expect(html).not.toContain('data-action="unsubscribe"');
-    expect(html).toContain('data-action="more"');  // always present
+    expect(html).toContain('data-action="more"'); // always present
   });
 
   it('push + bot shows Archive/Snooze/Open primary, no chips', () => {
@@ -2410,7 +2524,7 @@ describe('renderActionRow', () => {
   it('transactional is minimal: Archive + Open', () => {
     const html = renderActionRow({
       ...base,
-      classification: 'push',  // any — subtype wins
+      classification: 'push', // any — subtype wins
       senderKind: 'bot',
       subtype: 'transactional',
       hasUnsubscribeHeader: false,
@@ -2460,7 +2574,12 @@ Expected: FAIL — module not found.
 ```ts
 import { escapeHtml } from './escape.js';
 
-export type Classification = 'push' | 'digest' | 'transactional' | 'ignore' | null;
+export type Classification =
+  | 'push'
+  | 'digest'
+  | 'transactional'
+  | 'ignore'
+  | null;
 export type SenderKind = 'human' | 'bot' | 'unknown' | null;
 export type Subtype = 'transactional' | null;
 
@@ -2489,8 +2608,7 @@ function primaryActions(i: ActionRowInput): string[] {
   if (i.subtype === 'transactional') return ['archive', 'open-gmail'];
   if (i.classification === 'push' && i.senderKind === 'human')
     return ['quick-draft', 'draft-prompt', 'archive'];
-  if (i.classification === 'push')
-    return ['archive', 'snooze', 'open-gmail'];
+  if (i.classification === 'push') return ['archive', 'snooze', 'open-gmail'];
   if (i.classification === 'digest' && i.hasUnsubscribeHeader)
     return ['unsubscribe', 'archive', 'snooze', 'mute'];
   if (i.classification === 'digest')
@@ -2549,7 +2667,8 @@ export function renderActionRow(input: ActionRowInput): string {
         emailId: input.emailId,
         account: input.account,
         threadId: input.threadId,
-        style: a === 'archive' ? 'background:#276749;color:#c6f6d5;' : undefined,
+        style:
+          a === 'archive' ? 'background:#276749;color:#c6f6d5;' : undefined,
       }),
     )
     .join('');
@@ -2606,6 +2725,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 6"
 ### Task 13: Wire `renderActionRow` into `email-full.ts` with client-side JS
 
 **Files:**
+
 - Modify: `src/mini-app/templates/email-full.ts`
 - Modify: `src/mini-app/server.ts` (pass new fields to template)
 - Test: `src/__tests__/mini-app-routes.test.ts` (add assertion for new button set)
@@ -2615,7 +2735,12 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 6"
 In `src/mini-app/templates/email-full.ts`:
 
 ```ts
-import { renderActionRow, type Classification, type SenderKind, type Subtype } from './action-row.js';
+import {
+  renderActionRow,
+  type Classification,
+  type SenderKind,
+  type Subtype,
+} from './action-row.js';
 
 export interface EmailFullData {
   // ...existing
@@ -2632,7 +2757,9 @@ Add to the inline `<script>`:
 
 ```ts
 document.addEventListener('click', async (e) => {
-  const btn = (e.target as HTMLElement).closest('[data-action],[data-chip]') as HTMLElement | null;
+  const btn = (e.target as HTMLElement).closest(
+    '[data-action],[data-chip]',
+  ) as HTMLElement | null;
   if (!btn) return;
   const emailId = btn.dataset.emailId;
   if (!emailId) return;
@@ -2641,14 +2768,22 @@ document.addEventListener('click', async (e) => {
 
   if (chip) return handleChip(chip, emailId, btn);
   switch (action) {
-    case 'archive':       return handleArchive(emailId, btn);
-    case 'snooze':        return handleSnooze(emailId, btn);
-    case 'mute':          return handleMute(emailId, btn);
-    case 'unsubscribe':   return handleUnsubscribe(emailId, btn);
-    case 'quick-draft':   return handleQuickDraft(emailId, btn);
-    case 'draft-prompt':  return handleDraftPrompt(emailId, btn);
-    case 'more':          return toggleMoreRow();
-    case 'open-gmail':    return;  // anchor handles it
+    case 'archive':
+      return handleArchive(emailId, btn);
+    case 'snooze':
+      return handleSnooze(emailId, btn);
+    case 'mute':
+      return handleMute(emailId, btn);
+    case 'unsubscribe':
+      return handleUnsubscribe(emailId, btn);
+    case 'quick-draft':
+      return handleQuickDraft(emailId, btn);
+    case 'draft-prompt':
+      return handleDraftPrompt(emailId, btn);
+    case 'more':
+      return toggleMoreRow();
+    case 'open-gmail':
+      return; // anchor handles it
   }
 });
 
@@ -2662,23 +2797,40 @@ And stub handlers for each (implementations below in later tasks wire them fully
 
 ```ts
 async function handleMute(id, btn) {
-  btn.disabled = true; btn.textContent = 'Muting…';
-  const r = await fetch(`/api/email/${encodeURIComponent(id)}/mute`, { method: 'POST' });
+  btn.disabled = true;
+  btn.textContent = 'Muting…';
+  const r = await fetch(`/api/email/${encodeURIComponent(id)}/mute`, {
+    method: 'POST',
+  });
   const j = await r.json();
-  if (j.ok) showBanner('🔇 Muted', 'Unmute', () => fetch(`/api/email/${encodeURIComponent(id)}/mute`, { method: 'DELETE' }));
-  else { btn.disabled = false; btn.textContent = 'Mute thread'; alert(j.error || 'Failed'); }
+  if (j.ok)
+    showBanner('🔇 Muted', 'Unmute', () =>
+      fetch(`/api/email/${encodeURIComponent(id)}/mute`, { method: 'DELETE' }),
+    );
+  else {
+    btn.disabled = false;
+    btn.textContent = 'Mute thread';
+    alert(j.error || 'Failed');
+  }
 }
 
 function showBanner(text, actionLabel, actionFn) {
-  const existing = document.querySelector('.action-banner'); if (existing) existing.remove();
+  const existing = document.querySelector('.action-banner');
+  if (existing) existing.remove();
   const div = document.createElement('div');
   div.className = 'action-banner';
-  div.style.cssText = 'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
+  div.style.cssText =
+    'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
   div.innerHTML = `<span>${text}</span>`;
   if (actionLabel) {
     const a = document.createElement('button');
-    a.textContent = actionLabel; a.style.cssText = 'margin-left:12px;background:#21262d;color:#c9d1d9;padding:6px 12px;border-radius:6px;border:none;';
-    a.onclick = () => { actionFn(); div.remove(); };
+    a.textContent = actionLabel;
+    a.style.cssText =
+      'margin-left:12px;background:#21262d;color:#c9d1d9;padding:6px 12px;border-radius:6px;border:none;';
+    a.onclick = () => {
+      actionFn();
+      div.remove();
+    };
     div.appendChild(a);
   }
   document.body.appendChild(div);
@@ -2690,10 +2842,16 @@ function showBanner(text, actionLabel, actionFn) {
 In `src/mini-app/server.ts` `/email/:emailId` handler, pass along:
 
 ```ts
-const row2 = opts.db.prepare(
-  'SELECT classification, sender_kind, subtype FROM tracked_items WHERE id = ? OR thread_id = ? OR source_id = ? ORDER BY detected_at DESC LIMIT 1',
-).get(emailId, emailId, emailId) as
-  | { classification: string | null; sender_kind: string | null; subtype: string | null }
+const row2 = opts.db
+  .prepare(
+    'SELECT classification, sender_kind, subtype FROM tracked_items WHERE id = ? OR thread_id = ? OR source_id = ? ORDER BY detected_at DESC LIMIT 1',
+  )
+  .get(emailId, emailId, emailId) as
+  | {
+      classification: string | null;
+      sender_kind: string | null;
+      subtype: string | null;
+    }
   | undefined;
 
 const hasUnsubscribeHeader =
@@ -2719,8 +2877,17 @@ it('GET /email/:emailId renders classification-aware action row', async () => {
   db.prepare(
     `INSERT INTO tracked_items (id, source, state, queue, classification, sender_kind, thread_id, detected_at, metadata)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run('sse-class-1', 'email', 'pushed', 'attention', 'push', 'human', 'thread-1', Date.now(),
-    JSON.stringify({ account: 'alice@example.com' }));
+  ).run(
+    'sse-class-1',
+    'email',
+    'pushed',
+    'attention',
+    'push',
+    'human',
+    'thread-1',
+    Date.now(),
+    JSON.stringify({ account: 'alice@example.com' }),
+  );
   const res = await request(app).get('/email/sse-class-1');
   expect(res.status).toBe(200);
   // Human push → chips visible
@@ -2754,6 +2921,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 6"
 ### Task 14: Canned reply route + send
 
 **Files:**
+
 - Modify: `src/mini-app/actions.ts` (add canned-reply route)
 - Modify: `src/mini-app/templates/email-full.ts` (wire `handleChip`)
 - Modify: `src/__tests__/mini-app-actions.test.ts` (extend)
@@ -2785,7 +2953,8 @@ describe('mini-app actions — canned reply', () => {
   it('POST /api/email/:id/canned-reply creates draft + schedules send', async () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     db.prepare('UPDATE tracked_items SET source_id=? WHERE id=?').run(
-      'gmail:thread-1', 'i1',
+      'gmail:thread-1',
+      'i1',
     );
     const app = createMiniAppServer({ port: 0, db, gmailOps });
     const res = await request(app)
@@ -2831,7 +3000,10 @@ export interface CreateDraftReplyInput {
 }
 export interface GmailOps {
   // ...
-  createDraftReply(account: string, input: CreateDraftReplyInput): Promise<{ draftId: string }>;
+  createDraftReply(
+    account: string,
+    input: CreateDraftReplyInput,
+  ): Promise<{ draftId: string }>;
 }
 ```
 
@@ -2906,17 +3078,27 @@ const CANNED: Record<string, (name: string) => string> = {
 router.post('/api/email/:id/canned-reply', async (req, res) => {
   const item = lookupItem(req.params.id);
   if (!item || !item.thread_id || !item.account) {
-    res.status(404).json({ ok: false, error: 'Not found', code: 'ITEM_NOT_FOUND' });
+    res
+      .status(404)
+      .json({ ok: false, error: 'Not found', code: 'ITEM_NOT_FOUND' });
     return;
   }
   const kind = ((req.body as any)?.kind as string) ?? '';
   const builder = CANNED[kind];
   if (!builder) {
-    res.status(400).json({ ok: false, error: `unknown kind: ${kind}`, code: 'INVALID_KIND' });
+    res
+      .status(400)
+      .json({
+        ok: false,
+        error: `unknown kind: ${kind}`,
+        code: 'INVALID_KIND',
+      });
     return;
   }
   if (!deps.gmailOps || !deps.pendingSendRegistry) {
-    res.status(503).json({ ok: false, error: 'dependencies missing', code: 'INTERNAL' });
+    res
+      .status(503)
+      .json({ ok: false, error: 'dependencies missing', code: 'INTERNAL' });
     return;
   }
   const name = await getFirstName(deps.gmailOps, item.account);
@@ -2934,7 +3116,10 @@ router.post('/api/email/:id/canned-reply', async (req, res) => {
       try {
         await deps.gmailOps!.sendDraft(acct, id);
       } catch (err) {
-        logger.error({ err, draftId: id, component: 'mini-app-actions' }, 'canned-reply send failed');
+        logger.error(
+          { err, draftId: id, component: 'mini-app-actions' },
+          'canned-reply send failed',
+        );
       }
     },
   );
@@ -2949,14 +3134,22 @@ Pass `pendingSendRegistry` into `ActionDeps`. Update `server.ts` accordingly (`c
 ```ts
 async function handleChip(kind, emailId, btn) {
   const chips = document.querySelectorAll('.chip');
-  chips.forEach(c => { (c as HTMLButtonElement).disabled = true; });
-  const res = await fetch(`/api/email/${encodeURIComponent(emailId)}/canned-reply`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ kind }),
+  chips.forEach((c) => {
+    (c as HTMLButtonElement).disabled = true;
   });
+  const res = await fetch(
+    `/api/email/${encodeURIComponent(emailId)}/canned-reply`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind }),
+    },
+  );
   const j = await res.json();
   if (!j.ok) {
-    chips.forEach(c => { (c as HTMLButtonElement).disabled = false; });
+    chips.forEach((c) => {
+      (c as HTMLButtonElement).disabled = false;
+    });
     alert(j.error || 'Canned reply failed');
     return;
   }
@@ -2968,15 +3161,21 @@ function showUndoBanner(draftId, countdown) {
   // Reuse the existing undo banner from reply-mode if possible
   const div = document.createElement('div');
   div.className = 'action-banner';
-  div.style.cssText = 'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
+  div.style.cssText =
+    'border-top:1px solid #21262d;padding-top:12px;margin-top:12px;color:#c9d1d9;';
   div.innerHTML = `<span>Sending in <span id="cd">${countdown}</span>s</span>`;
   const undo = document.createElement('button');
   undo.textContent = 'Undo';
-  undo.style.cssText = 'margin-left:12px;background:#f85149;color:#fff;padding:6px 12px;border-radius:6px;border:none;';
+  undo.style.cssText =
+    'margin-left:12px;background:#f85149;color:#fff;padding:6px 12px;border-radius:6px;border:none;';
   undo.onclick = async () => {
-    await fetch(`/api/draft/${encodeURIComponent(draftId)}/send/cancel`, { method: 'POST' });
+    await fetch(`/api/draft/${encodeURIComponent(draftId)}/send/cancel`, {
+      method: 'POST',
+    });
     div.remove();
-    document.querySelectorAll('.chip').forEach(c => { (c as HTMLButtonElement).disabled = false; });
+    document.querySelectorAll('.chip').forEach((c) => {
+      (c as HTMLButtonElement).disabled = false;
+    });
   };
   div.appendChild(undo);
   document.body.appendChild(div);
@@ -3016,6 +3215,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 7"
 ### Task 15: Wire snooze dropdown + banners for the remaining actions
 
 **Files:**
+
 - Modify: `src/mini-app/templates/email-full.ts`
 
 - [ ] **Step 1: Snooze dropdown**
@@ -3027,38 +3227,55 @@ function handleSnooze(emailId, btn) {
   const wrap = document.createElement('div');
   wrap.className = 'snooze-dropdown';
   wrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;';
-  ['1h', 'tomorrow-8am', 'next-monday-8am', 'next-week', 'custom'].forEach((d) => {
-    const b = document.createElement('button');
-    b.textContent = {
-      '1h': '1 hour',
-      'tomorrow-8am': 'Tomorrow 8am',
-      'next-monday-8am': 'Next Mon 8am',
-      'next-week': 'Next week',
-      custom: 'Custom…',
-    }[d];
-    b.style.cssText = 'background:#21262d;color:#c9d1d9;padding:6px 10px;border-radius:6px;border:none;font-size:12px;';
-    b.onclick = async () => {
-      let wakeAt;
-      if (d === 'custom') {
-        const v = prompt('Snooze until (ISO datetime, e.g. 2026-04-21T09:00)?');
-        if (!v) return;
-        wakeAt = new Date(v).toISOString();
-      }
-      const res = await fetch(`/api/email/${encodeURIComponent(emailId)}/snooze`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ duration: d, wake_at: wakeAt }),
-      });
-      const j = await res.json();
-      if (!j.ok) { alert(j.error); return; }
-      wrap.remove();
-      const when = new Date(j.wake_at).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-      showBanner(`💤 Snoozed until ${when}`, 'Unsnooze', async () => {
-        await fetch(`/api/email/${encodeURIComponent(emailId)}/snooze`, { method: 'DELETE' });
-      });
-    };
-    wrap.appendChild(b);
-  });
+  ['1h', 'tomorrow-8am', 'next-monday-8am', 'next-week', 'custom'].forEach(
+    (d) => {
+      const b = document.createElement('button');
+      b.textContent = {
+        '1h': '1 hour',
+        'tomorrow-8am': 'Tomorrow 8am',
+        'next-monday-8am': 'Next Mon 8am',
+        'next-week': 'Next week',
+        custom: 'Custom…',
+      }[d];
+      b.style.cssText =
+        'background:#21262d;color:#c9d1d9;padding:6px 10px;border-radius:6px;border:none;font-size:12px;';
+      b.onclick = async () => {
+        let wakeAt;
+        if (d === 'custom') {
+          const v = prompt(
+            'Snooze until (ISO datetime, e.g. 2026-04-21T09:00)?',
+          );
+          if (!v) return;
+          wakeAt = new Date(v).toISOString();
+        }
+        const res = await fetch(
+          `/api/email/${encodeURIComponent(emailId)}/snooze`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: d, wake_at: wakeAt }),
+          },
+        );
+        const j = await res.json();
+        if (!j.ok) {
+          alert(j.error);
+          return;
+        }
+        wrap.remove();
+        const when = new Date(j.wake_at).toLocaleString('en-US', {
+          weekday: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+        showBanner(`💤 Snoozed until ${when}`, 'Unsnooze', async () => {
+          await fetch(`/api/email/${encodeURIComponent(emailId)}/snooze`, {
+            method: 'DELETE',
+          });
+        });
+      };
+      wrap.appendChild(b);
+    },
+  );
   btn.parentElement.appendChild(wrap);
 }
 ```
@@ -3067,16 +3284,27 @@ function handleSnooze(emailId, btn) {
 
 ```ts
 async function handleUnsubscribe(emailId, btn) {
-  btn.disabled = true; btn.textContent = 'Unsubscribing…';
-  const res = await fetch(`/api/email/${encodeURIComponent(emailId)}/unsubscribe`, { method: 'POST' });
+  btn.disabled = true;
+  btn.textContent = 'Unsubscribing…';
+  const res = await fetch(
+    `/api/email/${encodeURIComponent(emailId)}/unsubscribe`,
+    { method: 'POST' },
+  );
   const j = await res.json();
   if (j.ok) showBanner('✅ Unsubscribed and archived', null, null);
   else if (j.code === 'NO_UNSUBSCRIBE_HEADER') {
     showBanner('No unsubscribe link in headers', 'Open in Gmail', () => {
-      window.open(document.querySelector('a.btn[href*="mail.google"]')?.href || '', '_blank');
+      window.open(
+        document.querySelector('a.btn[href*="mail.google"]')?.href || '',
+        '_blank',
+      );
     });
-  }
-  else showBanner(`⚠️ Unsubscribe may have failed — ${j.error}`, 'Open in Gmail', null);
+  } else
+    showBanner(
+      `⚠️ Unsubscribe may have failed — ${j.error}`,
+      'Open in Gmail',
+      null,
+    );
 }
 ```
 
@@ -3105,6 +3333,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 8"
 ### Task 16: `/api/email/:id/draft-with-ai` + polling + container task
 
 **Files:**
+
 - Modify: `src/mini-app/actions.ts` (new route + polling endpoint)
 - Modify: `src/mini-app/templates/email-full.ts` (Quick / Prompt handlers)
 - Modify: `src/__tests__/mini-app-actions.test.ts` (extend)
@@ -3127,7 +3356,10 @@ describe('mini-app actions — draft-with-ai', () => {
   it('POST /api/email/:id/draft-with-ai returns taskId', async () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     const app = createMiniAppServer({
-      port: 0, db, gmailOps, spawnAgentTask: spawnAgentMock,
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
     });
     const res = await request(app)
       .post('/api/email/i1/draft-with-ai')
@@ -3144,7 +3376,10 @@ describe('mini-app actions — draft-with-ai', () => {
   it('POST /api/email/:id/draft-with-ai rejects intent > 500 chars', async () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     const app = createMiniAppServer({
-      port: 0, db, gmailOps, spawnAgentTask: spawnAgentMock,
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
     });
     const res = await request(app)
       .post('/api/email/i1/draft-with-ai')
@@ -3156,7 +3391,10 @@ describe('mini-app actions — draft-with-ai', () => {
   it('POST /api/email/:id/draft-with-ai returns 409 when a task is already running', async () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     const app = createMiniAppServer({
-      port: 0, db, gmailOps, spawnAgentTask: spawnAgentMock,
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
     });
     await request(app).post('/api/email/i1/draft-with-ai').send({});
     const res = await request(app).post('/api/email/i1/draft-with-ai').send({});
@@ -3166,11 +3404,14 @@ describe('mini-app actions — draft-with-ai', () => {
 
   it('GET /api/draft-status/:taskId returns status', async () => {
     const app = createMiniAppServer({
-      port: 0, db, gmailOps, spawnAgentTask: spawnAgentMock,
+      port: 0,
+      db,
+      gmailOps,
+      spawnAgentTask: spawnAgentMock,
     });
     const res = await request(app).get('/api/draft-status/unknown-task');
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('unknown');  // unknown taskId
+    expect(res.body.status).toBe('unknown'); // unknown taskId
   });
 });
 ```
@@ -3184,7 +3425,10 @@ Keep an in-memory map:
 ```ts
 // In actions.ts
 const activeTasks = new Map<string, { taskId: string; startedAt: number }>();
-const taskStatus = new Map<string, { status: 'running' | 'ready' | 'failed'; draftId?: string; error?: string }>();
+const taskStatus = new Map<
+  string,
+  { status: 'running' | 'ready' | 'failed'; draftId?: string; error?: string }
+>();
 ```
 
 Subscribe to the event bus at router creation time (if `eventBus` passed in deps):
@@ -3208,35 +3452,47 @@ const INTENT_CAP = 500;
 router.post('/api/email/:id/draft-with-ai', async (req, res) => {
   const item = lookupItem(req.params.id);
   if (!item || !item.thread_id || !item.account) {
-    res.status(404).json({ ok: false, error: 'Not found', code: 'ITEM_NOT_FOUND' });
+    res
+      .status(404)
+      .json({ ok: false, error: 'Not found', code: 'ITEM_NOT_FOUND' });
     return;
   }
   const intent = ((req.body as any)?.intent as string | undefined) ?? '';
   if (intent.length > INTENT_CAP) {
-    res.status(413).json({ ok: false, error: 'intent too long', code: 'INVALID_INTENT' });
+    res
+      .status(413)
+      .json({ ok: false, error: 'intent too long', code: 'INVALID_INTENT' });
     return;
   }
   const existing = activeTasks.get(item.id);
   if (existing && Date.now() - existing.startedAt < TASK_TIMEOUT_MS) {
     res.status(409).json({
-      ok: false, error: 'task already running', code: 'TASK_ALREADY_RUNNING',
+      ok: false,
+      error: 'task already running',
+      code: 'TASK_ALREADY_RUNNING',
       taskId: existing.taskId,
     });
     return;
   }
   if (!deps.spawnAgentTask) {
-    res.status(503).json({ ok: false, error: 'agent runner missing', code: 'INTERNAL' });
+    res
+      .status(503)
+      .json({ ok: false, error: 'agent runner missing', code: 'INTERNAL' });
     return;
   }
   const prompt = [
     'You are drafting a Gmail reply.',
     `Thread: ${item.thread_id} (account ${item.account})`,
-    intent ? `User intent: ${intent}` : 'User intent: use best judgment based on thread context.',
+    intent
+      ? `User intent: ${intent}`
+      : 'User intent: use best judgment based on thread context.',
     'Draft a concise, natural reply using gmail.users.drafts.create. Match any prior tone from earlier messages in the thread. Return the draft_id only.',
   ].join('\n');
 
   const { taskId } = await deps.spawnAgentTask({
-    prompt, account: item.account, itemId: item.id,
+    prompt,
+    account: item.account,
+    itemId: item.id,
   });
   activeTasks.set(item.id, { taskId, startedAt: Date.now() });
   taskStatus.set(taskId, { status: 'running' });
@@ -3250,7 +3506,12 @@ router.get('/api/draft-status/:taskId', (req, res) => {
     res.json({ ok: true, status: 'unknown' });
     return;
   }
-  res.json({ ok: true, status: state.status, draftId: state.draftId, error: state.error });
+  res.json({
+    ok: true,
+    status: state.status,
+    draftId: state.draftId,
+    error: state.error,
+  });
 });
 ```
 
@@ -3258,10 +3519,23 @@ router.get('/api/draft-status/:taskId', (req, res) => {
 
 ```ts
 async function handleQuickDraft(emailId, btn) {
-  btn.disabled = true; btn.textContent = '⚡ Drafting…';
-  const res = await fetch(`/api/email/${encodeURIComponent(emailId)}/draft-with-ai`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+  btn.disabled = true;
+  btn.textContent = '⚡ Drafting…';
+  const res = await fetch(
+    `/api/email/${encodeURIComponent(emailId)}/draft-with-ai`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    },
+  );
   const j = await res.json();
-  if (!j.ok) { btn.disabled = false; btn.textContent = 'Quick draft'; alert(j.error); return; }
+  if (!j.ok) {
+    btn.disabled = false;
+    btn.textContent = 'Quick draft';
+    alert(j.error);
+    return;
+  }
   pollDraftTask(j.taskId, btn);
 }
 
@@ -3269,21 +3543,38 @@ function handleDraftPrompt(emailId, btn) {
   if (document.getElementById('draft-prompt-input')) return;
   const ta = document.createElement('textarea');
   ta.id = 'draft-prompt-input';
-  ta.placeholder = 'What should the reply say? (e.g. "decline politely, suggest next Tues")';
-  ta.style.cssText = 'display:block;width:100%;min-height:72px;margin-top:8px;padding:8px;background:#0d1117;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;font:inherit;';
+  ta.placeholder =
+    'What should the reply say? (e.g. "decline politely, suggest next Tues")';
+  ta.style.cssText =
+    'display:block;width:100%;min-height:72px;margin-top:8px;padding:8px;background:#0d1117;color:#c9d1d9;border:1px solid #21262d;border-radius:6px;font:inherit;';
   const sub = document.createElement('button');
-  sub.textContent = 'Draft'; sub.style.cssText = 'margin-top:6px;background:#1f6feb;color:#fff;padding:8px 14px;border-radius:6px;border:none;';
+  sub.textContent = 'Draft';
+  sub.style.cssText =
+    'margin-top:6px;background:#1f6feb;color:#fff;padding:8px 14px;border-radius:6px;border:none;';
   sub.onclick = async () => {
     const intent = ta.value.trim();
     if (!intent) return;
-    btn.disabled = true; sub.disabled = true; sub.textContent = 'Drafting…';
-    const res = await fetch(`/api/email/${encodeURIComponent(emailId)}/draft-with-ai`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ intent }),
-    });
+    btn.disabled = true;
+    sub.disabled = true;
+    sub.textContent = 'Drafting…';
+    const res = await fetch(
+      `/api/email/${encodeURIComponent(emailId)}/draft-with-ai`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent }),
+      },
+    );
     const j = await res.json();
-    if (!j.ok) { alert(j.error); btn.disabled = false; sub.disabled = false; sub.textContent = 'Draft'; return; }
-    ta.remove(); sub.remove();
+    if (!j.ok) {
+      alert(j.error);
+      btn.disabled = false;
+      sub.disabled = false;
+      sub.textContent = 'Draft';
+      return;
+    }
+    ta.remove();
+    sub.remove();
     pollDraftTask(j.taskId, btn);
   };
   btn.parentElement.appendChild(ta);
@@ -3338,6 +3629,7 @@ Plan: docs/superpowers/plans/2026-04-19-miniapp-ux-expansion.md — Phase 9"
 ### Task 17: End-to-end integration test
 
 **Files:**
+
 - Create: `src/__tests__/miniapp-ux-expansion-integration.test.ts`
 
 - [ ] **Step 1: Write the integration test**
@@ -3362,17 +3654,29 @@ describe('ux-expansion integration', () => {
     const events: any[] = [];
     bus.on('email.snooze.waked', (e) => events.push(e));
 
-    const app = createMiniAppServer({ port: 0, db, gmailOps: { archiveThread: vi.fn() } as any });
+    const app = createMiniAppServer({
+      port: 0,
+      db,
+      gmailOps: { archiveThread: vi.fn() } as any,
+    });
     const wakeAt = new Date(Date.now() + 3600_000).toISOString();
-    const r1 = await request(app).post('/api/email/i1/snooze').send({ duration: 'custom', wake_at: wakeAt });
+    const r1 = await request(app)
+      .post('/api/email/i1/snooze')
+      .send({ duration: 'custom', wake_at: wakeAt });
     expect(r1.body.ok).toBe(true);
 
-    const stop = startSnoozeScheduler({ db, eventBus: bus as any, intervalMs: 60_000 });
+    const stop = startSnoozeScheduler({
+      db,
+      eventBus: bus as any,
+      intervalMs: 60_000,
+    });
     await vi.advanceTimersByTimeAsync(3700_000);
     stop();
 
     expect(events).toHaveLength(1);
-    const row = db.prepare('SELECT state FROM tracked_items WHERE id=?').get('i1') as { state: string };
+    const row = db
+      .prepare('SELECT state FROM tracked_items WHERE id=?')
+      .get('i1') as { state: string };
     expect(row.state).toBe('pushed');
   });
 
@@ -3381,7 +3685,9 @@ describe('ux-expansion integration', () => {
     seedItem(db, 'i1', 'thread-1', 'alice@example.com');
     const archive = vi.fn().mockResolvedValue(undefined);
     const app = createMiniAppServer({
-      port: 0, db, gmailOps: { archiveThread: archive } as any,
+      port: 0,
+      db,
+      gmailOps: { archiveThread: archive } as any,
     });
     await request(app).post('/api/email/i1/mute').send({});
 
@@ -3391,14 +3697,21 @@ describe('ux-expansion integration', () => {
       db,
       gmailOps: { archiveThread: archive } as any,
       event: {
-        threadId: 'thread-1', account: 'alice@example.com',
-        messageId: 'msg-2', subject: '', from: '', headers: {}, body: '',
+        threadId: 'thread-1',
+        account: 'alice@example.com',
+        messageId: 'msg-2',
+        subject: '',
+        from: '',
+        headers: {},
+        body: '',
       },
     });
     expect(result.action).toBe('muted_skip');
     // No new tracked_items
-    const count = db.prepare('SELECT COUNT(*) AS n FROM tracked_items').get() as { n: number };
-    expect(count.n).toBe(1);  // the original item only (now resolved)
+    const count = db
+      .prepare('SELECT COUNT(*) AS n FROM tracked_items')
+      .get() as { n: number };
+    expect(count.n).toBe(1); // the original item only (now resolved)
     expect(archive).toHaveBeenCalledWith('alice@example.com', 'thread-1');
   });
 });
@@ -3474,18 +3787,18 @@ If the smoke reveals issues, fix in place, commit incrementally, redeploy. Other
 
 ## Test summary (for the verifier)
 
-| Suite | Tests added |
-|---|---|
-| `src/__tests__/migrations-2026-04-19.test.ts` | 6 |
-| `src/triage/__tests__/sender-kind.test.ts` | 11 |
-| `src/triage/__tests__/mute-filter.test.ts` | 6 (5 unit + 1 integration) |
-| `src/triage/__tests__/snooze-scheduler.test.ts` | 3 |
-| `src/triage/__tests__/unsubscribe-executor.test.ts` | 10 |
-| `src/mini-app/templates/__tests__/action-row.test.ts` | 7 |
-| `src/__tests__/mini-app-actions.test.ts` | 12 (mute 3 + snooze 5 + unsubscribe 2 + canned 2 + draft-with-ai 4 variants) |
-| `src/channels/gmail.test.ts` | +1 sendEmail, +1 createDraftReply |
-| `src/__tests__/invariants-runtime-proof.test.ts` | +2 muted-never-visible |
-| `src/__tests__/miniapp-ux-expansion-integration.test.ts` | 2 |
+| Suite                                                    | Tests added                                                                  |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `src/__tests__/migrations-2026-04-19.test.ts`            | 6                                                                            |
+| `src/triage/__tests__/sender-kind.test.ts`               | 11                                                                           |
+| `src/triage/__tests__/mute-filter.test.ts`               | 6 (5 unit + 1 integration)                                                   |
+| `src/triage/__tests__/snooze-scheduler.test.ts`          | 3                                                                            |
+| `src/triage/__tests__/unsubscribe-executor.test.ts`      | 10                                                                           |
+| `src/mini-app/templates/__tests__/action-row.test.ts`    | 7                                                                            |
+| `src/__tests__/mini-app-actions.test.ts`                 | 12 (mute 3 + snooze 5 + unsubscribe 2 + canned 2 + draft-with-ai 4 variants) |
+| `src/channels/gmail.test.ts`                             | +1 sendEmail, +1 createDraftReply                                            |
+| `src/__tests__/invariants-runtime-proof.test.ts`         | +2 muted-never-visible                                                       |
+| `src/__tests__/miniapp-ux-expansion-integration.test.ts` | 2                                                                            |
 
 **Net:** ~60 new test cases.
 

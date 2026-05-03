@@ -244,7 +244,9 @@ export function getAllTrustLevels(groupId: string): TrustLevel[] {
       `SELECT action_class, group_id, approvals, denials, confidence, threshold, auto_execute, last_updated
        FROM trust_levels WHERE group_id = ? ORDER BY action_class`,
     )
-    .all(groupId) as Array<Omit<TrustLevel, 'auto_execute'> & { auto_execute: number }>;
+    .all(groupId) as Array<
+    Omit<TrustLevel, 'auto_execute'> & { auto_execute: number }
+  >;
   return rows.map((r) => ({ ...r, auto_execute: r.auto_execute === 1 }));
 }
 
@@ -296,9 +298,9 @@ export function insertTrustApproval(approval: TrustApproval): void {
 }
 
 export function getTrustApproval(id: string): TrustApproval | undefined {
-  return db
-    .prepare(`SELECT * FROM trust_approvals WHERE id = ?`)
-    .get(id) as TrustApproval | undefined;
+  return db.prepare(`SELECT * FROM trust_approvals WHERE id = ?`).get(id) as
+    | TrustApproval
+    | undefined;
 }
 
 export function resolveTrustApproval(
@@ -750,7 +752,8 @@ export function recordTrustDecision(
   const threshold = stored?.threshold ?? defaultThreshold;
   const autoExecute = stored?.auto_execute ?? true;
 
-  const newApprovals = decision === 'approved' ? prevApprovals + 1 : prevApprovals;
+  const newApprovals =
+    decision === 'approved' ? prevApprovals + 1 : prevApprovals;
   const newDenials = decision === 'denied' ? prevDenials + 1 : prevDenials;
 
   // Denial resets confidence significantly (hard to rebuild)
@@ -898,7 +901,9 @@ describe('recordTrustDecision', () => {
   it('graduation: emits trust.graduated when threshold crossed', () => {
     const { eventBus } = await import('../event-bus.js');
     let graduated = false;
-    eventBus.on('trust.graduated', () => { graduated = true; });
+    eventBus.on('trust.graduated', () => {
+      graduated = true;
+    });
     // write threshold = 0.8; need 5 approvals
     for (let i = 0; i < 4; i++) {
       recordTrustDecision('send_message', 'group1', 'approved');
@@ -913,16 +918,16 @@ describe('recordTrustDecision', () => {
 Note: The `auto_execute=false` test at the end of the `evaluateTrust` block should be removed (the inner import pattern won't work in Vitest). Replace with a separate test:
 
 ```typescript
-  it('auto_execute=false always requires approval even with high confidence', async () => {
-    const { setTrustAutoExecute } = await import('../db.js');
-    setTrustAutoExecute('comms.write', 'group1', false, 1.0);
-    for (let i = 0; i < 20; i++) {
-      recordTrustDecision('send_message', 'group1', 'approved');
-    }
-    const result = evaluateTrust('send_message', 'group1');
-    expect(result.decision).toBe('needs_approval');
-    expect(result.reason).toMatch(/manually configured/);
-  });
+it('auto_execute=false always requires approval even with high confidence', async () => {
+  const { setTrustAutoExecute } = await import('../db.js');
+  setTrustAutoExecute('comms.write', 'group1', false, 1.0);
+  for (let i = 0; i < 20; i++) {
+    recordTrustDecision('send_message', 'group1', 'approved');
+  }
+  const result = evaluateTrust('send_message', 'group1');
+  expect(result.decision).toBe('needs_approval');
+  expect(result.reason).toMatch(/manually configured/);
+});
 ```
 
 **Run test:** `npx vitest run src/__tests__/trust-engine.test.ts`
@@ -981,8 +986,16 @@ import {
   resolveTrustApproval,
 } from './db.js';
 import { eventBus } from './event-bus.js';
-import type { TrustApprovedEvent, TrustDeniedEvent, TrustRequestEvent } from './events.js';
-import { classifyTool, evaluateTrust, recordTrustDecision } from './trust-engine.js';
+import type {
+  TrustApprovedEvent,
+  TrustDeniedEvent,
+  TrustRequestEvent,
+} from './events.js';
+import {
+  classifyTool,
+  evaluateTrust,
+  recordTrustDecision,
+} from './trust-engine.js';
 import { logger } from './logger.js';
 
 export interface TrustGatewayDeps {
@@ -1005,7 +1018,9 @@ let expiryInterval: ReturnType<typeof setInterval> | null = null;
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => resolve(body));
     req.on('error', reject);
   });
@@ -1062,12 +1077,18 @@ async function handleEvaluate(
   }
 
   if (!body.tool_name || !body.group_id || !body.chat_jid) {
-    jsonResponse(res, 400, { error: 'missing required fields: tool_name, group_id, chat_jid' });
+    jsonResponse(res, 400, {
+      error: 'missing required fields: tool_name, group_id, chat_jid',
+    });
     return;
   }
 
   const actionClass = classifyTool(body.tool_name, body.action_class);
-  const trustDecision = evaluateTrust(body.tool_name, body.group_id, body.action_class);
+  const trustDecision = evaluateTrust(
+    body.tool_name,
+    body.group_id,
+    body.action_class,
+  );
 
   if (trustDecision.decision === 'approved') {
     // Auto-approve: record and return immediately
@@ -1138,15 +1159,17 @@ async function handleEvaluate(
 
   // Send approval prompt to user channel
   if (deps) {
-    deps.sendApprovalPrompt(
-      body.chat_jid,
-      approvalId,
-      actionClass,
-      body.tool_name,
-      body.description,
-    ).catch((err) => {
-      logger.error({ err, approvalId }, 'Failed to send approval prompt');
-    });
+    deps
+      .sendApprovalPrompt(
+        body.chat_jid,
+        approvalId,
+        actionClass,
+        body.tool_name,
+        body.description,
+      )
+      .catch((err) => {
+        logger.error({ err, approvalId }, 'Failed to send approval prompt');
+      });
   }
 
   jsonResponse(res, 202, {
@@ -1195,7 +1218,9 @@ async function handleResolve(
   }
 
   if (body.decision !== 'approved' && body.decision !== 'denied') {
-    jsonResponse(res, 400, { error: 'decision must be "approved" or "denied"' });
+    jsonResponse(res, 400, {
+      error: 'decision must be "approved" or "denied"',
+    });
     return;
   }
 
@@ -1274,12 +1299,20 @@ function startExpiryChecker(): void {
       eventBus.emit('trust.denied', event);
 
       if (deps) {
-        deps.sendTimeoutNotification(approval.chat_jid, approval.tool_name).catch((err) => {
-          logger.error({ err, approvalId: approval.id }, 'Failed to send timeout notification');
-        });
+        deps
+          .sendTimeoutNotification(approval.chat_jid, approval.tool_name)
+          .catch((err) => {
+            logger.error(
+              { err, approvalId: approval.id },
+              'Failed to send timeout notification',
+            );
+          });
       }
 
-      logger.info({ approvalId: approval.id, toolName: approval.tool_name }, 'Trust approval expired');
+      logger.info(
+        { approvalId: approval.id, toolName: approval.tool_name },
+        'Trust approval expired',
+      );
     }
   }, 60000); // check every minute
 }
@@ -1393,10 +1426,7 @@ Create `src/__tests__/trust-gateway.test.ts`:
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'http';
 import { _initTestDatabase, _closeDatabase } from '../db.js';
-import {
-  startTrustGateway,
-  stopTrustGateway,
-} from '../trust-gateway.js';
+import { startTrustGateway, stopTrustGateway } from '../trust-gateway.js';
 
 const TEST_PORT = 19255;
 process.env.TRUST_GATEWAY_PORT = String(TEST_PORT);
@@ -1420,7 +1450,9 @@ async function request(
     };
     const req = http.request(options, (res) => {
       let data = '';
-      res.on('data', (c) => { data += c; });
+      res.on('data', (c) => {
+        data += c;
+      });
       res.on('end', () => {
         resolve({ status: res.statusCode ?? 0, data: JSON.parse(data) });
       });
@@ -1491,7 +1523,10 @@ describe('GET /trust/approval/:id', () => {
       chat_jid: 'tg:123',
     });
     const approvalId = (evalRes.data as any).approval_id;
-    const { status, data } = await request('GET', `/trust/approval/${approvalId}`);
+    const { status, data } = await request(
+      'GET',
+      `/trust/approval/${approvalId}`,
+    );
     expect(status).toBe(200);
     expect((data as any).decision).toBe('pending');
   });
@@ -1510,7 +1545,9 @@ describe('POST /trust/resolve/:id', () => {
       chat_jid: 'tg:123',
     });
     const approvalId = (evalRes.data as any).approval_id;
-    await request('POST', `/trust/resolve/${approvalId}`, { decision: 'approved' });
+    await request('POST', `/trust/resolve/${approvalId}`, {
+      decision: 'approved',
+    });
     const { data } = await request('GET', `/trust/approval/${approvalId}`);
     expect((data as any).decision).toBe('approved');
   });
@@ -1522,7 +1559,9 @@ describe('POST /trust/resolve/:id', () => {
       chat_jid: 'tg:123',
     });
     const approvalId = (evalRes.data as any).approval_id;
-    await request('POST', `/trust/resolve/${approvalId}`, { decision: 'denied' });
+    await request('POST', `/trust/resolve/${approvalId}`, {
+      decision: 'denied',
+    });
     const { data } = await request('GET', `/trust/approval/${approvalId}`);
     expect((data as any).decision).toBe('denied');
   });
@@ -1534,8 +1573,12 @@ describe('POST /trust/resolve/:id', () => {
       chat_jid: 'tg:123',
     });
     const approvalId = (evalRes.data as any).approval_id;
-    await request('POST', `/trust/resolve/${approvalId}`, { decision: 'approved' });
-    const { status } = await request('POST', `/trust/resolve/${approvalId}`, { decision: 'denied' });
+    await request('POST', `/trust/resolve/${approvalId}`, {
+      decision: 'approved',
+    });
+    const { status } = await request('POST', `/trust/resolve/${approvalId}`, {
+      decision: 'denied',
+    });
     expect(status).toBe(409);
   });
 });
@@ -1610,10 +1653,14 @@ export function formatApprovalPrompt(
 
 function getOperationEmoji(operation: string): string {
   switch (operation) {
-    case 'read': return '🔍';
-    case 'write': return '✏️';
-    case 'transact': return '⚡';
-    default: return '❓';
+    case 'read':
+      return '🔍';
+    case 'write':
+      return '✏️';
+    case 'transact':
+      return '⚡';
+    default:
+      return '❓';
   }
 }
 
@@ -1647,7 +1694,10 @@ export function parseApprovalReply(
   // Implicit match when exactly one pending approval exists
   if (pendingApprovals.length === 1) {
     if (APPROVE_PATTERN.test(trimmed)) {
-      return { approvalId: pendingApprovals[0].approvalId, decision: 'approved' };
+      return {
+        approvalId: pendingApprovals[0].approvalId,
+        decision: 'approved',
+      };
     }
     if (DENY_PATTERN.test(trimmed)) {
       return { approvalId: pendingApprovals[0].approvalId, decision: 'denied' };
@@ -1669,7 +1719,11 @@ export function handlePotentialApprovalReply(
   const contexts: PendingApprovalContext[] = pendingApprovalIds
     .map((id) => {
       const approval = getTrustApproval(id);
-      if (!approval || approval.status !== 'pending' || approval.chat_jid !== chatJid) {
+      if (
+        !approval ||
+        approval.status !== 'pending' ||
+        approval.chat_jid !== chatJid
+      ) {
         return null;
       }
       return {
@@ -1687,7 +1741,11 @@ export function handlePotentialApprovalReply(
   const resolved = resolveApproval(resolution.approvalId, resolution.decision);
   if (resolved) {
     logger.info(
-      { approvalId: resolution.approvalId, decision: resolution.decision, chatJid },
+      {
+        approvalId: resolution.approvalId,
+        decision: resolution.decision,
+        chatJid,
+      },
       'Trust approval resolved via channel message',
     );
   }
@@ -1708,7 +1766,13 @@ import {
 
 describe('formatApprovalPrompt', () => {
   it('includes tool name and class', () => {
-    const msg = formatApprovalPrompt('abc123', 'comms.write', 'send_message', 'Send status update', 30);
+    const msg = formatApprovalPrompt(
+      'abc123',
+      'comms.write',
+      'send_message',
+      'Send status update',
+      30,
+    );
     expect(msg).toContain('send_message');
     expect(msg).toContain('comms');
     expect(msg).toContain('write');
@@ -1717,13 +1781,25 @@ describe('formatApprovalPrompt', () => {
   });
 
   it('omits details when description is undefined', () => {
-    const msg = formatApprovalPrompt('abc123', 'code.write', 'write_file', undefined, 30);
+    const msg = formatApprovalPrompt(
+      'abc123',
+      'code.write',
+      'write_file',
+      undefined,
+      30,
+    );
     expect(msg).not.toContain('Details');
   });
 });
 
 describe('parseApprovalReply', () => {
-  const pending = [{ approvalId: 'abc123', toolName: 'send_message', actionClass: 'comms.write' }];
+  const pending = [
+    {
+      approvalId: 'abc123',
+      toolName: 'send_message',
+      actionClass: 'comms.write',
+    },
+  ];
 
   it('returns null when no pending approvals', () => {
     expect(parseApprovalReply('yes', [])).toBeNull();
@@ -1752,8 +1828,16 @@ describe('parseApprovalReply', () => {
 
   it('matches with explicit approval id even in multi-pending', () => {
     const multi = [
-      { approvalId: 'abc123', toolName: 'send_message', actionClass: 'comms.write' },
-      { approvalId: 'xyz456', toolName: 'write_file', actionClass: 'code.write' },
+      {
+        approvalId: 'abc123',
+        toolName: 'send_message',
+        actionClass: 'comms.write',
+      },
+      {
+        approvalId: 'xyz456',
+        toolName: 'write_file',
+        actionClass: 'code.write',
+      },
     ];
     const result = parseApprovalReply('yes abc123', multi);
     expect(result?.approvalId).toBe('abc123');
@@ -1762,8 +1846,16 @@ describe('parseApprovalReply', () => {
 
   it('returns null for multi-pending without explicit id', () => {
     const multi = [
-      { approvalId: 'abc123', toolName: 'send_message', actionClass: 'comms.write' },
-      { approvalId: 'xyz456', toolName: 'write_file', actionClass: 'code.write' },
+      {
+        approvalId: 'abc123',
+        toolName: 'send_message',
+        actionClass: 'comms.write',
+      },
+      {
+        approvalId: 'xyz456',
+        toolName: 'write_file',
+        actionClass: 'code.write',
+      },
     ];
     expect(parseApprovalReply('yes', multi)).toBeNull();
   });
@@ -1790,7 +1882,13 @@ In the main startup section (where channels are started and `startIpcWatcher` is
 ```typescript
 // Start trust gateway (containers call this before write/transact ops)
 startTrustGateway({
-  sendApprovalPrompt: async (chatJid, approvalId, actionClass, toolName, description) => {
+  sendApprovalPrompt: async (
+    chatJid,
+    approvalId,
+    actionClass,
+    toolName,
+    description,
+  ) => {
     const msg = formatApprovalPrompt(
       approvalId,
       actionClass,
@@ -1801,7 +1899,10 @@ startTrustGateway({
     await sendMessage(chatJid, msg);
   },
   sendTimeoutNotification: async (chatJid, toolName) => {
-    await sendMessage(chatJid, `⏱ Approval request for \`${toolName}\` timed out.`);
+    await sendMessage(
+      chatJid,
+      `⏱ Approval request for \`${toolName}\` timed out.`,
+    );
   },
 });
 ```
@@ -1825,7 +1926,11 @@ Then in `src/index.ts` in the message dispatch loop, intercept before agent invo
 // Check if this message resolves a pending trust approval
 const pendingIds = getPendingTrustApprovalIds(chatJid);
 if (pendingIds.length > 0) {
-  const consumed = handlePotentialApprovalReply(messageText, chatJid, pendingIds);
+  const consumed = handlePotentialApprovalReply(
+    messageText,
+    chatJid,
+    pendingIds,
+  );
   if (consumed) {
     // Don't route to agent — this was an approval response
     continue; // or return, depending on the loop structure
@@ -1991,7 +2096,10 @@ describe('executeTrustCommand', () => {
   });
 
   it('never_auto sets manual gate', () => {
-    const result = executeTrustCommand({ type: 'never_auto', actionClass: 'health.transact' }, 'group1');
+    const result = executeTrustCommand(
+      { type: 'never_auto', actionClass: 'health.transact' },
+      'group1',
+    );
     expect(result).toContain('permanently gated');
   });
 
@@ -2107,7 +2215,9 @@ async function fetchJson<T>(
   const res = await fetch(url, options);
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Trust gateway ${options.method ?? 'GET'} ${url}: ${res.status} ${text}`);
+    throw new Error(
+      `Trust gateway ${options.method ?? 'GET'} ${url}: ${res.status} ${text}`,
+    );
   }
   return res.json() as Promise<T>;
 }
@@ -2159,8 +2269,10 @@ export async function requestTrustApproval(params: {
     );
 
     if (pollResp.decision === 'approved') return { approved: true };
-    if (pollResp.decision === 'denied') return { approved: false, reason: 'user denied' };
-    if (pollResp.decision === 'timeout') return { approved: false, reason: 'approval timed out' };
+    if (pollResp.decision === 'denied')
+      return { approved: false, reason: 'user denied' };
+    if (pollResp.decision === 'timeout')
+      return { approved: false, reason: 'approval timed out' };
     // 'pending' → keep polling
   }
 
@@ -2180,7 +2292,12 @@ Read `container/agent-runner/src/ipc-mcp-stdio.ts` to understand the tool dispat
 import { requestTrustApproval } from './trust-client.js';
 
 // Before executing a write/transact tool:
-const SKIP_TRUST_TOOLS = new Set(['read_file', 'list_files', 'web_search', 'search_contacts']);
+const SKIP_TRUST_TOOLS = new Set([
+  'read_file',
+  'list_files',
+  'web_search',
+  'search_contacts',
+]);
 
 if (!SKIP_TRUST_TOOLS.has(toolName)) {
   const { approved, reason } = await requestTrustApproval({
@@ -2189,7 +2306,11 @@ if (!SKIP_TRUST_TOOLS.has(toolName)) {
     chatJid: config.chatJid,
   });
   if (!approved) {
-    return { content: [{ type: 'text', text: `Action blocked: ${reason ?? 'not approved'}` }] };
+    return {
+      content: [
+        { type: 'text', text: `Action blocked: ${reason ?? 'not approved'}` },
+      ],
+    };
   }
 }
 ```
@@ -2216,16 +2337,31 @@ import { recordTrustDecision } from '../trust-engine.js';
 const TEST_PORT = 19256;
 process.env.TRUST_GATEWAY_PORT = String(TEST_PORT);
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: unknown }> {
+async function post(
+  path: string,
+  body: unknown,
+): Promise<{ status: number; data: unknown }> {
   return new Promise((resolve, reject) => {
     const bodyStr = JSON.stringify(body);
     const req = http.request(
-      { hostname: '127.0.0.1', port: TEST_PORT, path, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) } },
+      {
+        hostname: '127.0.0.1',
+        port: TEST_PORT,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+      },
       (res) => {
         let data = '';
-        res.on('data', (c) => { data += c; });
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, data: JSON.parse(data) }));
+        res.on('data', (c) => {
+          data += c;
+        });
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, data: JSON.parse(data) }),
+        );
       },
     );
     req.on('error', reject);
@@ -2240,8 +2376,12 @@ async function get(path: string): Promise<{ status: number; data: unknown }> {
       { hostname: '127.0.0.1', port: TEST_PORT, path, method: 'GET' },
       (res) => {
         let data = '';
-        res.on('data', (c) => { data += c; });
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, data: JSON.parse(data) }));
+        res.on('data', (c) => {
+          data += c;
+        });
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, data: JSON.parse(data) }),
+        );
       },
     );
     req.on('error', reject);
@@ -2355,6 +2495,7 @@ npm run build
 ```
 
 **Expected results:**
+
 - All test suites: PASS
 - Build: 0 errors, 0 warnings on trust files
 - `npm run dev` starts without error; trust gateway logs `Trust gateway started` on port 10255

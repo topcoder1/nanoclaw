@@ -6,6 +6,7 @@
 **Strategy:** Commit all schema-level decisions now. Defer operational machinery until data justifies it. Ship in 3 weeks, not 9.
 
 ### Locked decisions (from sign-off)
+
 1. **Embeddings: local `nomic-embed-text-v1.5` via `@huggingface/transformers`.** Privacy + free re-embedding + no external dependency. Quality gap closed by reranker enabled from day 1 of P1.
 2. **Location: `store/brain.db`** (alongside existing `store/messages.db`). Future split → `store/brain/{work,personal}.db`.
 3. **Recall UX: free-form `/recall <question>`.** Structured shortcuts layered on later from digest-observed patterns.
@@ -29,6 +30,7 @@
 ## 2. What's in v2 vs. deferred
 
 ### In v2 (schema commitments — expensive to retrofit)
+
 - Entity spine with ULIDs and time-bound aliases
 - Bitemporal Knowledge Units (`valid_from/until` + `recorded_at/superseded_at`)
 - Immutable `raw_events`
@@ -42,17 +44,17 @@
 
 ### Deferred (operational — add when data justifies)
 
-| Feature | Trigger to add | Cost to add later |
-|---------|----------------|-------------------|
-| Split to two SQLite files (`personal.db` / `work.db`) | First colleague onboards OR audit requirement | Weekend, bounded |
-| Splink nightly dedup sidecar | Entity count > 10K OR >5% dedup precision miss | 1 week |
-| Cross-encoder reranker | Measured retrieval quality < target on eval harness | 2 days |
-| Tier demotion (hot/warm/cold/forgotten) | Working set > 100K KUs OR Qdrant RAM pressure | 1 week |
-| Sleep-time consolidation | Retrieval results show material redundancy | 1 week |
-| OpenFGA RBAC | Second user in work scope | 1 week |
-| HyDE fallback | Retrieval confidence < 0.4 on >10% of queries | 2 days |
-| Local embeddings (`nomic-embed-text-v1.5`) | Privacy review flags OpenAI exposure | 2 days |
-| Entity review queue UI | Review queue backlog > 50 | 3 days |
+| Feature                                               | Trigger to add                                      | Cost to add later |
+| ----------------------------------------------------- | --------------------------------------------------- | ----------------- |
+| Split to two SQLite files (`personal.db` / `work.db`) | First colleague onboards OR audit requirement       | Weekend, bounded  |
+| Splink nightly dedup sidecar                          | Entity count > 10K OR >5% dedup precision miss      | 1 week            |
+| Cross-encoder reranker                                | Measured retrieval quality < target on eval harness | 2 days            |
+| Tier demotion (hot/warm/cold/forgotten)               | Working set > 100K KUs OR Qdrant RAM pressure       | 1 week            |
+| Sleep-time consolidation                              | Retrieval results show material redundancy          | 1 week            |
+| OpenFGA RBAC                                          | Second user in work scope                           | 1 week            |
+| HyDE fallback                                         | Retrieval confidence < 0.4 on >10% of queries       | 2 days            |
+| Local embeddings (`nomic-embed-text-v1.5`)            | Privacy review flags OpenAI exposure                | 2 days            |
+| Entity review queue UI                                | Review queue backlog > 50                           | 3 days            |
 
 Every deferred feature gets a **measurable re-evaluation trigger**, not "we'll get to it."
 
@@ -89,6 +91,7 @@ Consumers: agents · Telegram /recall · weekly digest
 ```
 
 **Key simplifications vs. v1:**
+
 - One SQLite file (`store/brain.db`), separate from existing `store/messages.db`.
 - `account` and `scope` are columns, not separate files.
 - Deterministic entity resolution only; Splink deferred.
@@ -100,6 +103,7 @@ Consumers: agents · Telegram /recall · weekly digest
 ## 4. Migration from existing NanoClaw
 
 Existing state (confirmed via codebase review):
+
 - `store/messages.db` has `knowledge_facts` (FTS5-backed), `tracked_items`, `commitments`, `contact_activity`, `acted_emails`, etc.
 - Qdrant collection `nanoclaw_knowledge` exists at 1536d, points have **no** `model_version` in payload.
 - `src/memory/knowledge-store.ts:202` hardcodes `COLLECTION_NAME = 'nanoclaw_knowledge'`.
@@ -108,11 +112,13 @@ Existing state (confirmed via codebase review):
 ### Migration plan (runs once, idempotent)
 
 **Phase A — Qdrant model-version backfill (before any schema work):**
+
 1. Update all existing `nanoclaw_knowledge` points to add `model_version: "openai:text-embedding-3-small:1536"` in payload via bulk upsert.
 2. Update `knowledge-store.ts` to write `model_version` on every new upsert (2-line fix).
 3. Rename collection logically: `nanoclaw_knowledge` → conceptually treated as `ku_openai_text-embedding-3-small_1536`. We keep the physical name for backward compat; new collections created with the new naming scheme.
 
 **Phase B — Introduce `store/brain.db`:**
+
 1. New file, WAL mode, `synchronous=NORMAL` set on open.
 2. Create full v2 schema (see §5).
 3. `knowledge_facts` → `knowledge_units` migration:
@@ -129,6 +135,7 @@ Existing state (confirmed via codebase review):
 5. `messages.db` stays as-is. Brain layer does not touch it.
 
 **Phase C — Cutover:**
+
 1. `knowledge-store.ts` rewired to write to `brain.db` via the new API.
 2. Old `knowledge_facts` table kept read-only for 30 days, then deleted.
 
@@ -317,22 +324,27 @@ query
 ## 7. Topic key, scope, extraction rules — defined
 
 ### topic_key
+
 ```
 topic_key = sha256(normalize(topic_seed)) where topic_seed =
   coalesce(extracted_subject, title, first_sentence)
   lowercased, stop-words removed, stemmed, truncated to 128 chars
 ```
+
 Stable across re-ingestions. Used later for supersession / consolidation.
 
 ### scope
-JSON array of department tags: `["sales"]`, `["eng","exec"]`. `NULL` = unscoped work. Multi-tag OR: KU is visible to anyone authorized for *any* tag. Empty array = private-to-owner.
+
+JSON array of department tags: `["sales"]`, `["eng","exec"]`. `NULL` = unscoped work. Multi-tag OR: KU is visible to anyone authorized for _any_ tag. Empty array = private-to-owner.
 
 ### Extraction rules (cheap tier — runs on every event)
+
 1. Regex patterns for: URLs, emails, phone numbers, dates, money amounts, ticker symbols, HubSpot deal IDs, Gong call IDs.
 2. Named entities from existing NanoClaw sender/subject classifiers.
 3. If structured signals present (explicit ask, deal mention, named project) → queue LLM tier.
 
 ### LLM extraction tier (runs only on signal-positive events)
+
 - Model: Claude Haiku 4.5 for cost. Budget: $0.10/day soft cap.
 - Output schema: JSON with `claims[]`, each with `text`, `topic_seed`, `entities_mentioned[]`, `confidence`.
 - Confidence gates: `>0.7` → KU stored; `0.4–0.7` → KU stored + `needs_review=1`; `<0.4` → dropped.
@@ -358,6 +370,7 @@ on raw event:
 ```
 
 ### Failure handling
+
 - Step 6 (Qdrant upsert) fails → KU row written but Qdrant miss. Reconciliation job (§9) fixes.
 - Step 4 (LLM) fails → raw_event.process_error set, retry_count++. Retry on next cycle up to 3x; after that, alert.
 - Step 2 queue full → backpressure on SSE handler via existing IPC trigger path.
@@ -367,6 +380,7 @@ on raw event:
 ## 9. Observability, reliability, cost
 
 ### Metrics (written to `system_state` + `cost_log`)
+
 - Ingestion rate (events/hour), processing lag, error rate.
 - Qdrant ↔ SQLite consistency: nightly job compares KU count; alerts on drift.
 - Embedding cost per day, per source.
@@ -374,17 +388,21 @@ on raw event:
 - Entity count, alias count, unresolved-candidate count.
 
 ### Health
+
 - Embedding provider reachability probe every 5min (write to `system_state`).
 - Weekly digest includes: cost YTD, ingestion volume, top-retrieved KUs, new entities, any drift alerts.
 - On any critical alert (provider down > 15min, cost spike > 2x rolling avg, consistency drift > 1%): Telegram ping to user.
 
 ### Backup / recovery
+
 - `brain.db` backed up nightly via `.backup()` API to `store/backups/brain-YYYY-MM-DD.db`. Keep 30 days.
 - Qdrant snapshot nightly via API to `store/qdrant-snapshots/`. Keep 14 days.
 - **Recovery contract:** if Qdrant is lost, re-embed from `brain.db` (all text retained). If `brain.db` is lost, re-derive from `raw_events` table AND existing `store/messages.db`. Document this as the re-derivation procedure — tested quarterly.
 
 ### Cost model (rough)
+
 At ~100 events/day, 20% signal-positive:
+
 - Embeddings: ~100 × $0.00002 × avg 200 tokens = **$0.0004/day** (negligible)
 - LLM extraction (Haiku 4.5, 20 calls × 2K tokens): ~**$0.05/day**
 - Rerank (local, free when enabled)
@@ -395,6 +413,7 @@ At ~100 events/day, 20% signal-positive:
 ## 10. Evaluation harness
 
 Without measurement, tuning is guesswork. Before P0 ships:
+
 1. Build a **golden query set** (25 queries with expected KU ids) covering: recent recall, historical recall, entity lookup, multi-hop ("who worked on X at company Y").
 2. Tests run on every PR touching retrieval. Report: precision@10, recall@10, MRR.
 3. Monthly: user validates 10 random retrievals, feedback logged as `needs_review` or `irrelevant`.
@@ -404,19 +423,20 @@ Without measurement, tuning is guesswork. Before P0 ships:
 
 ## 11. Stack (final)
 
-| Layer | Choice | Note |
-|-------|--------|------|
-| SQLite | `better-sqlite3` | WAL mode, `synchronous=NORMAL` |
-| Query builder | **Raw SQL** (matches existing NanoClaw style) | Kysely can come later |
-| Vector | Qdrant + `@qdrant/js-client-rest` | Current version 1.14.0 |
-| Embeddings | **Local: `nomic-embed-text-v1.5` via `@huggingface/transformers`** (768d, Matryoshka-truncatable) | ONNX runtime, ~140MB model. No external API. |
-| LLM extraction | Claude Haiku 4.5 via Anthropic SDK | Matches existing NanoClaw patterns |
-| Reranker | `@huggingface/transformers` + `ms-marco-MiniLM-L-6-v2` | **Enabled from P1 day 1** to close embedding quality gap. |
-| IDs | `ulid` | npm |
-| Write-serializer | Simple `AsyncQueue` class in `src/brain/queue.ts` | No new dep |
-| RRF | Native JS (~20 lines in `src/brain/retrieval.ts`) | |
+| Layer            | Choice                                                                                            | Note                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| SQLite           | `better-sqlite3`                                                                                  | WAL mode, `synchronous=NORMAL`                            |
+| Query builder    | **Raw SQL** (matches existing NanoClaw style)                                                     | Kysely can come later                                     |
+| Vector           | Qdrant + `@qdrant/js-client-rest`                                                                 | Current version 1.14.0                                    |
+| Embeddings       | **Local: `nomic-embed-text-v1.5` via `@huggingface/transformers`** (768d, Matryoshka-truncatable) | ONNX runtime, ~140MB model. No external API.              |
+| LLM extraction   | Claude Haiku 4.5 via Anthropic SDK                                                                | Matches existing NanoClaw patterns                        |
+| Reranker         | `@huggingface/transformers` + `ms-marco-MiniLM-L-6-v2`                                            | **Enabled from P1 day 1** to close embedding quality gap. |
+| IDs              | `ulid`                                                                                            | npm                                                       |
+| Write-serializer | Simple `AsyncQueue` class in `src/brain/queue.ts`                                                 | No new dep                                                |
+| RRF              | Native JS (~20 lines in `src/brain/retrieval.ts`)                                                 |                                                           |
 
 **Code location:** new `src/brain/` directory in NanoClaw:
+
 ```
 src/brain/
   db.ts          — brain.db init, WAL, migrations
@@ -435,11 +455,11 @@ src/brain/
 
 ## 12. Phased rollout (3 weeks)
 
-| Phase | Duration | Deliverable | Exit criteria |
-|-------|----------|-------------|---------------|
-| **P0** | Week 1 | `brain.db` + schema + WAL + serializer + `raw_events` capture from SSE + Qdrant `model_version` backfill | All new emails land in `raw_events`; `model_version` present on every Qdrant point |
-| **P1** | Week 2 | Entity spine + deterministic resolution + FTS5 + RRF retrieval + golden-set eval harness | Golden set passes baseline threshold; Telegram `/recall` returns results from `brain.db` |
-| **P2** | Week 3 | `knowledge_facts` → `knowledge_units` migration + cutover + observability + cost tracking + weekly digest | Old `knowledge_facts` read-only; daily cost report in digest; drift alerts work |
+| Phase  | Duration | Deliverable                                                                                               | Exit criteria                                                                            |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **P0** | Week 1   | `brain.db` + schema + WAL + serializer + `raw_events` capture from SSE + Qdrant `model_version` backfill  | All new emails land in `raw_events`; `model_version` present on every Qdrant point       |
+| **P1** | Week 2   | Entity spine + deterministic resolution + FTS5 + RRF retrieval + golden-set eval harness                  | Golden set passes baseline threshold; Telegram `/recall` returns results from `brain.db` |
+| **P2** | Week 3   | `knowledge_facts` → `knowledge_units` migration + cutover + observability + cost tracking + weekly digest | Old `knowledge_facts` read-only; daily cost report in digest; drift alerts work          |
 
 After P2 ships: 30-day **measurement phase** — real ingestion, real queries, real cost data. Then revisit the deferred list with evidence.
 
@@ -477,6 +497,7 @@ These get checked in the weekly digest. No hand-wavy "we'll get to it."
 ## 15. What this deliberately does not do
 
 To avoid scope creep, explicitly out of v2:
+
 - No graph traversal beyond depth 1 (defer to Neo4j or recursive CTEs when needed).
 - No attachment OCR or PDF extraction (attachments stored as raw bytes in `raw_events.payload` for now).
 - No consolidation / supersession logic — just write `topic_key` so future supersession can find groups.
@@ -485,6 +506,6 @@ To avoid scope creep, explicitly out of v2:
 
 ---
 
-*Full evidence: [.omc/research/brain-architecture-battle-tested.md](../../.omc/research/brain-architecture-battle-tested.md)*
-*Superseded: [.omc/design/brain-architecture-v1.md](brain-architecture-v1.md)*
-*Review that drove this revision: critic findings — migration gap, retrieval contradiction, WAL/serializer unspecified, ATTACH risks, observability missing, indexes missing.*
+_Full evidence: [.omc/research/brain-architecture-battle-tested.md](../../.omc/research/brain-architecture-battle-tested.md)_
+_Superseded: [.omc/design/brain-architecture-v1.md](brain-architecture-v1.md)_
+_Review that drove this revision: critic findings — migration gap, retrieval contradiction, WAL/serializer unspecified, ATTACH risks, observability missing, indexes missing._

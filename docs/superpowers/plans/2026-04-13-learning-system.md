@@ -8,12 +8,14 @@
 The Learning System makes NanoClaw get smarter over time through four subsystems:
 
 ### 7A: Compounding Memory (Knowledge Store)
+
 - SQLite FTS5 full-text search across stored facts
 - Cross-group queryable memory
 - Functions: `storeFact()`, `queryFacts()`, `deleteFact()`, `getAllFacts()`
 - **File:** `src/memory/knowledge-store.ts`
 
 ### 7B: Outcome Tracking
+
 - Dedicated `outcomes` table (separate from trust_actions)
 - Success rate tracking per action class
 - Cost aggregation
@@ -21,12 +23,14 @@ The Learning System makes NanoClaw get smarter over time through four subsystems
 - **File:** `src/memory/outcome-store.ts`
 
 ### 7C: Cost Dashboard
+
 - On-demand via `@Andy cost report` (or `@Andy costs`)
 - Reads from existing `session_costs` table
 - Breakdown by session type with budget display
 - **File:** `src/memory/cost-dashboard.ts`
 
 ### 7D: Procedure Store
+
 - Learned procedures stored as JSON files
 - Global: `store/procedures/`
 - Per-group: `groups/{name}/procedures/`
@@ -34,6 +38,7 @@ The Learning System makes NanoClaw get smarter over time through four subsystems
 - **File:** `src/memory/procedure-store.ts`
 
 ### 7E: Teach Mode
+
 - Triggered by `@Andy teach: how to do X`
 - Parses description into procedure steps
 - Stores via procedure store

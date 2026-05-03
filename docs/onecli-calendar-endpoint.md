@@ -38,6 +38,7 @@
 ## NanoClaw Integration
 
 The NanoClaw calendar poller (`src/calendar-poller.ts`) already:
+
 - Calls this endpoint every 5 minutes
 - Handles 404 gracefully (logs debug, returns)
 - Parses `summary` OR `title` fields

@@ -18,13 +18,13 @@ Add one-tap reply approval to the nanoclaw email mini-app. The agent already dra
 
 ## Clarifying-question answers (recap)
 
-| # | Question | Answer |
-|---|----------|--------|
-| Q1 | Primary reply flow | Agent-drafts-first; mini-app is review/edit/send |
-| Q2 | Send semantics | Send-with-undo (10s deferred send timer) |
-| Q3 | Edit flow | Inline textarea + "Edit in Gmail" escape hatch; text-only v1 |
-| Q4 | Account routing | Derived from incoming thread (no user picker) |
-| Q5 | Forward in mini-app | Skip — conversational chat path already works |
+| #   | Question            | Answer                                                       |
+| --- | ------------------- | ------------------------------------------------------------ |
+| Q1  | Primary reply flow  | Agent-drafts-first; mini-app is review/edit/send             |
+| Q2  | Send semantics      | Send-with-undo (10s deferred send timer)                     |
+| Q3  | Edit flow           | Inline textarea + "Edit in Gmail" escape hatch; text-only v1 |
+| Q4  | Account routing     | Derived from incoming thread (no user picker)                |
+| Q5  | Forward in mini-app | Skip — conversational chat path already works                |
 
 ## Architecture
 
@@ -88,20 +88,25 @@ Add one-tap reply approval to the nanoclaw email mini-app. The agent already dra
 interface PendingSend {
   draftId: string;
   account: string;
-  sendAt: number;             // epoch ms
+  sendAt: number; // epoch ms
   timer: NodeJS.Timeout;
 }
 
 class PendingSendRegistry {
-  schedule(draftId: string, account: string, delayMs: number,
-           onFire: () => Promise<void>): { sendAt: number }
-  cancel(draftId: string): boolean
-  has(draftId: string): boolean
-  shutdown(): void
+  schedule(
+    draftId: string,
+    account: string,
+    delayMs: number,
+    onFire: () => Promise<void>,
+  ): { sendAt: number };
+  cancel(draftId: string): boolean;
+  has(draftId: string): boolean;
+  shutdown(): void;
 }
 ```
 
 Behavior:
+
 - `schedule()` with the same `draftId` replaces any existing timer (idempotent; double-tap Send simply pushes `sendAt` out).
 - `cancel()` returns `true` if a timer existed, `false` if it already fired or never existed.
 - `shutdown()` clears all timers without firing — called from SIGTERM/SIGINT. Safer default: email never leaves if process dies during the 10s window.
@@ -146,8 +151,9 @@ Two new methods on the interfaces:
 
 ```ts
 interface DraftReplyContext {
-  body: string;                 // current agent-enriched draft body (plain text)
-  incoming: {                   // headers of the email being replied TO
+  body: string; // current agent-enriched draft body (plain text)
+  incoming: {
+    // headers of the email being replied TO
     from: string;
     to: string;
     subject: string;
@@ -158,7 +164,10 @@ interface DraftReplyContext {
 
 interface GmailOps {
   // existing methods...
-  getDraftReplyContext(account: string, draftId: string): Promise<DraftReplyContext | null>;
+  getDraftReplyContext(
+    account: string,
+    draftId: string,
+  ): Promise<DraftReplyContext | null>;
   sendDraft(account: string, draftId: string): Promise<void>;
 }
 
@@ -169,15 +178,17 @@ interface GmailOpsProvider {
 }
 ```
 
-Rationale: `draft_originals` stores only the *pre-enrichment* body (used for the diff view). The mini-app needs the current agent-enriched body AND the incoming email headers. Both can be fetched in a single `gmail.users.drafts.get` call because a draft includes its threadId, and we can read sibling message headers from the same thread. We return a composite object to keep the interface surface narrow and avoid two round-trips in the route handler.
+Rationale: `draft_originals` stores only the _pre-enrichment_ body (used for the diff view). The mini-app needs the current agent-enriched body AND the incoming email headers. Both can be fetched in a single `gmail.users.drafts.get` call because a draft includes its threadId, and we can read sibling message headers from the same thread. We return a composite object to keep the interface surface narrow and avoid two round-trips in the route handler.
 
 Implementation in `channels/gmail.ts`:
+
 - `getDraftReplyContext`: `gmail.users.drafts.get({ userId: 'me', id: draftId, format: 'full' })` → extract draft body (prefer `text/plain`; fall back to stripped `text/html`). Find the most recent non-draft message in the same thread via `gmail.users.threads.get({ userId: 'me', id: threadId, format: 'metadata', metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date'] })` → populate `incoming`. Returns `null` if the draft no longer exists (404).
 - `sendDraft`: `gmail.users.drafts.send({ userId: 'me', requestBody: { id: draftId } })`. Logs on success with `{ account, draftId, threadId }`; logs + rethrows on failure.
 
 ### Mini-app UI — `src/mini-app/templates/email-full.ts`
 
 Renders:
+
 - Incoming email header (from, subject, date) — unchanged styling.
 - **Agent's draft body** in an editable `<textarea class="compose">` (auto-grows with JS; text-only; placeholder: "Agent's draft — edit before sending").
 - Button row: `[ Send ]` `[ Edit in Gmail ]` `[ Archive ]`.
@@ -221,17 +232,17 @@ The Telegram callback that handles the "Full Email" button already knows both `e
 
 ### Edge cases
 
-| Case | Behavior |
-|------|----------|
-| Double-tap Send | Registry replaces timer; `sendAt` pushed out 10s from latest tap. One send fires. |
-| Close mini-app after Send, before 10s | Timer runs server-side → send fires. Matches "I hit send" mental model. |
-| Restart nanoclaw before 10s fires | `shutdown()` clears timers → no send. User reopens mini-app and can re-send. |
-| Cancel after fire | Returns `{ cancelled: false }` → UI: "Too late — already sent." |
-| `updateDraft` fails on save | UI: "Couldn't save — try Edit in Gmail". Send button disabled until retry. |
-| `sendDraft` fails in timer | Event-bus `draft.send.failed` → Telegram notification with Retry + Open-in-Gmail buttons (reuses push-manager + callback-router). |
-| Account not registered | Route returns 404 `ACCOUNT_NOT_REGISTERED` → UI: "Account not registered — open in Gmail." |
-| Draft deleted in Gmail between save and send | `sendDraft` returns 404 from Gmail → error event → UI/Telegram notification: "Draft no longer exists." |
-| Two mini-app sessions on same draft | Not supported (single-user); second session won't see the first's undo state. Out of scope. |
+| Case                                         | Behavior                                                                                                                          |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Double-tap Send                              | Registry replaces timer; `sendAt` pushed out 10s from latest tap. One send fires.                                                 |
+| Close mini-app after Send, before 10s        | Timer runs server-side → send fires. Matches "I hit send" mental model.                                                           |
+| Restart nanoclaw before 10s fires            | `shutdown()` clears timers → no send. User reopens mini-app and can re-send.                                                      |
+| Cancel after fire                            | Returns `{ cancelled: false }` → UI: "Too late — already sent."                                                                   |
+| `updateDraft` fails on save                  | UI: "Couldn't save — try Edit in Gmail". Send button disabled until retry.                                                        |
+| `sendDraft` fails in timer                   | Event-bus `draft.send.failed` → Telegram notification with Retry + Open-in-Gmail buttons (reuses push-manager + callback-router). |
+| Account not registered                       | Route returns 404 `ACCOUNT_NOT_REGISTERED` → UI: "Account not registered — open in Gmail."                                        |
+| Draft deleted in Gmail between save and send | `sendDraft` returns 404 from Gmail → error event → UI/Telegram notification: "Draft no longer exists."                            |
+| Two mini-app sessions on same draft          | Not supported (single-user); second session won't see the first's undo state. Out of scope.                                       |
 
 ## Error handling
 
@@ -252,23 +263,24 @@ Client branches on `code`; shows `error` verbatim when no specific handler appli
 
 ### Logging (pino, structured fields)
 
-| Level | Event | Fields |
-|-------|-------|--------|
-| info | `Draft save via mini-app` | `{ account, draftId, bodyLen }` |
-| info | `Draft send scheduled` | `{ account, draftId, sendAt, delayMs }` |
-| info | `Draft send cancelled` | `{ account, draftId }` |
-| info | `Draft sent` | `{ account, draftId, threadId, elapsedMs }` |
-| warn | `Pending send dropped at shutdown` | `{ pendingCount, draftIds }` |
-| error | `Draft send failed` | `{ account, draftId, err }` |
-| error | `Draft save failed from mini-app` | `{ account, draftId, err }` |
+| Level | Event                              | Fields                                      |
+| ----- | ---------------------------------- | ------------------------------------------- |
+| info  | `Draft save via mini-app`          | `{ account, draftId, bodyLen }`             |
+| info  | `Draft send scheduled`             | `{ account, draftId, sendAt, delayMs }`     |
+| info  | `Draft send cancelled`             | `{ account, draftId }`                      |
+| info  | `Draft sent`                       | `{ account, draftId, threadId, elapsedMs }` |
+| warn  | `Pending send dropped at shutdown` | `{ pendingCount, draftIds }`                |
+| error | `Draft send failed`                | `{ account, draftId, err }`                 |
+| error | `Draft save failed from mini-app`  | `{ account, draftId, err }`                 |
 
 Component bindings: `{ component: 'mini-app' }` for routes, `{ component: 'gmail' }` for channel-level logs.
 
 ### Out-of-UI failure notification
 
 If `sendDraft` fails inside the timer and the mini-app is closed:
+
 1. Registry emits `draft.send.failed` event on the existing event-bus with `{ account, draftId, subject, error }`.
-2. An event-bus subscriber routes a Telegram message to the user via push-manager: "❌ Couldn't send reply to *{subject}* — [Retry] [Open in Gmail]".
+2. An event-bus subscriber routes a Telegram message to the user via push-manager: "❌ Couldn't send reply to _{subject}_ — [Retry] [Open in Gmail]".
 3. Retry callback uses the existing callback-router pattern; reissuing hits the same `POST /send` route.
 
 ### Deliberately not done
@@ -283,6 +295,7 @@ If `sendDraft` fails inside the timer and the mini-app is closed:
 ### Unit tests
 
 **`src/mini-app/pending-send.test.ts`** (new):
+
 - `schedule` fires `onFire` after `delayMs`
 - `schedule` same `draftId` twice replaces timer (only latest fires)
 - `cancel` of pending timer → `true`, no fire
@@ -291,11 +304,13 @@ If `sendDraft` fails inside the timer and the mini-app is closed:
 - `onFire` rejection → caught, logged, event-bus emits `draft.send.failed`
 
 **`src/gmail-ops.test.ts`** (extend):
+
 - `GmailOpsRouter.getDraftReplyContext` delegates to registered channel by account
 - `GmailOpsRouter.sendDraft` delegates to registered channel by account
 - Unknown account → throws existing error message
 
 **`src/channels/gmail.test.ts`** (extend):
+
 - `getDraftReplyContext(draftId)` → calls `drafts.get` + `threads.get`, returns composite `{ body, incoming }`
 - `getDraftReplyContext(draftId)` → returns `null` on 404 from Gmail
 - `getDraftReplyContext(draftId)` → falls back to stripped `text/html` when draft has no `text/plain` part
@@ -307,6 +322,7 @@ If `sendDraft` fails inside the timer and the mini-app is closed:
 ### Route tests
 
 **`src/__tests__/mini-app-draft-send-routes.test.ts`** (new):
+
 - `GET /reply/:draftId` → 200 HTML containing the rendered template with incoming headers + body textarea
 - `GET /reply/:draftId` missing draft → 200 HTML stub "Draft no longer exists" (not 404 — UX preference)
 - `PATCH /save` happy → 200, `updateDraft` mock called once
@@ -319,6 +335,7 @@ If `sendDraft` fails inside the timer and the mini-app is closed:
 ### Integration tests
 
 **`src/__tests__/mini-app-send-integration.test.ts`** (new):
+
 - Seed `draft_originals` row + mock `GmailOps` with in-memory store.
 - Flow: `save → send → advance(9s) → cancel` → assert `sendDraft` never called.
 - Flow: `send → advance(10s)` → assert `sendDraft` called exactly once with correct `{ account, draftId }`.
@@ -348,6 +365,7 @@ If `sendDraft` fails inside the timer and the mini-app is closed:
 ## Implementation ordering (for writing-plans)
 
 Recommended task sequence:
+
 1. `PendingSendRegistry` + unit tests (pure logic, no dependencies).
 2. `getDraftReplyContext` + `sendDraft` in `GmailOps` + `GmailOpsProvider` interfaces + Gmail channel impl + tests.
 3. Three new routes in `mini-app/server.ts` + route tests (uses methods from step 2).

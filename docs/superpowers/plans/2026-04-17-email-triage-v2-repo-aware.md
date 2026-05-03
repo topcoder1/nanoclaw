@@ -25,6 +25,7 @@
 ## Task 1: Repo profile schema + storage
 
 **Files:**
+
 - Create: `src/triage/repo-profile.ts`
 - Test: `src/__tests__/triage-repo-profile.test.ts`
 
@@ -57,7 +58,11 @@ db.prepare(
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { _initTestDatabase, _closeDatabase } from '../db.js';
-import { upsertRepoProfile, listRepoProfiles, getRepoProfile } from '../triage/repo-profile.js';
+import {
+  upsertRepoProfile,
+  listRepoProfiles,
+  getRepoProfile,
+} from '../triage/repo-profile.js';
 
 describe('repo profile store', () => {
   beforeEach(() => _initTestDatabase());
@@ -185,6 +190,7 @@ git commit -m "feat(triage-v2): repo profile schema + SQLite store"
 ## Task 2: Thread → repo mapping table
 
 **Files:**
+
 - Modify: `src/db.ts` (add `triage_thread_repo_map` table)
 - Create: `src/triage/thread-map.ts`
 - Test: `src/__tests__/triage-thread-map.test.ts`
@@ -210,6 +216,7 @@ db.prepare(
 - `getThreadRepo(threadId): { repo, confidence, confirmedByUser } | null`
 
 Test cases:
+
 - Round-trip: set then get returns same values
 - Upsert: second set overrides first
 - User confirmation upgrades confidence to 1.0
@@ -226,6 +233,7 @@ git commit -m "feat(triage-v2): thread\u2192repo persistent mapping"
 ## Task 3: Repo index scanner — `scripts/build-repo-index.ts`
 
 **Files:**
+
 - Create: `scripts/build-repo-index.ts`
 - No test (one-off CLI script)
 
@@ -266,10 +274,12 @@ git commit -m "feat(triage-v2): repo index scanner"
 ## Task 4: User-confirmation flow for extracted profiles
 
 **Files:**
+
 - Modify: `scripts/build-repo-index.ts` (or create `scripts/triage-confirm-repos.ts`)
 - Create: `src/triage/repo-confirm.ts` (interactive Telegram flow — can be skipped if user opts to edit the DB directly)
 
 At first-run, Telegram message with top 12 active repos asking for:
+
 1. Which repos to enable auto-fix for (sets `auto_fix_allowed = 1`)
 2. Aliases ("the email thing" → superpilot) — add to the `keywords` array
 3. Sender → repo mappings (stored separately in `triage_sender_repo_map`)
@@ -304,6 +314,7 @@ git commit -m "feat(triage-v2): interactive repo profile confirmation"
 ## Task 5: Repo resolver — 5-signal scoring
 
 **Files:**
+
 - Create: `src/triage/repo-resolver.ts`
 - Test: `src/__tests__/triage-repo-resolver.test.ts`
 
@@ -329,7 +340,7 @@ export interface ResolveInput {
 export interface ResolveCandidate {
   repo: string;
   score: number;
-  signals: string[];  // which signals fired, e.g. ['explicit:url', 'sender:github']
+  signals: string[]; // which signals fired, e.g. ['explicit:url', 'sender:github']
 }
 
 export interface ResolveResult {
@@ -365,6 +376,7 @@ git commit -m "feat(triage-v2): 5-signal repo resolver with confidence gate"
 ## Task 6: Wire resolver into triage worker
 
 **Files:**
+
 - Modify: `src/triage/worker.ts`
 - Modify: `src/triage/schema.ts` (populate `repo_candidates` from resolver, not LLM)
 - Test: extend `src/__tests__/triage-worker.test.ts`
@@ -380,7 +392,7 @@ if (TRIAGE_V2_ENABLED) {
     emailBody: input.emailBody,
     sender: input.sender,
     subject: input.subject,
-    headers: {},                  // v1 doesn't carry headers; extend SSE later
+    headers: {}, // v1 doesn't carry headers; extend SSE later
     threadId: input.threadId,
   });
   decision.repo_candidates = result.candidates;
@@ -415,6 +427,7 @@ git commit -m "feat(triage-v2): wire repo resolver into worker"
 ## Task 7: "Which repo?" button UX when confidence below threshold
 
 **Files:**
+
 - Modify: `src/triage/push-attention.ts` (add optional repo-candidate buttons)
 - Modify: `src/callback-router.ts` (add `triage:which_repo:<repo>:<itemId>` handler)
 - Create: `src/triage/queue-actions.ts` → add `handleWhichRepo(itemId, repo)` which writes to `triage_thread_repo_map` with `confirmed_by_user=1`
@@ -446,12 +459,18 @@ export function handleWhichRepo(itemId: string, repo: string): void {
   const item = getItem(itemId);
   if (!item?.thread_id) return;
 
-  setThreadRepo(item.thread_id, repo, { confidence: 1.0, confirmedByUser: true });
+  setThreadRepo(item.thread_id, repo, {
+    confidence: 1.0,
+    confirmedByUser: true,
+  });
 
   // Also update the item's repo_candidates to reflect confirmation
   getDb()
     .prepare(`UPDATE tracked_items SET repo_candidates_json = ? WHERE id = ?`)
-    .run(JSON.stringify([{ repo, score: 1.0, signal: 'user_confirmed' }]), itemId);
+    .run(
+      JSON.stringify([{ repo, score: 1.0, signal: 'user_confirmed' }]),
+      itemId,
+    );
 }
 ```
 
@@ -469,6 +488,7 @@ git commit -m "feat(triage-v2): 'which repo?' fallback UX"
 ## Task 8: Docs-inbox commit action
 
 **Files:**
+
 - Create: `src/triage/docs-inbox.ts`
 - Test: `src/__tests__/triage-docs-inbox.test.ts`
 
@@ -480,15 +500,15 @@ When `repo_resolved` is set AND `facts_extracted` is non-empty AND auto-fix is N
 
 ```typescript
 export interface DocsInboxInput {
-  repo: string;                  // logical repo name
-  absolutePath: string;          // worktree path
+  repo: string; // logical repo name
+  absolutePath: string; // worktree path
   subject: string;
   sender: string;
   threadId: string;
   account: string;
   classificationId: string;
   facts: ExtractedFact[];
-  pushUpstream: boolean;         // gated on env
+  pushUpstream: boolean; // gated on env
 }
 ```
 
@@ -520,7 +540,11 @@ function setupTempRepo(): string {
   execFileSync('git', ['init', '-b', 'main'], { cwd: dir });
   fs.writeFileSync(path.join(dir, 'README.md'), 'test');
   execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'init'], { cwd: dir });
+  execFileSync(
+    'git',
+    ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'init'],
+    { cwd: dir },
+  );
   return dir;
 }
 ```
@@ -539,6 +563,7 @@ git commit -m "feat(triage-v2): docs-inbox append + branch commit + push"
 ## Task 9: Wire docs-inbox into worker side-effects
 
 **Files:**
+
 - Modify: `src/triage/worker.ts`
 - Modify: `src/__tests__/triage-worker.test.ts`
 
@@ -554,9 +579,11 @@ After the existing facts-append-to-knowledge.md block (Task 16 in v1), add a sib
 ## Task 10: Rollout runbook (v2)
 
 **Files:**
+
 - Create: `docs/runbooks/triage-v2-rollout.md`
 
 Document:
+
 1. Pre-reqs (v1 stable ≥ 14 days, agreement ≥ 80%)
 2. Run `npm run triage:index-repos` and confirm output
 3. Edit Telegram confirmation flow (which repos allow auto-fix, aliases, sender mappings)

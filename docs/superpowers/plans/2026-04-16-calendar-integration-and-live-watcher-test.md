@@ -15,6 +15,7 @@
 **Context:** The existing Gmail OAuth tokens at `~/.gmail-mcp*/credentials.json` only have `gmail.settings.basic` and `gmail.modify` scopes. Google Calendar API requires `calendar.readonly`. The OAuth client app at `~/.gmail-mcp*/gcp-oauth.keys.json` uses the `installed` flow. The refresh script at `scripts/refresh-gmail-tokens.py` handles token lifecycle.
 
 **Files:**
+
 - Modify: `scripts/refresh-gmail-tokens.py` — add `calendar.readonly` to required scopes list
 - Create: `scripts/authorize-calendar.py` — one-time authorization script that adds calendar scope
 
@@ -254,6 +255,7 @@ git commit -m "feat: add calendar OAuth scope authorization script"
 ### Task 2: Google Calendar Fetcher Module
 
 **Files:**
+
 - Create: `src/calendar-fetcher.ts` — fetches events from Google Calendar API using stored OAuth tokens
 - Create: `src/calendar-fetcher.test.ts` — unit tests with mocked googleapis
 
@@ -273,8 +275,18 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((p: string) => {
-      if (typeof p === 'string' && p.includes('gmail-mcp') && p.endsWith('credentials.json')) return true;
-      if (typeof p === 'string' && p.includes('gmail-mcp') && p.endsWith('gcp-oauth.keys.json')) return true;
+      if (
+        typeof p === 'string' &&
+        p.includes('gmail-mcp') &&
+        p.endsWith('credentials.json')
+      )
+        return true;
+      if (
+        typeof p === 'string' &&
+        p.includes('gmail-mcp') &&
+        p.endsWith('gcp-oauth.keys.json')
+      )
+        return true;
       return actual.existsSync(p);
     }),
     readFileSync: vi.fn((p: string, enc?: string) => {
@@ -303,7 +315,10 @@ vi.mock('fs', async () => {
   };
 });
 
-import { fetchCalendarEvents, type CalendarAccountConfig } from './calendar-fetcher.js';
+import {
+  fetchCalendarEvents,
+  type CalendarAccountConfig,
+} from './calendar-fetcher.js';
 
 describe('fetchCalendarEvents', () => {
   it('returns empty array when no accounts have calendar scope', async () => {
@@ -453,16 +468,28 @@ function buildCalendarClient(
       try {
         const updated = { ...creds, ...tokens };
         if (tokens.expiry_date) updated.expiry_date = tokens.expiry_date;
-        fs.writeFileSync(account.credentialsPath, JSON.stringify(updated, null, 2));
-        logger.debug({ account: account.label }, 'Calendar OAuth tokens refreshed and saved');
+        fs.writeFileSync(
+          account.credentialsPath,
+          JSON.stringify(updated, null, 2),
+        );
+        logger.debug(
+          { account: account.label },
+          'Calendar OAuth tokens refreshed and saved',
+        );
       } catch (err) {
-        logger.warn({ err, account: account.label }, 'Failed to save refreshed calendar tokens');
+        logger.warn(
+          { err, account: account.label },
+          'Failed to save refreshed calendar tokens',
+        );
       }
     });
 
     return google.calendar({ version: 'v3', auth: oauth2 });
   } catch (err) {
-    logger.warn({ err, account: account.label }, 'Failed to build calendar client');
+    logger.warn(
+      { err, account: account.label },
+      'Failed to build calendar client',
+    );
     return null;
   }
 }
@@ -563,6 +590,7 @@ git commit -m "feat: add direct Google Calendar fetcher using googleapis"
 ### Task 3: Update Calendar Poller to Use Direct Fetcher
 
 **Files:**
+
 - Modify: `src/calendar-poller.ts` — replace OneCLI fetch with direct calendar fetcher, keep OneCLI as fallback
 
 - [ ] **Step 1: Write test for the fallback behavior**
@@ -599,7 +627,10 @@ describe('pollCalendar with direct fetcher', () => {
 At the top of `src/calendar-poller.ts`, add the import:
 
 ```typescript
-import { fetchCalendarEvents, discoverCalendarAccounts } from './calendar-fetcher.js';
+import {
+  fetchCalendarEvents,
+  discoverCalendarAccounts,
+} from './calendar-fetcher.js';
 ```
 
 Then modify the `pollCalendar` function to try the direct fetcher first, falling back to OneCLI:
@@ -667,6 +698,7 @@ git commit -m "feat: calendar poller uses direct Google API, OneCLI as fallback"
 ### Task 4: Live Calendar Integration Test
 
 **Files:**
+
 - No code changes — manual verification
 
 - [ ] **Step 1: Verify OAuth credentials have calendar scope**
@@ -717,6 +749,7 @@ Expected: `Calendar poll complete` with `eventsFound` > 0 (if calendar has event
 **Context:** Browser watchers are now fully wired (Tasks 1-4 from previous plan). The watcher store, extract function, polling loop, and event consumer are all connected. This task tests the full system by adding a watcher that monitors a real web page.
 
 **Files:**
+
 - No code changes — IPC-based live test
 
 - [ ] **Step 1: Create a test watcher via the watcher store directly**
@@ -811,6 +844,7 @@ console.log('Remaining enabled:', listAllEnabledWatchers().length);
 **Context:** In the future, watchers should be addable from inside containers via IPC (similar to teach-mode procedures). This task adds a `watch_page` IPC handler to the orchestrator so agents can create watchers.
 
 **Files:**
+
 - Modify: `src/ipc.ts` — add `watch_page` task type handler
 - Create: `src/__tests__/ipc-watcher.test.ts` — test for the new handler
 
@@ -834,7 +868,10 @@ vi.mock('../event-bus.js', () => ({
   eventBus: { emit: vi.fn() },
 }));
 
-import { addWatcher, listAllEnabledWatchers } from '../watchers/watcher-store.js';
+import {
+  addWatcher,
+  listAllEnabledWatchers,
+} from '../watchers/watcher-store.js';
 import { handleWatchPageIpc } from '../ipc.js';
 
 beforeEach(() => _initTestDatabase());
@@ -987,6 +1024,7 @@ git commit -m "feat: add watch_page IPC handler for container-initiated watchers
 ### Task 7: Live IPC Watcher Test
 
 **Files:**
+
 - No code changes — end-to-end IPC simulation
 
 - [ ] **Step 1: Drop a watch_page IPC task file**

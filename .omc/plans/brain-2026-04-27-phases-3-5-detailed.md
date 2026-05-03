@@ -9,19 +9,19 @@
 
 These were ambiguous in the prior plan and are now pinned:
 
-| # | Question | Decision | Rationale |
-|---|---|---|---|
-| D1 | `wiki/` location — per-group or install-wide? | **Install-wide:** `store/wiki/` alongside `store/brain.db`. | The brain is a single SQLite + Qdrant install. Per-group would duplicate pages. Move it to `groups/<main>/wiki/` later only if the user actively browses it. |
-| D2 | File-tracked or DB-tracked? | **Files** (Markdown). Mirrored in git via `.gitignore` exclusion. | Karpathy pattern + Obsidian browsability + the original ask. `wiki_pages` table was considered and rejected — losing the human-readable surface defeats the point. |
-| D3 | Where does `last_synthesis_at` live? | **Real column** on `entities`, added via `applyColumnMigrations`. | Wikilint's class-4 finder needs an indexable predicate; `json_extract` on the `canonical` blob would be unindexable. |
-| D4 | How is `ku_count` change detected? | **`ku_count_at_last_synthesis INTEGER` column** on `entities`. | Same reason as D3. Live count comes from `COUNT(*) FROM ku_entities WHERE entity_id = ?`. |
-| D5 | Wiki dir in git? | **`.gitignore`d.** Regenerable from `brain.db`. | Avoids commit noise on every email ingest. Backups already cover `brain.db`. |
-| D6 | Atomic writes? | **`.tmp` + rename** for every page write. | Obsidian / VS Code file watchers can read mid-write. |
-| D7 | Coalescing primitive | **New `CoalescingQueue<K>` in `src/brain/queue.ts`** — per-key debounce, last-write-wins. Distinct from existing `AsyncWriteQueue` (batch-flush). | Critic correctly flagged that "coalesce" requires key-based dedup, not batch-flush. |
-| D8 | Phase 5 readiness gate | **20+ accumulated brain-reflection rules manually reviewed** — not "4 weeks". | Statistical sanity per critic. Calendar-based gates are coin flips at this emission rate. |
-| D9 | Wiki summary LLM | **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), max 256 output tokens. | Same model as `extract.ts` and `procedural-reflect.ts` — keeps the cost-log "anthropic/extract" bucket coherent. |
-| D10 | Phase split | **Phase 3 splits into 3a (projection + tests) and 3b (triggers + wiring + slash command)**. | Critic estimate of 5–7 days realistic. Splitting lets 3a land + get reviewed before the integration risk in 3b. |
-| D11 | Per-install wiki value if Phase 5 doesn't ship | **Phase 3 stands alone:** human-readable surface for ad-hoc review (browse in Obsidian when you ask "what do I know about Acme"). Phase 5 makes it agent-readable too, but isn't a prerequisite for value. | Skeptic finding correctly identified the dependency. v1 ships the surface; v2 (Phase 5) unlocks the agent grounding. |
+| #   | Question                                       | Decision                                                                                                                                                                                                   | Rationale                                                                                                                                                          |
+| --- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | `wiki/` location — per-group or install-wide?  | **Install-wide:** `store/wiki/` alongside `store/brain.db`.                                                                                                                                                | The brain is a single SQLite + Qdrant install. Per-group would duplicate pages. Move it to `groups/<main>/wiki/` later only if the user actively browses it.       |
+| D2  | File-tracked or DB-tracked?                    | **Files** (Markdown). Mirrored in git via `.gitignore` exclusion.                                                                                                                                          | Karpathy pattern + Obsidian browsability + the original ask. `wiki_pages` table was considered and rejected — losing the human-readable surface defeats the point. |
+| D3  | Where does `last_synthesis_at` live?           | **Real column** on `entities`, added via `applyColumnMigrations`.                                                                                                                                          | Wikilint's class-4 finder needs an indexable predicate; `json_extract` on the `canonical` blob would be unindexable.                                               |
+| D4  | How is `ku_count` change detected?             | **`ku_count_at_last_synthesis INTEGER` column** on `entities`.                                                                                                                                             | Same reason as D3. Live count comes from `COUNT(*) FROM ku_entities WHERE entity_id = ?`.                                                                          |
+| D5  | Wiki dir in git?                               | **`.gitignore`d.** Regenerable from `brain.db`.                                                                                                                                                            | Avoids commit noise on every email ingest. Backups already cover `brain.db`.                                                                                       |
+| D6  | Atomic writes?                                 | **`.tmp` + rename** for every page write.                                                                                                                                                                  | Obsidian / VS Code file watchers can read mid-write.                                                                                                               |
+| D7  | Coalescing primitive                           | **New `CoalescingQueue<K>` in `src/brain/queue.ts`** — per-key debounce, last-write-wins. Distinct from existing `AsyncWriteQueue` (batch-flush).                                                          | Critic correctly flagged that "coalesce" requires key-based dedup, not batch-flush.                                                                                |
+| D8  | Phase 5 readiness gate                         | **20+ accumulated brain-reflection rules manually reviewed** — not "4 weeks".                                                                                                                              | Statistical sanity per critic. Calendar-based gates are coin flips at this emission rate.                                                                          |
+| D9  | Wiki summary LLM                               | **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), max 256 output tokens.                                                                                                                                 | Same model as `extract.ts` and `procedural-reflect.ts` — keeps the cost-log "anthropic/extract" bucket coherent.                                                   |
+| D10 | Phase split                                    | **Phase 3 splits into 3a (projection + tests) and 3b (triggers + wiring + slash command)**.                                                                                                                | Critic estimate of 5–7 days realistic. Splitting lets 3a land + get reviewed before the integration risk in 3b.                                                    |
+| D11 | Per-install wiki value if Phase 5 doesn't ship | **Phase 3 stands alone:** human-readable surface for ad-hoc review (browse in Obsidian when you ask "what do I know about Acme"). Phase 5 makes it agent-readable too, but isn't a prerequisite for value. | Skeptic finding correctly identified the dependency. v1 ships the surface; v2 (Phase 5) unlocks the agent grounding.                                               |
 
 ---
 
@@ -73,6 +73,7 @@ export function renderEntityPage(input: RenderInput): RenderedPage;
 ```
 
 Reads — exact SQL pinned to avoid scope creep:
+
 - `SELECT * FROM entities WHERE entity_id = ?` → frontmatter + title
 - `SELECT * FROM entity_aliases WHERE entity_id = ? AND valid_until IS NULL ORDER BY confidence DESC` → "## Aliases"
 - `SELECT er.relationship, e2.entity_id, e2.canonical FROM entity_relationships er JOIN entities e2 ON e2.entity_id = er.to_entity_id WHERE er.from_entity_id = ? AND er.valid_until IS NULL` → "## Relationships"
@@ -82,8 +83,9 @@ Reads — exact SQL pinned to avoid scope creep:
 The `wiki_summary` column (loaded from the entity row) is rendered as the blockquote at the top — **3a.2 doesn't write it, only reads.** Empty cache → empty blockquote.
 
 **Tests** (~7) in `src/brain/__tests__/wiki-projection.test.ts`:
+
 1. Person entity with full data → golden-file match
-2. Company entity → golden-file match  
+2. Company entity → golden-file match
 3. Topic entity (no aliases or relationships) → minimal page
 4. Entity with one KU → "## Facts" still renders correctly
 5. Entity with `wiki_summary` set → blockquote present
@@ -98,12 +100,13 @@ The `wiki_summary` column (loaded from the entity row) is rendered as the blockq
 export interface SynthesisInput {
   entityId: string;
   db: Database.Database;
-  llm?: SummaryLlmCaller;  // injectable like procedural-reflect.ts
+  llm?: SummaryLlmCaller; // injectable like procedural-reflect.ts
   nowIso?: string;
 }
 
-export type SummaryLlmCaller = (prompt: string) =>
-  Promise<{ summary: string; inputTokens: number; outputTokens: number }>;
+export type SummaryLlmCaller = (
+  prompt: string,
+) => Promise<{ summary: string; inputTokens: number; outputTokens: number }>;
 
 /**
  * Returns 'synthesized' if the cache was refreshed (and writes the new
@@ -117,6 +120,7 @@ export async function synthesizeEntitySummary(
 ```
 
 Cache invalidation rule:
+
 ```
 needsRegen =
   e.last_synthesis_at IS NULL
@@ -125,15 +129,17 @@ needsRegen =
 ```
 
 LLM caller:
+
 - Same `@ai-sdk/anthropic` plumbing as `procedural-reflect.ts:defaultReflectionLlmCaller`. Pinned to **`claude-haiku-4-5-20251001`** with `maxOutputTokens: 256` (D9).
 - Prompt: pass entity name + canonical + the deduped KU text list (cap input at 32 KUs by recency to bound prompt size). Output: 2–4 plain sentences, no JSON, no markdown headers.
 - Logs cost via existing `cost_log` insert (operation='extract', units=tokens). Same daily-budget gate as `extract.ts:getDailyLlmBudgetUsd` — **explicitly check the gate** to fail-closed if today's budget is blown.
 
 **Tests** (~5) in same test file:
+
 1. First call → 'synthesized', writes all three cache columns
 2. Second call within 7 days, ku_count unchanged → 'reused', no LLM call (assert mock not called)
 3. ku_count drops by 25% → 'synthesized' (regen trigger)
-4. >7 days since last synthesis → 'synthesized'
+4. > 7 days since last synthesis → 'synthesized'
 5. Entity with 0 KUs → 'skipped', no LLM call, no DB write
 
 ### 3a.4 — Definition of done for 3a
@@ -179,6 +185,7 @@ export class CoalescingQueue<K> {
 Implementation: `Map<K, NodeJS.Timeout>`. On `enqueue`, clear any existing timer for that key, set a new one for `debounceMs`. On fire, delete from map and run handler (catch + report errors via `onError`). `flushAll` triggers all timers immediately.
 
 **Tests** (~5) in `src/brain/__tests__/queue-coalescing.test.ts`:
+
 1. 3 enqueues of same key inside debounce → handler called once
 2. 3 enqueues of different keys → handler called 3 times
 3. handler throws → onError fires, queue stays alive
@@ -222,6 +229,7 @@ export async function appendLog(baseDir: string, line: string): Promise<void>;
 ```
 
 Key behaviors:
+
 - **Atomic write** (D6): write to `${path}.tmp.${pid}.${rand}`, fsync, rename to final path. If anything throws, unlink the .tmp file.
 - **Diff detection**: compare new render to existing file content (string equality). Skip write if unchanged → returns 'unchanged'.
 - **Path layout** (D1): `${baseDir}/wiki/{Person|Company|Project|Product|Topic}/${entityId}.md`. Create dirs as needed.
@@ -230,6 +238,7 @@ Key behaviors:
 - **`appendLog`**: rotation per D9 — if `wiki/log.md` exceeds 1MB, rename to `log.md.archived-<date>` before appending. (No multi-archive cleanup in v1.)
 
 **Tests** (~8) in `src/brain/__tests__/wiki-writer.test.ts` with `tmpDir` fixture:
+
 1. First materialize → 'created', file exists, content matches render
 2. Re-materialize same entity, no DB change → 'unchanged', no write
 3. KU change → 'updated', file rewritten
@@ -260,6 +269,7 @@ The ingest pipeline does NOT block on the queue handler. Failures in materializa
 #### Trigger B — Daily pass (LLM-synthesizing)
 
 **File:** `src/brain/wiki-projection.ts` exports `startWikiSynthesisSchedule(opts)`. Same pattern as `procedural-reflect.ts:startReflectionSchedule`:
+
 - Hourly tick
 - Window: every day 09:00–11:59 local
 - 22h debounce stamped in `system_state.last_wiki_synthesis` on success
@@ -286,6 +296,7 @@ export async function handleWikiCommand(
 ```
 
 Behavior:
+
 - Resolves entity by id prefix (8 chars) or name (LIKE on `entities.canonical->>'$.name'`).
 - On match: calls `materializeEntity(id, baseDir, { synthesize: true })`, then reads the file and replies with the first 4KB plus path to full file. Ambiguous match → reply with candidates list.
 - No match → "No entity found matching `<query>`. Try `/recall` for free-text search."
@@ -296,17 +307,20 @@ Behavior:
 ### 3b.4 — Wiring + smoke
 
 **Files modified:**
+
 - `src/index.ts` — singleton `CoalescingQueue`, wire `enqueueWikiRebuilds` in ingest path, wire `startWikiSynthesisSchedule()` next to digest, wire `/wiki` command intercept.
 - `src/brain/weekly-digest.ts` — add one line "📚 Wiki: N created, M updated this period" pulled from `system_state.last_wiki_pass_counts` JSON.
 - `.gitignore` — add `store/wiki/` (D5).
 - `scripts/wiki-materialize.ts` — new ad-hoc CLI for full rebuild. Same pattern as `scripts/brain-weekly-digest.ts`.
 
 **Manual smoke:**
+
 1. `npx tsx scripts/wiki-materialize.ts` → eyeball one Person, one Company, one Topic page
 2. Send `/wiki <known-entity>` in Telegram → reply with content
 3. Trigger an email ingest → wait 5 minutes → verify wiki page updated
 
 **Definition of done:**
+
 - Typecheck + brain test suite green
 - Independent code-reviewer pass with HIGH/MED addressed
 - ~21 new tests across 3a + 3b (12 + 9)
@@ -330,11 +344,26 @@ Four pure functions, each `(db) => Finding[]`:
 ```ts
 export type Finding =
   | { kind: 'duplicate_kus'; kuIdA: string; kuIdB: string; cosine: number }
-  | { kind: 'temporal_contradiction'; entityId: string; kuIdA: string; kuIdB: string }
-  | { kind: 'orphan_entity'; entityId: string; kuCount: number; ageDays: number }
-  | { kind: 'stale_wiki_page'; entityId: string; lastSynthesisAt: string; newestKuValidFrom: string };
+  | {
+      kind: 'temporal_contradiction';
+      entityId: string;
+      kuIdA: string;
+      kuIdB: string;
+    }
+  | {
+      kind: 'orphan_entity';
+      entityId: string;
+      kuCount: number;
+      ageDays: number;
+    }
+  | {
+      kind: 'stale_wiki_page';
+      entityId: string;
+      lastSynthesisAt: string;
+      newestKuValidFrom: string;
+    };
 
-export function findDuplicateKus(db, opts?: {threshold?: number}): Finding[];
+export function findDuplicateKus(db, opts?: { threshold?: number }): Finding[];
 export function findTemporalContradictions(db): Finding[];
 export function findOrphanEntities(db): Finding[];
 export function findStaleWikiPages(db): Finding[];
@@ -359,6 +388,7 @@ export function formatWikilintReport(findings: Finding[]): string;
 ```
 
 Output structure (Markdown):
+
 ```
 🔎 *Wikilint report* — N findings
 ---
@@ -377,6 +407,7 @@ Output structure (Markdown):
 **Cron:** add to the same daily/weekly cadence as the digest, deliver as separate "wikilint" message. Reuse the digest scheduler hook — don't add a new `setInterval`. Concretely, in `startDigestSchedule`'s callback (in `src/index.ts`), after delivering the digest markdown, check if it's been >7 days since `system_state.last_wikilint` and if so, deliver the wikilint report too. Stamp on success.
 
 **Definition of done:**
+
 - Typecheck + tests green
 - ~10 new tests
 - Independent code-reviewer pass clean
@@ -417,6 +448,7 @@ const baseFilter = isBrainReflectionInjectionEnabled()
 ```
 
 **Tests** (~3) in `src/learning/__tests__/rules-engine-integration.test.ts`:
+
 1. Flag off → brain-reflection rule does NOT appear in `queryRules` (regression guard)
 2. Flag on → brain-reflection rule WITH `groupId=null` DOES appear in `queryRules('email.draft', 'group-1')`
 3. Flag on, brain-reflection rule with overlapping subsource gets matched alongside a group-scoped `user_feedback` rule
@@ -430,6 +462,7 @@ Already covered structurally in `rules-engine-integration.test.ts` (decayConfide
 **File:** `.omc/design/brain-wiki-and-frontier-v1.md` — add a note under "Brain reflection" section recording the promotion decision: date, count of active rules at time of promotion, link to the Phase 5 PR.
 
 **Definition of done:**
+
 - Manual rule review completed and documented in the PR description (rules count + sample of accepted/rejected examples)
 - ~4 new test cases, all green
 - Independent code-reviewer pass clean
@@ -451,6 +484,7 @@ Already covered structurally in `rules-engine-integration.test.ts` (decayConfide
 ### Code review discipline
 
 Every phase ends with a `code-reviewer` agent pass. Specifically scrutinize:
+
 - Phase 3a: cache invalidation correctness, LLM cost gating
 - Phase 3b: filesystem race, atomic-write correctness, hot-path latency on ingest
 - Phase 4: SQL correctness on the four detectors, especially temporal-contradiction joins
@@ -489,13 +523,13 @@ Total LLM increment over current spend: ~$3/year. No new budget gate.
 
 ## Estimate roll-up
 
-| Phase | Effort | Cumulative | Calendar |
-|---|---|---|---|
-| 3a | 2–3 days | 2–3 days | week 1 |
-| 3b | 2 days | 4–5 days | week 2 |
-| 4 | 1.5 days | 5.5–6.5 days | week 3 |
-| 5 (code) | 0.5 day | 6–7 days | after ≥4 weeks observation |
-| 5 (manual review) | varies | — | concurrent with calendar wait |
+| Phase             | Effort   | Cumulative   | Calendar                      |
+| ----------------- | -------- | ------------ | ----------------------------- |
+| 3a                | 2–3 days | 2–3 days     | week 1                        |
+| 3b                | 2 days   | 4–5 days     | week 2                        |
+| 4                 | 1.5 days | 5.5–6.5 days | week 3                        |
+| 5 (code)          | 0.5 day  | 6–7 days     | after ≥4 weeks observation    |
+| 5 (manual review) | varies   | —            | concurrent with calendar wait |
 
 **Total active engineering: 6–7 days** (vs 4.5 in the original plan — corrected per critic).
 **Calendar to v1-complete: ~6 weeks** (mostly waiting on Phase 5 observation window).

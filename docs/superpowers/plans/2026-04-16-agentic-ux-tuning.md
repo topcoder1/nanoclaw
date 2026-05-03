@@ -15,6 +15,7 @@
 Create the core config module that reads/writes tunable parameters from SQLite.
 
 **Files:**
+
 - Create: `src/ux-config.ts`
 - Modify: `src/db.ts` (add table creation)
 - Test: `src/__tests__/ux-config.test.ts`
@@ -65,8 +66,12 @@ describe('UxConfig', () => {
       const items = config.list();
       expect(items.length).toBeGreaterThanOrEqual(7);
       expect(items.find((i) => i.key === 'batcher.maxItems')?.value).toBe('5');
-      expect(items.find((i) => i.key === 'batcher.maxWaitMs')?.value).toBe('10000');
-      expect(items.find((i) => i.key === 'enrichment.maxBodyLength')?.value).toBe('200');
+      expect(items.find((i) => i.key === 'batcher.maxWaitMs')?.value).toBe(
+        '10000',
+      );
+      expect(
+        items.find((i) => i.key === 'enrichment.maxBodyLength')?.value,
+      ).toBe('200');
     });
 
     it('should not overwrite existing values on re-seed', () => {
@@ -99,7 +104,9 @@ describe('UxConfig', () => {
     });
 
     it('should validate enrichment.prompt requires {body}', () => {
-      expect(() => config.set('enrichment.prompt', 'no body placeholder')).toThrow();
+      expect(() =>
+        config.set('enrichment.prompt', 'no body placeholder'),
+      ).toThrow();
     });
 
     it('should accept valid enrichment.prompt', () => {
@@ -113,7 +120,12 @@ describe('UxConfig', () => {
 
     it('should accept valid classifier.rules JSON', () => {
       const rules = JSON.stringify([
-        { patterns: ['test'], category: 'email', urgency: 'info', batchable: false },
+        {
+          patterns: ['test'],
+          category: 'email',
+          urgency: 'info',
+          batchable: false,
+        },
       ]);
       config.set('classifier.rules', rules);
       expect(config.get('classifier.rules')).toBe(rules);
@@ -157,7 +169,12 @@ describe('UxConfig', () => {
       config.set(
         'classifier.rules',
         JSON.stringify([
-          { patterns: ['changed'], category: 'email', urgency: 'info', batchable: false },
+          {
+            patterns: ['changed'],
+            category: 'email',
+            urgency: 'info',
+            batchable: false,
+          },
         ]),
       );
       const rules2 = config.getClassifierRules();
@@ -308,12 +325,15 @@ Instructions:
     type: 'json',
     validate: (v) => {
       const arr = JSON.parse(v);
-      if (!Array.isArray(arr)) throw new Error('classifier.rules must be an array');
+      if (!Array.isArray(arr))
+        throw new Error('classifier.rules must be an array');
       for (const rule of arr) {
-        if (!Array.isArray(rule.patterns)) throw new Error('Each rule must have patterns array');
+        if (!Array.isArray(rule.patterns))
+          throw new Error('Each rule must have patterns array');
         if (!rule.category) throw new Error('Each rule must have category');
         if (!rule.urgency) throw new Error('Each rule must have urgency');
-        if (typeof rule.batchable !== 'boolean') throw new Error('Each rule must have batchable boolean');
+        if (typeof rule.batchable !== 'boolean')
+          throw new Error('Each rule must have batchable boolean');
       }
     },
   },
@@ -322,7 +342,10 @@ Instructions:
 export class UxConfig {
   private db: Database.Database;
   private defaultMap: Map<string, ConfigDefault>;
-  private rulesCache: { rules: ClassificationRule[]; fetchedAt: number } | null = null;
+  private rulesCache: {
+    rules: ClassificationRule[];
+    fetchedAt: number;
+  } | null = null;
   private CACHE_TTL_MS = 60_000;
 
   constructor(db: Database.Database) {
@@ -384,7 +407,10 @@ export class UxConfig {
       this.rulesCache = null;
     }
 
-    logger.info({ key, value: value.length > 50 ? `${value.slice(0, 50)}...` : value }, 'UX config updated');
+    logger.info(
+      { key, value: value.length > 50 ? `${value.slice(0, 50)}...` : value },
+      'UX config updated',
+    );
   }
 
   reset(key: string): void {
@@ -402,7 +428,12 @@ export class UxConfig {
     }
   }
 
-  list(): Array<{ key: string; value: string; defaultValue: string; updatedAt: string }> {
+  list(): Array<{
+    key: string;
+    value: string;
+    defaultValue: string;
+    updatedAt: string;
+  }> {
     const rows = this.db
       .prepare('SELECT key, value, updated_at FROM ux_config ORDER BY key')
       .all() as Array<{ key: string; value: string; updated_at: string }>;
@@ -472,6 +503,7 @@ git commit -m "feat(ux): add UxConfig module with DB-backed tunable parameters"
 Create the chat commands parser and formatter for `config` and `smoketest` commands.
 
 **Files:**
+
 - Create: `src/chat-commands.ts`
 - Test: `src/__tests__/chat-commands.test.ts`
 
@@ -483,7 +515,11 @@ Create `src/__tests__/chat-commands.test.ts`:
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { UxConfig } from '../ux-config.js';
-import { parseCommand, handleConfigCommand, formatConfigList } from '../chat-commands.js';
+import {
+  parseCommand,
+  handleConfigCommand,
+  formatConfigList,
+} from '../chat-commands.js';
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
@@ -497,11 +533,17 @@ function createTestDb(): Database.Database {
 
 describe('parseCommand', () => {
   it('should parse "config list"', () => {
-    expect(parseCommand('config list')).toEqual({ type: 'config', action: 'list' });
+    expect(parseCommand('config list')).toEqual({
+      type: 'config',
+      action: 'list',
+    });
   });
 
   it('should parse "Config List" case-insensitively', () => {
-    expect(parseCommand('Config List')).toEqual({ type: 'config', action: 'list' });
+    expect(parseCommand('Config List')).toEqual({
+      type: 'config',
+      action: 'list',
+    });
   });
 
   it('should parse "config set key value"', () => {
@@ -514,7 +556,9 @@ describe('parseCommand', () => {
   });
 
   it('should parse "config set" with multi-word value', () => {
-    expect(parseCommand('config set enrichment.prompt Hello {body} world')).toEqual({
+    expect(
+      parseCommand('config set enrichment.prompt Hello {body} world'),
+    ).toEqual({
       type: 'config',
       action: 'set',
       key: 'enrichment.prompt',
@@ -551,7 +595,10 @@ describe('handleConfigCommand', () => {
   });
 
   it('should handle config list', () => {
-    const result = handleConfigCommand({ type: 'config', action: 'list' }, config);
+    const result = handleConfigCommand(
+      { type: 'config', action: 'list' },
+      config,
+    );
     expect(result).toContain('⚙️ UX Configuration');
     expect(result).toContain('batcher.maxItems');
   });
@@ -600,16 +647,28 @@ describe('handleConfigCommand', () => {
 describe('formatConfigList', () => {
   it('should show truncated values for long strings', () => {
     const items = [
-      { key: 'enrichment.prompt', value: 'x'.repeat(200), defaultValue: 'x'.repeat(200), updatedAt: '2026-01-01' },
+      {
+        key: 'enrichment.prompt',
+        value: 'x'.repeat(200),
+        defaultValue: 'x'.repeat(200),
+        updatedAt: '2026-01-01',
+      },
     ];
     const output = formatConfigList(items);
     expect(output).toContain('[200 chars]');
   });
 
   it('should show rule count for classifier.rules', () => {
-    const rules = JSON.stringify([{ patterns: ['a'], category: 'email', urgency: 'info', batchable: false }]);
+    const rules = JSON.stringify([
+      { patterns: ['a'], category: 'email', urgency: 'info', batchable: false },
+    ]);
     const items = [
-      { key: 'classifier.rules', value: rules, defaultValue: rules, updatedAt: '2026-01-01' },
+      {
+        key: 'classifier.rules',
+        value: rules,
+        defaultValue: rules,
+        updatedAt: '2026-01-01',
+      },
     ];
     const output = formatConfigList(items);
     expect(output).toContain('[1 rule');
@@ -724,7 +783,12 @@ export function handleConfigCommand(
 }
 
 export function formatConfigList(
-  items: Array<{ key: string; value: string; defaultValue: string; updatedAt: string }>,
+  items: Array<{
+    key: string;
+    value: string;
+    defaultValue: string;
+    updatedAt: string;
+  }>,
 ): string {
   const lines = items.map((item) => {
     let display: string;
@@ -768,6 +832,7 @@ git commit -m "feat(ux): add chat commands module for config list/set/reset"
 Add the `smoketest` handler that checks each agentic UX component and reports results.
 
 **Files:**
+
 - Modify: `src/chat-commands.ts` (add `handleSmokeTest`)
 - Test: `src/__tests__/chat-commands.test.ts` (extend)
 
@@ -838,7 +903,10 @@ Add to `src/chat-commands.ts`:
 
 ```typescript
 export interface SmokeTestDeps {
-  classifyAndFormat: (text: string) => { text: string; meta: { category: string; actions: unknown[] } };
+  classifyAndFormat: (text: string) => {
+    text: string;
+    meta: { category: string; actions: unknown[] };
+  };
   gmailOpsRouter: {
     listRecentDrafts: (account: string) => Promise<unknown[]>;
     accounts: string[];
@@ -848,7 +916,12 @@ export interface SmokeTestDeps {
   };
   draftWatcherRunning: boolean;
   uxConfig: {
-    list: () => Array<{ key: string; value: string; defaultValue: string; updatedAt: string }>;
+    list: () => Array<{
+      key: string;
+      value: string;
+      defaultValue: string;
+      updatedAt: string;
+    }>;
   };
   miniAppPort: number;
 }
@@ -990,6 +1063,7 @@ git commit -m "feat(ux): add smoketest command for runtime health check"
 Change `classifyMessage` to accept optional rules parameter, with the hardcoded rules as fallback.
 
 **Files:**
+
 - Modify: `src/message-classifier.ts`
 - Modify: `src/__tests__/message-classifier.test.ts` (extend)
 
@@ -1079,6 +1153,7 @@ git commit -m "feat(ux): accept dynamic rules parameter in classifyMessage"
 Connect UxConfig, chat commands, dynamic classifier rules, and configurable enrichment prompt into the main application.
 
 **Files:**
+
 - Modify: `src/index.ts` (initialization + onMessage intercepts)
 - Modify: `src/router.ts` (pass uxConfig to classifyAndFormat)
 
@@ -1100,7 +1175,11 @@ Add after DB initialization:
 
 ```typescript
 import { UxConfig } from './ux-config.js';
-import { parseCommand, handleConfigCommand, handleSmokeTest } from './chat-commands.js';
+import {
+  parseCommand,
+  handleConfigCommand,
+  handleSmokeTest,
+} from './chat-commands.js';
 
 // In main(), after getDb():
 const uxConfig = new UxConfig(getDb());
@@ -1124,7 +1203,8 @@ if (cmd) {
         reply = await handleSmokeTest({
           classifyAndFormat,
           gmailOpsRouter: {
-            listRecentDrafts: (account) => gmailOpsRouter.listRecentDrafts(account),
+            listRecentDrafts: (account) =>
+              gmailOpsRouter.listRecentDrafts(account),
             accounts: enrichmentAccounts,
           },
           archiveTracker: {
@@ -1176,9 +1256,11 @@ const ageMs = Date.now() - new Date(draft.createdAt).getTime();
 if (ageMs > 30 * 60 * 1000) return null;
 
 // After:
-if (draft.body.length > uxConfig.getNumber('enrichment.maxBodyLength')) return null;
+if (draft.body.length > uxConfig.getNumber('enrichment.maxBodyLength'))
+  return null;
 const ageMs = Date.now() - new Date(draft.createdAt).getTime();
-if (ageMs > uxConfig.getNumber('enrichment.maxAgeMinutes') * 60 * 1000) return null;
+if (ageMs > uxConfig.getNumber('enrichment.maxAgeMinutes') * 60 * 1000)
+  return null;
 ```
 
 And the timeout:
@@ -1215,6 +1297,7 @@ git commit -m "feat(ux): wire UxConfig, chat commands, and configurable enrichme
 End-to-end test verifying the full config + smoketest flow.
 
 **Files:**
+
 - Test: `src/__tests__/ux-tuning-integration.test.ts` (create)
 
 - [ ] **Step 1: Write integration test**
@@ -1225,7 +1308,11 @@ Create `src/__tests__/ux-tuning-integration.test.ts`:
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { UxConfig } from '../ux-config.js';
-import { parseCommand, handleConfigCommand, handleSmokeTest } from '../chat-commands.js';
+import {
+  parseCommand,
+  handleConfigCommand,
+  handleSmokeTest,
+} from '../chat-commands.js';
 import { classifyMessage } from '../message-classifier.js';
 import { classifyAndFormat } from '../router.js';
 
@@ -1252,10 +1339,20 @@ describe('UX tuning integration', () => {
   it('should update classifier rules via config set and use them', () => {
     // Add a custom rule
     const newRules = JSON.stringify([
-      { patterns: ['custom trigger'], category: 'security', urgency: 'urgent', batchable: false },
+      {
+        patterns: ['custom trigger'],
+        category: 'security',
+        urgency: 'urgent',
+        batchable: false,
+      },
     ]);
     const setResult = handleConfigCommand(
-      { type: 'config', action: 'set', key: 'classifier.rules', value: newRules },
+      {
+        type: 'config',
+        action: 'set',
+        key: 'classifier.rules',
+        value: newRules,
+      },
       config,
     );
     expect(setResult).toContain('✅');
@@ -1272,7 +1369,12 @@ describe('UX tuning integration', () => {
     config.set(
       'classifier.rules',
       JSON.stringify([
-        { patterns: ['only match'], category: 'team', urgency: 'info', batchable: true },
+        {
+          patterns: ['only match'],
+          category: 'team',
+          urgency: 'info',
+          batchable: true,
+        },
       ]),
     );
 

@@ -56,9 +56,9 @@ The event bus is the system backbone, not a monitoring layer. All inter-layer co
 
 ```typescript
 interface NanoClawEvent {
-  type: string;           // e.g., 'message.inbound', 'trust.request', 'task.complete'
-  source: string;         // layer that emitted: 'channel', 'executor', 'trust', etc.
-  groupId?: string;       // which group context
+  type: string; // e.g., 'message.inbound', 'trust.request', 'task.complete'
+  source: string; // layer that emitted: 'channel', 'executor', 'trust', etc.
+  groupId?: string; // which group context
   timestamp: number;
   payload: Record<string, unknown>;
 }
@@ -105,6 +105,7 @@ message.inbound → executor.task.queued → executor.task.started
 **Error handling:** Event handlers that throw are caught, logged with full context, and do not crash the bus. The bus emits a `system.error` event for observability.
 
 **Codebase changes:**
+
 - New `src/event-bus.ts` — typed EventEmitter wrapper with error boundary
 - `src/index.ts` refactored: polling loop → event-driven dispatcher
 - `src/group-queue.ts` → refactored into ExecutorPool (preserve existing concurrency, idle detection, task queuing logic; add warm pool, priority scheduling, event emission)
@@ -127,7 +128,7 @@ message.inbound event
      ▼
 ┌─────────────┐
 │  Task Queue  │  Priority-ordered, per-group fairness
-│  (in-memory) │  
+│  (in-memory) │
 └──────┬──────┘
        │
        ▼
@@ -243,6 +244,7 @@ When the trust engine asks "approve this action?" and the user doesn't respond w
 ### Action classification
 
 Two-layer classification:
+
 1. **Static mapping table** — known tools mapped to action classes (e.g., `send_message` → `comms.write`, `schedule_task` → `services.write`). Covers all standard tools.
 2. **Agent self-classification** — for novel/dynamic actions, the agent classifies via system prompt. The orchestrator validates.
 3. **Default for unmapped actions** — defaults to highest risk level (transact), requiring approval. Better to over-ask than to auto-execute an unclassified action.
@@ -257,14 +259,14 @@ The `+1` prevents immediate graduation on first approval. Time decay: confidence
 
 ### Action classification taxonomy
 
-| Domain | Read (low risk) | Write (medium risk) | Transact (high risk) |
-|--------|:---:|:---:|:---:|
-| **Info** | Web search, check weather | — | — |
-| **Comms** | Read email/messages | Send message, reply | — |
-| **Health** | Check refill status | Request refill | — |
-| **Finance** | Check balance | — | Transfer, pay bill |
-| **Code** | Read files, search | Edit files, commit | Push, deploy |
-| **Services** | Check account status | Change settings | Create/cancel account |
+| Domain       |      Read (low risk)      | Write (medium risk) | Transact (high risk)  |
+| ------------ | :-----------------------: | :-----------------: | :-------------------: |
+| **Info**     | Web search, check weather |          —          |           —           |
+| **Comms**    |    Read email/messages    | Send message, reply |           —           |
+| **Health**   |    Check refill status    |   Request refill    |           —           |
+| **Finance**  |       Check balance       |          —          |  Transfer, pay bill   |
+| **Code**     |    Read files, search     | Edit files, commit  |     Push, deploy      |
+| **Services** |   Check account status    |   Change settings   | Create/cancel account |
 
 Default thresholds: read = 0.7 (3 approvals), write = 0.8 (5 approvals), transact = 0.95 (20 approvals or never-auto configurable).
 
@@ -344,13 +346,13 @@ External event sources feed into the event bus. The bus already exists (Layer 0)
 
 ### Event sources
 
-| Source | Status | What it watches |
-|--------|--------|-----------------|
-| Gmail SSE | Already built | New emails across 4 accounts |
-| Calendar polling | New — poll Google Calendar API every 5 min | Upcoming meetings, changes |
-| Browser watchers | New — scheduled browser visits that extract specific values via CSS selectors, then compare against previous values | Alto refill status, any configured web service |
-| Scheduled checks | Already built (task-scheduler) | Cron-based tasks |
-| Webhook endpoint | New — HTTP endpoint accepting external events | GitHub webhooks, Notion changes, custom integrations |
+| Source           | Status                                                                                                              | What it watches                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Gmail SSE        | Already built                                                                                                       | New emails across 4 accounts                         |
+| Calendar polling | New — poll Google Calendar API every 5 min                                                                          | Upcoming meetings, changes                           |
+| Browser watchers | New — scheduled browser visits that extract specific values via CSS selectors, then compare against previous values | Alto refill status, any configured web service       |
+| Scheduled checks | Already built (task-scheduler)                                                                                      | Cron-based tasks                                     |
+| Webhook endpoint | New — HTTP endpoint accepting external events                                                                       | GitHub webhooks, Notion changes, custom integrations |
 
 ### Event routing rules
 
@@ -385,6 +387,7 @@ Configurable per group in `groups/{name}/events.json`:
 ### Daily Digest (CEO expansion #1)
 
 A scheduled event (configurable time, default 8:00 AM PT) that:
+
 1. Queries overnight events from the event bus log
 2. Queries pending trust approvals
 3. Queries upcoming calendar events (next 12 hours)
@@ -393,6 +396,7 @@ A scheduled event (configurable time, default 8:00 AM PT) that:
 6. Sends to primary channel (Telegram)
 
 Format:
+
 ```
 Morning brief (Apr 14):
 Handled: Alto refill reordered (auto-approved)
@@ -405,6 +409,7 @@ Flag: Gmail dev token expired again (4th time this month)
 ### "What did I miss?" (CEO expansion #2)
 
 On-demand command. When the user says "what did I miss?" or similar:
+
 1. Determine time since last user message
 2. Query event bus log, outcome store, and trust actions for that period
 3. Prioritize by: actions taken > approvals pending > events received > informational
@@ -449,7 +454,7 @@ A cheap, fast LLM call (Haiku) compares the user's request against the proposed 
 ### Confidence signals in responses
 
 ```
-Verified: "Your Alto refill for Lisinopril is ready" 
+Verified: "Your Alto refill for Lisinopril is ready"
   (source: browser check of alto.com, 2 min ago)
 
 Unverified: "I think your next appointment is Thursday"
@@ -485,11 +490,11 @@ Accumulate accuracy stats: `SELECT confidence_level, AVG(was_correct) FROM outco
 
 Three-tier architecture:
 
-| Tier | What | Storage | Scope |
-|------|------|---------|-------|
-| **1. Hot Memory** | Per-group CLAUDE.md (existing) | Filesystem | Group |
+| Tier                 | What                                     | Storage                    | Scope      |
+| -------------------- | ---------------------------------------- | -------------------------- | ---------- |
+| **1. Hot Memory**    | Per-group CLAUDE.md (existing)           | Filesystem                 | Group      |
 | **2. Global Memory** | Cross-group facts, preferences, patterns | SQLite + Mem0 (local mode) | All groups |
-| **3. Outcome Store** | Action results, user feedback | SQLite | All groups |
+| **3. Outcome Store** | Action results, user feedback            | SQLite                     | All groups |
 
 - **Tier 1** stays as-is — per-group CLAUDE.md files
 - **Tier 2** adopts **Mem0** (52.9K stars) as the recall engine with **Qdrant** as the vector database (runs as a Docker container, ~100-200MB RAM). Mem0 extracts facts from conversations and stores them as embeddings. Agent sessions query at startup: "What do I know about this user's [relevant domain]?" Qdrant chosen over sqlite-vec for superior semantic query quality (9/10 vs 7/10).
@@ -517,12 +522,14 @@ CREATE TABLE outcomes (
 ```
 
 What feeds into outcomes:
+
 - Trust engine logs every action decision
 - Container runner logs success/failure and cost
 - User reactions parsed as implicit feedback
 - Explicit feedback: `@Andy that was wrong` / `@Andy good job`
 
 What outcomes feed into:
+
 - **Trust engine** — success rate informs confidence. Failures reduce trust.
 - **Method selection** — prefer methods with higher success rates
 - **Proactive timing** — schedule actions at times with best success history
@@ -535,7 +542,7 @@ On-demand via `@Andy cost report` and included in daily digest:
 ```
 Cost report (last 7 days):
 Interactive: $4.20 (62 tasks)
-Proactive:   $1.15 (23 tasks)  
+Proactive:   $1.15 (23 tasks)
 Scheduled:   $0.80 (12 tasks)
 Learning:    $0.30 (embeddings)
 ─────────────────────
@@ -554,6 +561,7 @@ Queries the outcomes table: `SELECT SUM(cost_usd), source_type, DATE(timestamp) 
 **Path 2: Teach mode (CEO expansion #5)** — human-guided procedure recording.
 
 Teach mode interaction:
+
 1. User says: `@Andy teach: how to reorder Alto refills`
 2. Agent opens browser session, says "I'm watching. Walk me through the steps."
 3. User narrates: "Go to alto.com. Click Medications. Find Lisinopril. Click Request Refill."
@@ -574,10 +582,26 @@ Learned procedures stored as replayable guidance:
   "acquisition": "teach",
   "steps": [
     { "action": "navigate", "url": "https://alto.com/dashboard" },
-    { "action": "click", "selector": "[data-tab='medications']", "description": "Click Medications tab" },
-    { "action": "find", "text": "{medication_name}", "description": "Find the requested medication" },
-    { "action": "click", "selector": ".request-refill-btn", "description": "Click Request Refill" },
-    { "action": "click", "selector": ".confirm-btn", "description": "Confirm the refill request" }
+    {
+      "action": "click",
+      "selector": "[data-tab='medications']",
+      "description": "Click Medications tab"
+    },
+    {
+      "action": "find",
+      "text": "{medication_name}",
+      "description": "Find the requested medication"
+    },
+    {
+      "action": "click",
+      "selector": ".request-refill-btn",
+      "description": "Click Request Refill"
+    },
+    {
+      "action": "click",
+      "selector": ".confirm-btn",
+      "description": "Confirm the refill request"
+    }
   ],
   "success_rate": "3/3",
   "last_used": "2026-04-15",
@@ -586,6 +610,7 @@ Learned procedures stored as replayable guidance:
 ```
 
 Key constraints:
+
 - Procedures are **guidance, not macros** — agent adapts when pages change
 - Procedures go through the **trust engine** — new procedures start as manual-approval
 - Stored in `groups/{name}/procedures/` or `store/procedures/` (global)
@@ -611,17 +636,17 @@ Channel-specific formatting handled by existing `src/router.ts` formatting logic
 
 ## Build Order
 
-| # | Layer | What it delivers | Depends on | Est. AI dev time |
-|---|-------|-----------------|------------|-----------------|
-| 0 | Event Bus | System backbone, event-driven architecture | — | 1-2 days |
-| 1 | Parallel Execution | Concurrent tasks, warm pool | Layer 0 | 2-3 days |
-| 2 | Browser Sidecar | Universal web connector | Layer 1 | 2-3 days |
-| 3 | Trust Engine | Graduated autonomy, MCP gateway | Layer 0 | 2-3 days |
-| 4 | Proactive Monitor | Event sources, daily digest, "what did I miss?" | Layers 0 + 1 + 3 | 3-4 days |
-| 5 | Verification Pipeline | Anti-hallucination, confidence calibration | Layer 3 (shares MCP gateway) | 1-2 days |
-| 6 | Learning System | Memory, outcomes, teach mode, cost dashboard | Layers 3 + 5 | 3-4 days |
-| 7 | Cross-channel relay | Content forwarding between channels | Layer 0 | 0.5 day |
-| — | Integration testing | Cross-layer flows, end-to-end tests | All layers | 3-5 days |
+| #   | Layer                 | What it delivers                                | Depends on                   | Est. AI dev time |
+| --- | --------------------- | ----------------------------------------------- | ---------------------------- | ---------------- |
+| 0   | Event Bus             | System backbone, event-driven architecture      | —                            | 1-2 days         |
+| 1   | Parallel Execution    | Concurrent tasks, warm pool                     | Layer 0                      | 2-3 days         |
+| 2   | Browser Sidecar       | Universal web connector                         | Layer 1                      | 2-3 days         |
+| 3   | Trust Engine          | Graduated autonomy, MCP gateway                 | Layer 0                      | 2-3 days         |
+| 4   | Proactive Monitor     | Event sources, daily digest, "what did I miss?" | Layers 0 + 1 + 3             | 3-4 days         |
+| 5   | Verification Pipeline | Anti-hallucination, confidence calibration      | Layer 3 (shares MCP gateway) | 1-2 days         |
+| 6   | Learning System       | Memory, outcomes, teach mode, cost dashboard    | Layers 3 + 5                 | 3-4 days         |
+| 7   | Cross-channel relay   | Content forwarding between channels             | Layer 0                      | 0.5 day          |
+| —   | Integration testing   | Cross-layer flows, end-to-end tests             | All layers                   | 3-5 days         |
 
 **Total estimated AI dev time: 4-6 weeks** (includes integration testing)
 
@@ -636,6 +661,7 @@ Note: Layers 0+1 and 3 can be built in parallel (no dependencies between them). 
 **Tagline:** "The personal AI agent that earns your trust."
 
 **Differentiators:**
+
 1. Per-group container isolation (vs. ForgeAI's code sandbox)
 2. Train-then-trust autonomy (vs. everyone's static permissions)
 3. Outcome-based learning (vs. Mem0/Letta's recall-only memory)
@@ -647,33 +673,33 @@ Note: Layers 0+1 and 3 can be built in parallel (no dependencies between them). 
 
 Three critical gaps identified: infrastructure containers that crash need graceful degradation.
 
-| Component | Failure | Recovery | User Impact |
-|-----------|---------|----------|-------------|
-| Warm pool container crashes idle | Auto-recreate on next tick. Log warning. | Transparent. Next task uses cold start (slower, not broken). |
-| Browser sidecar crashes | Detect via CDP health check (every 30s). Auto-restart container. Invalidate active browser sessions. | Agent reports "browser temporarily unavailable, retrying." |
-| Qdrant container unavailable | Mem0 queries fall back to empty results. Log error. Agent operates without Tier 2 memory. | Agent loses cross-group knowledge. Per-group CLAUDE.md (Tier 1) still works. |
+| Component                        | Failure                                                                                              | Recovery                                                                     | User Impact |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------- |
+| Warm pool container crashes idle | Auto-recreate on next tick. Log warning.                                                             | Transparent. Next task uses cold start (slower, not broken).                 |
+| Browser sidecar crashes          | Detect via CDP health check (every 30s). Auto-restart container. Invalidate active browser sessions. | Agent reports "browser temporarily unavailable, retrying."                   |
+| Qdrant container unavailable     | Mem0 queries fall back to empty results. Log error. Agent operates without Tier 2 memory.            | Agent loses cross-group knowledge. Per-group CLAUDE.md (Tier 1) still works. |
 
 All three follow the same pattern: detect, log, degrade gracefully, auto-recover. No infrastructure failure should crash the orchestrator or block message processing.
 
 ## System Requirements
 
-| Resource | Minimum | Recommended |
-|----------|---------|-------------|
-| RAM | 8 GB | 16 GB |
-| Disk | 10 GB (container images) | 20 GB |
-| CPU | 4 cores | 8 cores |
+| Resource          | Minimum                   | Recommended                  |
+| ----------------- | ------------------------- | ---------------------------- |
+| RAM               | 8 GB                      | 16 GB                        |
+| Disk              | 10 GB (container images)  | 20 GB                        |
+| CPU               | 4 cores                   | 8 cores                      |
 | Container runtime | Docker or Apple Container | Docker (for Compose support) |
 
 **Resource breakdown at peak (5 active agents):**
 
-| Component | RAM | Count | Total |
-|-----------|-----|-------|-------|
-| Orchestrator (Node.js) | ~200 MB | 1 | 200 MB |
-| Agent containers | ~200-400 MB | 5 | 1-2 GB |
-| Warm pool containers | ~200 MB | 2 | 400 MB |
-| Browser sidecar (Chromium) | ~400 MB | 1 | 400 MB |
-| Qdrant (vector DB) | ~200 MB | 1 | 200 MB |
-| **Total** | | | **2.2-3.2 GB** |
+| Component                  | RAM         | Count | Total          |
+| -------------------------- | ----------- | ----- | -------------- |
+| Orchestrator (Node.js)     | ~200 MB     | 1     | 200 MB         |
+| Agent containers           | ~200-400 MB | 5     | 1-2 GB         |
+| Warm pool containers       | ~200 MB     | 2     | 400 MB         |
+| Browser sidecar (Chromium) | ~400 MB     | 1     | 400 MB         |
+| Qdrant (vector DB)         | ~200 MB     | 1     | 200 MB         |
+| **Total**                  |             |       | **2.2-3.2 GB** |
 
 ## Test Strategy (Eng Review)
 
@@ -683,34 +709,36 @@ All three follow the same pattern: detect, log, degrade gracefully, auto-recover
 
 ### Unit tests per module
 
-| Module | Test file | Key test cases |
-|--------|-----------|---------------|
-| Event bus | `event-bus.test.ts` | Emission, subscription, error boundary, typed events |
-| Executor pool | `executor-pool.test.ts` | Concurrency, warm pool lifecycle, priority scheduling, fairness |
-| Trust engine | `trust-engine.test.ts` | Classification, confidence calc, graduation, decay, revocation, timeout |
-| Trust gateway | `trust-gateway.test.ts` | HTTP request-response, approval polling, timeout cancellation |
-| Verification | `verification.test.ts` | Source cross-reference, pre-action validation, confidence markers |
-| Memory (Mem0) | `memory/mem0.test.ts` | Fact extraction, query, Qdrant connection failure fallback |
-| Outcome store | `memory/outcomes.test.ts` | Log action, query by class, cost aggregation |
-| Procedures | `memory/procedures.test.ts` | Save, load, match by trigger, teach mode recording |
-| Watchers | `watchers/*.test.ts` | Calendar poll, browser watcher diff, webhook validation |
+| Module        | Test file                   | Key test cases                                                          |
+| ------------- | --------------------------- | ----------------------------------------------------------------------- |
+| Event bus     | `event-bus.test.ts`         | Emission, subscription, error boundary, typed events                    |
+| Executor pool | `executor-pool.test.ts`     | Concurrency, warm pool lifecycle, priority scheduling, fairness         |
+| Trust engine  | `trust-engine.test.ts`      | Classification, confidence calc, graduation, decay, revocation, timeout |
+| Trust gateway | `trust-gateway.test.ts`     | HTTP request-response, approval polling, timeout cancellation           |
+| Verification  | `verification.test.ts`      | Source cross-reference, pre-action validation, confidence markers       |
+| Memory (Mem0) | `memory/mem0.test.ts`       | Fact extraction, query, Qdrant connection failure fallback              |
+| Outcome store | `memory/outcomes.test.ts`   | Log action, query by class, cost aggregation                            |
+| Procedures    | `memory/procedures.test.ts` | Save, load, match by trigger, teach mode recording                      |
+| Watchers      | `watchers/*.test.ts`        | Calendar poll, browser watcher diff, webhook validation                 |
 
 ### Integration tests (E2E)
 
-| Flow | What it tests |
-|------|--------------|
-| Proactive action | Event source → event bus → executor → trust → verify → execute → outcome |
-| Daily digest | Scheduled trigger → query events + outcomes + calendar → generate brief → send to channel |
-| Teach mode | User narrates → agent records → procedure saved → replay on next request |
-| Cross-channel relay | Main channel command → orchestrator → format → deliver to target channel |
+| Flow                | What it tests                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| Proactive action    | Event source → event bus → executor → trust → verify → execute → outcome                  |
+| Daily digest        | Scheduled trigger → query events + outcomes + calendar → generate brief → send to channel |
+| Teach mode          | User narrates → agent records → procedure saved → replay on next request                  |
+| Cross-channel relay | Main channel command → orchestrator → format → deliver to target channel                  |
 
 ### Worktree parallelization
 
 Build Layer 0 first (shared dependency). Then:
+
 - **Lane A:** Layer 1 → Layer 2 (executor → browser)
 - **Lane B:** Layer 3 (trust engine, independent)
 
 Merge A+B. Then:
+
 - **Lane C:** Layers 5+6 (verification + learning)
 - **Lane D:** Layer 4 (proactive monitor)
 

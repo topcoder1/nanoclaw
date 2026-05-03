@@ -15,36 +15,38 @@
 ## File Map
 
 ### New Files
-| File | Responsibility |
-|------|---------------|
-| `src/browser/playwright-client.ts` | WebSocket connection to sidecar, context creation, reconnect logic |
-| `src/browser/playwright-client.test.ts` | Unit tests for playwright client |
-| `src/browser/stagehand-bridge.ts` | Stagehand wrapper, IPC request handling, trust-aware action dispatch |
-| `src/browser/stagehand-bridge.test.ts` | Unit tests for stagehand bridge |
-| `src/browser/visual-diff.ts` | Screenshot comparison via pixelmatch |
-| `src/browser/visual-diff.test.ts` | Unit tests for visual diff |
-| `container/skills/browser-automation/SKILL.md` | Agent-facing skill with tool docs for both layers |
+
+| File                                           | Responsibility                                                       |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| `src/browser/playwright-client.ts`             | WebSocket connection to sidecar, context creation, reconnect logic   |
+| `src/browser/playwright-client.test.ts`        | Unit tests for playwright client                                     |
+| `src/browser/stagehand-bridge.ts`              | Stagehand wrapper, IPC request handling, trust-aware action dispatch |
+| `src/browser/stagehand-bridge.test.ts`         | Unit tests for stagehand bridge                                      |
+| `src/browser/visual-diff.ts`                   | Screenshot comparison via pixelmatch                                 |
+| `src/browser/visual-diff.test.ts`              | Unit tests for visual diff                                           |
+| `container/skills/browser-automation/SKILL.md` | Agent-facing skill with tool docs for both layers                    |
 
 ### Modified Files
-| File | What Changes |
-|------|-------------|
-| `src/browser/session-manager.ts` | Rewrite: generic-pool wrapping real Playwright contexts |
-| `src/browser/session-manager.test.ts` | Rewrite: tests for pool-based session manager |
-| `src/browser/profile-crypto.ts` | Add single-file encrypt/decrypt exports, key loading helper |
-| `src/browser/profile-crypto.test.ts` | Add tests for single-file operations and key loading |
-| `src/container-runtime.ts` | Add `ensureDockerNetwork()`, `ensureBrowserSidecar()` |
-| `src/container-runtime.test.ts` | Tests for new functions |
-| `src/container-runner.ts` | Add `--network nanoclaw` to docker run args |
-| `src/container-runner.test.ts` | Update mock assertions for network arg |
-| `src/trust-engine.ts` | Add browser tools to `TOOL_CLASS_MAP` |
-| `src/trust-engine.test.ts` | Tests for browser tool classification |
-| `src/ipc.ts` | Add browser_act, browser_extract, browser_observe handlers |
-| `src/events.ts` | Add browser event types to EventMap |
-| `src/config.ts` | Update BROWSER_CDP_URL default, add new config vars |
-| `src/index.ts` | Call network/sidecar setup at startup, browser shutdown on exit |
-| `docker-compose.browser.yml` | Bump mem_limit to 1536m |
-| `container/Dockerfile` | Add `@playwright/mcp` global install |
-| `package.json` | Add playwright-core, generic-pool, pixelmatch dependencies |
+
+| File                                  | What Changes                                                    |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `src/browser/session-manager.ts`      | Rewrite: generic-pool wrapping real Playwright contexts         |
+| `src/browser/session-manager.test.ts` | Rewrite: tests for pool-based session manager                   |
+| `src/browser/profile-crypto.ts`       | Add single-file encrypt/decrypt exports, key loading helper     |
+| `src/browser/profile-crypto.test.ts`  | Add tests for single-file operations and key loading            |
+| `src/container-runtime.ts`            | Add `ensureDockerNetwork()`, `ensureBrowserSidecar()`           |
+| `src/container-runtime.test.ts`       | Tests for new functions                                         |
+| `src/container-runner.ts`             | Add `--network nanoclaw` to docker run args                     |
+| `src/container-runner.test.ts`        | Update mock assertions for network arg                          |
+| `src/trust-engine.ts`                 | Add browser tools to `TOOL_CLASS_MAP`                           |
+| `src/trust-engine.test.ts`            | Tests for browser tool classification                           |
+| `src/ipc.ts`                          | Add browser_act, browser_extract, browser_observe handlers      |
+| `src/events.ts`                       | Add browser event types to EventMap                             |
+| `src/config.ts`                       | Update BROWSER_CDP_URL default, add new config vars             |
+| `src/index.ts`                        | Call network/sidecar setup at startup, browser shutdown on exit |
+| `docker-compose.browser.yml`          | Bump mem_limit to 1536m                                         |
+| `container/Dockerfile`                | Add `@playwright/mcp` global install                            |
+| `package.json`                        | Add playwright-core, generic-pool, pixelmatch dependencies      |
 
 ---
 
@@ -53,6 +55,7 @@
 ### Task 1: Install Dependencies & Update Config
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `src/config.ts:163-169`
 
@@ -120,6 +123,7 @@ git commit -m "feat(browser): install CDP deps, update browser config defaults"
 ### Task 2: Docker Network & Sidecar Management
 
 **Files:**
+
 - Modify: `src/container-runtime.ts`
 - Modify: `src/container-runtime.test.ts`
 
@@ -163,14 +167,18 @@ describe('ensureDockerNetwork', () => {
 
   it('ignores "already exists" error', () => {
     const err = new Error('network with name nanoclaw already exists');
-    vi.mocked(execSync).mockImplementationOnce(() => { throw err; });
+    vi.mocked(execSync).mockImplementationOnce(() => {
+      throw err;
+    });
     const { ensureDockerNetwork } = require('./container-runtime.js');
     expect(() => ensureDockerNetwork('nanoclaw')).not.toThrow();
   });
 
   it('re-throws non-duplicate errors', () => {
     const err = new Error('permission denied');
-    vi.mocked(execSync).mockImplementationOnce(() => { throw err; });
+    vi.mocked(execSync).mockImplementationOnce(() => {
+      throw err;
+    });
     const { ensureDockerNetwork } = require('./container-runtime.js');
     expect(() => ensureDockerNetwork('nanoclaw')).toThrow('permission denied');
   });
@@ -232,10 +240,10 @@ export function ensureDockerNetwork(name: string): void {
 export function ensureBrowserSidecar(): void {
   const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
   try {
-    execSync(
-      `${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`,
-      { stdio: 'pipe', timeout: 30000 },
-    );
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} up -d`, {
+      stdio: 'pipe',
+      timeout: 30000,
+    });
     logger.info('Browser sidecar started');
   } catch (err) {
     logger.error({ err }, 'Failed to start browser sidecar');
@@ -247,10 +255,10 @@ export function ensureBrowserSidecar(): void {
 export function stopBrowserSidecar(): void {
   const composePath = path.join(process.cwd(), 'docker-compose.browser.yml');
   try {
-    execSync(
-      `${CONTAINER_RUNTIME_BIN} compose -f ${composePath} down`,
-      { stdio: 'pipe', timeout: 15000 },
-    );
+    execSync(`${CONTAINER_RUNTIME_BIN} compose -f ${composePath} down`, {
+      stdio: 'pipe',
+      timeout: 15000,
+    });
     logger.info('Browser sidecar stopped');
   } catch (err) {
     logger.warn({ err }, 'Failed to stop browser sidecar');
@@ -280,6 +288,7 @@ git commit -m "feat(browser): add docker network and sidecar management"
 ### Task 3: Wire Network & Sidecar Into Startup
 
 **Files:**
+
 - Modify: `src/index.ts:27-31,867-870`
 
 - [ ] **Step 1: Add imports**
@@ -351,6 +360,7 @@ git commit -m "feat(browser): wire network and sidecar into startup/shutdown"
 ### Task 4: Add --network to Container Runner
 
 **Files:**
+
 - Modify: `src/container-runner.ts:528`
 - Modify: `src/container-runner.test.ts`
 
@@ -426,6 +436,7 @@ git commit -m "feat(browser): attach agent containers to nanoclaw network"
 ### Task 5: Add Browser Event Types
 
 **Files:**
+
 - Modify: `src/events.ts`
 
 - [ ] **Step 1: Add browser event interfaces**
@@ -519,6 +530,7 @@ git commit -m "feat(browser): add browser event types to EventMap"
 ### Task 6: Playwright Client
 
 **Files:**
+
 - Create: `src/browser/playwright-client.ts`
 - Create: `src/browser/playwright-client.test.ts`
 
@@ -667,13 +679,15 @@ export class PlaywrightClient {
     this.onDisconnect = handler;
   }
 
-  async newContext(
-    options?: { storageState?: string | object },
-  ): Promise<BrowserContext> {
+  async newContext(options?: {
+    storageState?: string | object;
+  }): Promise<BrowserContext> {
     if (!this.browser?.isConnected()) {
       await this.connect();
     }
-    return this.browser!.newContext(options as Parameters<Browser['newContext']>[0]);
+    return this.browser!.newContext(
+      options as Parameters<Browser['newContext']>[0],
+    );
   }
 
   async disconnect(): Promise<void> {
@@ -708,6 +722,7 @@ git commit -m "feat(browser): playwright client with CDP connection"
 ### Task 7: Rewrite Session Manager with generic-pool
 
 **Files:**
+
 - Rewrite: `src/browser/session-manager.ts`
 - Rewrite: `src/browser/session-manager.test.ts`
 
@@ -872,7 +887,11 @@ export class BrowserSessionManager {
       {
         create: async () => this.client.newContext(),
         destroy: async (ctx) => {
-          try { await ctx.close(); } catch { /* already closed */ }
+          try {
+            await ctx.close();
+          } catch {
+            /* already closed */
+          }
         },
         validate: async (ctx) => {
           try {
@@ -958,7 +977,10 @@ export class BrowserSessionManager {
     await this.client.disconnect();
   }
 
-  on(eventType: BrowserContextEvent['type'], handler: EventHandler): () => void {
+  on(
+    eventType: BrowserContextEvent['type'],
+    handler: EventHandler,
+  ): () => void {
     const handlers = this.handlers.get(eventType) || [];
     handlers.push(handler);
     this.handlers.set(eventType, handlers);
@@ -975,7 +997,10 @@ export class BrowserSessionManager {
       try {
         handler(event);
       } catch (err) {
-        logger.error({ error: err, eventType: event.type }, 'Browser event handler threw');
+        logger.error(
+          { error: err, eventType: event.type },
+          'Browser event handler threw',
+        );
       }
     }
   }
@@ -1018,6 +1043,7 @@ git commit -m "feat(browser): rewrite session manager with generic-pool"
 ### Task 7b: Update Docker Compose Memory Limit
 
 **Files:**
+
 - Modify: `docker-compose.browser.yml`
 
 - [ ] **Step 1: Update mem_limit**
@@ -1035,7 +1061,7 @@ services:
       - --port=9222
       - --host=0.0.0.0
     ports:
-      - "9222:9222"
+      - '9222:9222'
     volumes:
       - browser-data:/data
     restart: unless-stopped
@@ -1066,6 +1092,7 @@ git commit -m "feat(browser): bump sidecar memory limit to 1536m for 5 contexts"
 ### Task 8: Install Stagehand & Add Trust Engine Entries
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `src/trust-engine.ts:36-70`
 - Modify: `src/__tests__/trust-engine.test.ts`
@@ -1168,6 +1195,7 @@ git commit -m "feat(browser): add browser tools to trust engine classification"
 ### Task 9: Stagehand Bridge
 
 **Files:**
+
 - Create: `src/browser/stagehand-bridge.ts`
 - Create: `src/browser/stagehand-bridge.test.ts`
 
@@ -1279,9 +1307,18 @@ export interface StagehandResponse {
 }
 
 const DESTRUCTIVE_PATTERNS = [
-  'delete', 'remove', 'cancel', 'unsubscribe',
-  'transfer', 'send money', 'pay', 'purchase', 'buy',
-  'submit order', 'confirm payment', 'place order',
+  'delete',
+  'remove',
+  'cancel',
+  'unsubscribe',
+  'transfer',
+  'send money',
+  'pay',
+  'purchase',
+  'buy',
+  'submit order',
+  'confirm payment',
+  'place order',
 ];
 
 export function isDestructiveIntent(instruction: string): boolean {
@@ -1365,6 +1402,7 @@ git commit -m "feat(browser): stagehand bridge scaffold with IPC interface"
 ### Task 10: IPC Handlers for Browser Tools
 
 **Files:**
+
 - Modify: `src/ipc.ts`
 
 - [ ] **Step 1: Add browser IPC case handlers**
@@ -1468,6 +1506,7 @@ git commit -m "feat(browser): add browser_act/extract/observe IPC handlers"
 ### Task 11: Add Playwright MCP to Agent Container
 
 **Files:**
+
 - Modify: `container/Dockerfile:40`
 
 - [ ] **Step 1: Update Dockerfile**
@@ -1496,13 +1535,14 @@ Note: The container image must be rebuilt after this change (`./container/build.
 ### Task 12: Browser Automation Container Skill
 
 **Files:**
+
 - Create: `container/skills/browser-automation/SKILL.md`
 
 - [ ] **Step 1: Create the skill file**
 
 Create `container/skills/browser-automation/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: browser-automation
 description: Full browser automation via two layers — Playwright MCP (direct tools, zero extra cost) for known sites, and Stagehand IPC (natural language, LLM-powered) for unknown/complex sites. Use whenever a task requires web browsing, form filling, data extraction, or visual monitoring.
@@ -1547,41 +1587,49 @@ Use for unknown sites, complex forms (custom dropdowns, date pickers, drag-and-d
 Write a JSON file to `/workspace/ipc/tasks/` with:
 
 **browser_act** — perform an action described in natural language:
+
 ```json
 { "type": "browser_act", "instruction": "click the login button" }
 ```
+````
 
 **browser_extract** — extract structured data:
+
 ```json
 { "type": "browser_extract", "instruction": "get all product names and prices" }
 ```
 
 **browser_observe** — understand what's on the page:
+
 ```json
-{ "type": "browser_observe", "instruction": "what form fields are on this page?" }
+{
+  "type": "browser_observe",
+  "instruction": "what form fields are on this page?"
+}
 ```
 
 ## When to Use Which
 
-| Situation | Use |
-|-----------|-----|
+| Situation                                        | Use            |
+| ------------------------------------------------ | -------------- |
 | You can read the snapshot and know what to click | Playwright MCP |
-| Standard HTML forms with labels | Playwright MCP |
-| File uploads, tab management | Playwright MCP |
-| Custom dropdowns, date pickers, rich UI | Stagehand IPC |
-| Site you've never seen, need to figure it out | Stagehand IPC |
-| Extracting structured data from messy pages | Stagehand IPC |
-| Cost-sensitive task | Playwright MCP |
+| Standard HTML forms with labels                  | Playwright MCP |
+| File uploads, tab management                     | Playwright MCP |
+| Custom dropdowns, date pickers, rich UI          | Stagehand IPC  |
+| Site you've never seen, need to figure it out    | Stagehand IPC  |
+| Extracting structured data from messy pages      | Stagehand IPC  |
+| Cost-sensitive task                              | Playwright MCP |
 
 Both layers share the same browser session — you can mix them freely within a task.
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add container/skills/browser-automation/SKILL.md
 git commit -m "feat(browser): add browser-automation container skill"
-```
+````
 
 ---
 
@@ -1590,6 +1638,7 @@ git commit -m "feat(browser): add browser-automation container skill"
 ### Task 13: Profile Crypto — Single-File Operations & Key Loading
 
 **Files:**
+
 - Modify: `src/browser/profile-crypto.ts`
 - Modify: `src/browser/profile-crypto.test.ts`
 
@@ -1627,7 +1676,9 @@ describe('single-file operations', () => {
 
   it('encrypts and decrypts a single file', () => {
     const filePath = path.join(tmpDir, 'state.json');
-    const original = JSON.stringify({ cookies: [{ name: 'auth', value: 'abc' }] });
+    const original = JSON.stringify({
+      cookies: [{ name: 'auth', value: 'abc' }],
+    });
     fs.writeFileSync(filePath, original);
 
     encryptSingleFile(filePath, key);
@@ -1649,7 +1700,12 @@ describe('single-file operations', () => {
     const filePath = path.join(tmpDir, 'state.json');
     const state = {
       cookies: [{ name: 'session', value: 'xyz', domain: '.example.com' }],
-      origins: [{ origin: 'https://example.com', localStorage: [{ name: 'key', value: 'val' }] }],
+      origins: [
+        {
+          origin: 'https://example.com',
+          localStorage: [{ name: 'key', value: 'val' }],
+        },
+      ],
     };
     fs.writeFileSync(filePath, JSON.stringify(state));
 
@@ -1714,6 +1770,7 @@ git commit -m "feat(browser): export single-file encrypt/decrypt operations"
 ### Task 14: Wire Profile Save/Restore into Session Manager
 
 **Files:**
+
 - Modify: `src/browser/session-manager.ts`
 - Modify: `src/browser/session-manager.test.ts`
 
@@ -1745,7 +1802,8 @@ describe('profile persistence', () => {
 
     const mgr = new BrowserSessionManager(undefined, {
       profileKey: Buffer.alloc(32, 'a'),
-      resolveProfileDir: (groupId) => path.join(tmpGroupsDir, groupId, 'browser'),
+      resolveProfileDir: (groupId) =>
+        path.join(tmpGroupsDir, groupId, 'browser'),
     });
 
     await mgr.acquireContext('test-group');
@@ -1841,7 +1899,6 @@ IMPORTANT: Always acquire from the pool first, then apply storage state. Never b
 
 Note: When `storageState` is provided, we acquire a pool slot (enforcing max limit), close the empty context, and create a replacement with the profile. The pool tracks the slot as "in use" even though we swapped the actual context object. On release, we return the replacement context — `generic-pool` will call `destroy` on it which calls `ctx.close()`.
 
-
 Update `releaseContext` to save encrypted profile:
 
 ```typescript
@@ -1913,6 +1970,7 @@ git commit -m "feat(browser): wire encrypted profile save/restore into session m
 ### Task 15: Visual Diff
 
 **Files:**
+
 - Create: `src/browser/visual-diff.ts`
 - Create: `src/browser/visual-diff.test.ts`
 
@@ -1931,9 +1989,9 @@ describe('compareScreenshots', () => {
     const height = 2;
     const pixels = Buffer.alloc(width * height * 4);
     for (let i = 0; i < pixels.length; i += 4) {
-      pixels[i] = 255;     // R
-      pixels[i + 1] = 0;   // G
-      pixels[i + 2] = 0;   // B
+      pixels[i] = 255; // R
+      pixels[i + 1] = 0; // G
+      pixels[i + 2] = 0; // B
       pixels[i + 3] = 255; // A
     }
 
@@ -1948,8 +2006,14 @@ describe('compareScreenshots', () => {
     const red = Buffer.alloc(width * height * 4);
     const blue = Buffer.alloc(width * height * 4);
     for (let i = 0; i < red.length; i += 4) {
-      red[i] = 255; red[i + 1] = 0; red[i + 2] = 0; red[i + 3] = 255;
-      blue[i] = 0; blue[i + 1] = 0; blue[i + 2] = 255; blue[i + 3] = 255;
+      red[i] = 255;
+      red[i + 1] = 0;
+      red[i + 2] = 0;
+      red[i + 3] = 255;
+      blue[i] = 0;
+      blue[i + 1] = 0;
+      blue[i + 2] = 255;
+      blue[i + 3] = 255;
     }
 
     const result = compareScreenshots(red, blue, width, height);
@@ -2114,6 +2178,7 @@ git commit -m "feat(browser): final integration fixes"
 ### Testing Checklist
 
 After deployment:
+
 - [ ] `docker network ls` shows `nanoclaw` network
 - [ ] `docker compose -f docker-compose.browser.yml ps` shows sidecar running
 - [ ] Agent container can resolve `browser-sidecar` hostname

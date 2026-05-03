@@ -7,7 +7,7 @@
 
 ## Goal
 
-Make every meaningful thing I learn retrievable from wherever I work, without me having to remember where I put it. The brain (v2) gave me *email archival + extraction*. This doc extends that into a personal second brain: multi-input capture, per-repo surfacing, and a single "what do I know about X" entry point.
+Make every meaningful thing I learn retrievable from wherever I work, without me having to remember where I put it. The brain (v2) gave me _email archival + extraction_. This doc extends that into a personal second brain: multi-input capture, per-repo surfacing, and a single "what do I know about X" entry point.
 
 ## Non-goals
 
@@ -19,15 +19,15 @@ Make every meaningful thing I learn retrievable from wherever I work, without me
 
 ## Current state (what we have, what's missing)
 
-| Layer | What exists | Gap |
-|---|---|---|
-| Capture — email | brain.db ingests every email's subject + snippet + sender; extracted into claims | Body is truncated at Gmail's ~200 char snippet; no other channels |
-| Capture — code/docs | **none** | 20+ repos' READMEs, docs, architecture notes are invisible to the brain |
-| Capture — user-initiated | **none** | No "save this thought" inbox for Jon's own notes / meeting takeaways |
-| Storage | brain.db (SQLite + FTS5) + Qdrant `ku_nomic-embed-text-v1.5_768` | Fine. Reused for v1. |
-| Curation | SuperPilot KB (MCP `upload_to_kb`), kb-housekeeping skill | Email-only scope |
-| Retrieval | miniapp (`/brain/*`), `/recall` chat cmd, `/brainstream`, new `/brain/queries` | No CLI from arbitrary cwd; not consulted inside normal agent turns |
-| Expression | `generate_reply` grounds email drafts in SP KB | Agent doesn't auto-consult brain.db during conversation; editor / cwd context has no surfacing |
+| Layer                    | What exists                                                                      | Gap                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Capture — email          | brain.db ingests every email's subject + snippet + sender; extracted into claims | Body is truncated at Gmail's ~200 char snippet; no other channels                              |
+| Capture — code/docs      | **none**                                                                         | 20+ repos' READMEs, docs, architecture notes are invisible to the brain                        |
+| Capture — user-initiated | **none**                                                                         | No "save this thought" inbox for Jon's own notes / meeting takeaways                           |
+| Storage                  | brain.db (SQLite + FTS5) + Qdrant `ku_nomic-embed-text-v1.5_768`                 | Fine. Reused for v1.                                                                           |
+| Curation                 | SuperPilot KB (MCP `upload_to_kb`), kb-housekeeping skill                        | Email-only scope                                                                               |
+| Retrieval                | miniapp (`/brain/*`), `/recall` chat cmd, `/brainstream`, new `/brain/queries`   | No CLI from arbitrary cwd; not consulted inside normal agent turns                             |
+| Expression               | `generate_reply` grounds email drafts in SP KB                                   | Agent doesn't auto-consult brain.db during conversation; editor / cwd context has no surfacing |
 
 **Sharpest gaps**: no repo indexing, no CLI entry point, no cwd-aware surfacing.
 
@@ -73,11 +73,12 @@ Make every meaningful thing I learn retrievable from wherever I work, without me
 ### v0 — prove the CLI UX (≈200 lines, no infra)
 
 Ship a `claw know <query>` subcommand that performs an on-demand walk:
+
 - Calls `recall()` against the live brain.db (today's email KUs)
 - Calls SuperPilot's `search_kb` over HTTP (needs endpoint confirmed)
 - Interleaves by normalized score, labels each hit by source
 
-**Success criteria**: from any `~/dev/<project>` directory, `claw know "stellar cyber pricing"` returns a useful ranked list in under a second and the result feels like *the right answer shape*.
+**Success criteria**: from any `~/dev/<project>` directory, `claw know "stellar cyber pricing"` returns a useful ranked list in under a second and the result feels like _the right answer shape_.
 
 **Explicitly out of scope at v0**: repo content, journals, daemon, agent-grounding changes, writes of any kind.
 
@@ -99,6 +100,7 @@ Ship a `claw know <query>` subcommand that performs an on-demand walk:
 Shipped with **1,136 files indexed across 32 repos in ~5s** (initial full sync).
 
 Deliberate v1.0 non-features:
+
 - No `fswatch` daemon. Sync is on-demand (`claw sync`) or via cron (user-configured).
 - No code file indexing.
 - No embeddings (semantic search stays email-only until v1.1).
@@ -129,6 +131,7 @@ The initial v1.1a embedding run dropped 103/1131 files on Nomic's 8192-token con
 Gated behind a `--code` flag on `claw sync`. Without it, sync remains markdown + READMEs only (preserves v1.0 default — accidental `claw sync` doesn't suddenly add tens of thousands of KUs). With it, eligible source files are indexed per each repo's `scope` from repos.yaml (`docs+code` or `full` opts in; `docs` stays doc-only).
 
 Indexing rules:
+
 - **Eligible extensions**: `.ts/.tsx/.js/.jsx/.mjs/.cjs`, `.py/.pyi`, `.go`, `.rs`, `.rb`, `.java/.kt/.scala`, `.swift`, `.c/.cc/.cpp/.h/.hpp`, `.sh/.bash/.zsh`, `.sql`. JSON/YAML/TOML/HTML/CSS deliberately excluded — too noisy.
 - **Filter**: skip files whose names contain `.min.`, `.bundle.`, `.generated.`, `.pb.` — minified or generated artefacts.
 - **Cap**: 1MB per file (vs 64KB for docs). Files larger than that are skipped.
@@ -229,14 +232,14 @@ Effect: a draft about "Stellar Cyber renewal" now sees both SP KB hits AND your 
 
 ## Risks + mitigations
 
-| Risk | Mitigation |
-|---|---|
-| Indexing secrets-bearing files (`.env`, `*.key`) | `.gitignore` honored by default; add `.clawignore` as additional filter; hardcode skip list for common secrets filenames |
-| Journal drift vs code (agent writes a fact, code changes, fact goes stale) | `git_sha` provenance + weekly consolidation marks stale + time-decay in retrieval ranking |
-| Brain.db growth at 20+ repos | File-level granularity + content-hash dedup keeps ≈5-15MB storage total; acceptable |
-| CLI noise from poorly-ranked SP KB hits crowding out brain.db hits | Per-source caps in `claw know` output (e.g. top 5 brain + top 3 SP). Tunable. |
-| 20+ fswatch handles on macOS hitting FD limits | `fswatch` uses kqueue, one handle per root dir, not per file — 20 roots is fine |
-| SuperPilot HTTP endpoint doesn't exist yet | v0 ships brain-only if needed; add endpoint as parallel track in the SP repo |
+| Risk                                                                       | Mitigation                                                                                                               |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Indexing secrets-bearing files (`.env`, `*.key`)                           | `.gitignore` honored by default; add `.clawignore` as additional filter; hardcode skip list for common secrets filenames |
+| Journal drift vs code (agent writes a fact, code changes, fact goes stale) | `git_sha` provenance + weekly consolidation marks stale + time-decay in retrieval ranking                                |
+| Brain.db growth at 20+ repos                                               | File-level granularity + content-hash dedup keeps ≈5-15MB storage total; acceptable                                      |
+| CLI noise from poorly-ranked SP KB hits crowding out brain.db hits         | Per-source caps in `claw know` output (e.g. top 5 brain + top 3 SP). Tunable.                                            |
+| 20+ fswatch handles on macOS hitting FD limits                             | `fswatch` uses kqueue, one handle per root dir, not per file — 20 roots is fine                                          |
+| SuperPilot HTTP endpoint doesn't exist yet                                 | v0 ships brain-only if needed; add endpoint as parallel track in the SP repo                                             |
 
 ## Decision log (to fill as we go)
 

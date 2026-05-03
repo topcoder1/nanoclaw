@@ -12,29 +12,34 @@
 
 ## File Structure
 
-| File | Responsibility |
-|---|---|
-| `src/events.ts` | Add `ChatMessageEditedEvent` and `ChatMessageDeletedEvent` types + bus map entries |
-| `src/channels/signal.ts` | Detect `editMessage` / `remoteDelete` in inbound envelopes; update cache; emit new events |
-| `src/channels/discord.ts` | In existing `MessageUpdate` / `MessageDelete` listeners, after cache write, emit new events |
-| `src/brain/chat-edit-sync.ts` | NEW — subscribe to edit/delete events, locate matching KUs via raw_events, supersede or tombstone |
-| `src/brain/chat-ingest.ts` | Wire `startChatEditSync` / `stopChatEditSync` into existing start/stop |
-| `src/brain/__tests__/chat-edit-sync.test.ts` | NEW — unit + integration tests for both edit and delete paths |
-| `src/channels/__tests__/signal.test.ts` | Append tests for editMessage/remoteDelete envelope handling |
-| `src/channels/__tests__/discord.test.ts` | Append tests for MessageUpdate/MessageDelete event emission |
+| File                                         | Responsibility                                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `src/events.ts`                              | Add `ChatMessageEditedEvent` and `ChatMessageDeletedEvent` types + bus map entries                |
+| `src/channels/signal.ts`                     | Detect `editMessage` / `remoteDelete` in inbound envelopes; update cache; emit new events         |
+| `src/channels/discord.ts`                    | In existing `MessageUpdate` / `MessageDelete` listeners, after cache write, emit new events       |
+| `src/brain/chat-edit-sync.ts`                | NEW — subscribe to edit/delete events, locate matching KUs via raw_events, supersede or tombstone |
+| `src/brain/chat-ingest.ts`                   | Wire `startChatEditSync` / `stopChatEditSync` into existing start/stop                            |
+| `src/brain/__tests__/chat-edit-sync.test.ts` | NEW — unit + integration tests for both edit and delete paths                                     |
+| `src/channels/__tests__/signal.test.ts`      | Append tests for editMessage/remoteDelete envelope handling                                       |
+| `src/channels/__tests__/discord.test.ts`     | Append tests for MessageUpdate/MessageDelete event emission                                       |
 
 ---
 
 ## Task 1: `ChatMessageEditedEvent` + `ChatMessageDeletedEvent` types
 
 **Files:**
+
 - Modify: `src/events.ts`
 
 - [ ] **Step 1: Append failing test** to `src/__tests__/events.test.ts` (create if missing — model on the existing `ChatWindowFlushedEvent` test):
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import type { ChatMessageEditedEvent, ChatMessageDeletedEvent, NanoClawEventMap } from '../events.js';
+import type {
+  ChatMessageEditedEvent,
+  ChatMessageDeletedEvent,
+  NanoClawEventMap,
+} from '../events.js';
 
 describe('chat edit/delete event types', () => {
   it('ChatMessageEditedEvent has all required fields', () => {
@@ -135,6 +140,7 @@ git commit -m "feat(events): ChatMessageEditedEvent + ChatMessageDeletedEvent ty
 ## Task 2: Signal channel — detect editMessage and emit `chat.message.edited`
 
 **Files:**
+
 - Modify: `src/channels/signal.ts`
 - Modify: `src/channels/__tests__/signal.test.ts`
 
@@ -143,50 +149,50 @@ The `DataMessage.editMessage` type is already declared (line 38–41). What's mi
 - [ ] **Step 1: Append failing test** at the end of `src/channels/__tests__/signal.test.ts` (inside the existing `describe('Signal', ...)` block, before the closing `});`):
 
 ```ts
-  it('inbound editMessage emits chat.message.edited and updates cache', async () => {
-    const events: ChatMessageEditedEvent[] = [];
-    eventBus.on('chat.message.edited', (e) => events.push(e));
-    // Pre-cache an "original" message so the edit can find it.
-    mockGetChatMessage.mockReturnValueOnce({
-      platform: 'signal',
-      chat_id: 'group-X',
-      message_id: '9999',
-      sent_at: '2026-04-27T00:00:00.000Z',
-      sender: 'alice',
-      text: 'original text',
-    });
-    const env = {
-      source: 'alice',
-      sourceNumber: '+15551234567',
-      sourceName: 'Alice',
-      timestamp: Date.now(),
-      dataMessage: {
-        timestamp: Date.now(),
-        editMessage: {
-          targetSentTimestamp: 9999,
-          dataMessage: { message: 'edited text' },
-        },
-        groupInfo: { groupId: 'group-X', type: 'DELIVER' },
-      },
-    };
-    await channel.handleEnvelope(env as any);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'chat.message.edited',
-      platform: 'signal',
-      chat_id: 'sig:group:group-X',
-      message_id: '9999',
-      old_text: 'original text',
-      new_text: 'edited text',
-    });
-    expect(mockPutChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message_id: '9999',
-        text: 'edited text',
-        edited_at: expect.any(String),
-      }),
-    );
+it('inbound editMessage emits chat.message.edited and updates cache', async () => {
+  const events: ChatMessageEditedEvent[] = [];
+  eventBus.on('chat.message.edited', (e) => events.push(e));
+  // Pre-cache an "original" message so the edit can find it.
+  mockGetChatMessage.mockReturnValueOnce({
+    platform: 'signal',
+    chat_id: 'group-X',
+    message_id: '9999',
+    sent_at: '2026-04-27T00:00:00.000Z',
+    sender: 'alice',
+    text: 'original text',
   });
+  const env = {
+    source: 'alice',
+    sourceNumber: '+15551234567',
+    sourceName: 'Alice',
+    timestamp: Date.now(),
+    dataMessage: {
+      timestamp: Date.now(),
+      editMessage: {
+        targetSentTimestamp: 9999,
+        dataMessage: { message: 'edited text' },
+      },
+      groupInfo: { groupId: 'group-X', type: 'DELIVER' },
+    },
+  };
+  await channel.handleEnvelope(env as any);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'chat.message.edited',
+    platform: 'signal',
+    chat_id: 'sig:group:group-X',
+    message_id: '9999',
+    old_text: 'original text',
+    new_text: 'edited text',
+  });
+  expect(mockPutChatMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message_id: '9999',
+      text: 'edited text',
+      edited_at: expect.any(String),
+    }),
+  );
+});
 ```
 
 (If `mockGetChatMessage` isn't set up in the test file, follow the same pattern already used for `mockPutChatMessage` in the existing tests.)
@@ -196,39 +202,39 @@ The `DataMessage.editMessage` type is already declared (line 38–41). What's mi
 - [ ] **Step 3: Add handler** in `src/channels/signal.ts`. Find the inbound message branch (where `putChatMessage` is called around line 234). After that block but before the agent-routing block, insert:
 
 ```ts
-    if (dataMsg.editMessage) {
-      const targetTs = dataMsg.editMessage.targetSentTimestamp;
-      const originalId = String(targetTs);
-      const newText = dataMsg.editMessage.dataMessage.message ?? '';
-      const cached = getChatMessage('signal', chatId, originalId);
-      const editedAtIso = new Date(envelope.timestamp).toISOString();
-      // Update cache (idempotent UPSERT).
-      putChatMessage({
-        platform: 'signal',
-        chat_id: chatId,
-        message_id: originalId,
-        sent_at: cached?.sent_at ?? editedAtIso,
-        sender: sourceJid,
-        sender_name: envelope.sourceName,
-        text: newText,
-        edited_at: editedAtIso,
-      });
-      // Emit so chat-edit-sync can supersede derived KUs.
-      eventBus.emit('chat.message.edited', {
-        type: 'chat.message.edited',
-        source: 'signal',
-        timestamp: envelope.timestamp,
-        payload: {},
-        platform: 'signal',
-        chat_id: chatId,
-        message_id: originalId,
-        old_text: cached?.text ?? null,
-        new_text: newText,
-        edited_at: editedAtIso,
-        sender: sourceJid,
-      } satisfies ChatMessageEditedEvent);
-      return;
-    }
+if (dataMsg.editMessage) {
+  const targetTs = dataMsg.editMessage.targetSentTimestamp;
+  const originalId = String(targetTs);
+  const newText = dataMsg.editMessage.dataMessage.message ?? '';
+  const cached = getChatMessage('signal', chatId, originalId);
+  const editedAtIso = new Date(envelope.timestamp).toISOString();
+  // Update cache (idempotent UPSERT).
+  putChatMessage({
+    platform: 'signal',
+    chat_id: chatId,
+    message_id: originalId,
+    sent_at: cached?.sent_at ?? editedAtIso,
+    sender: sourceJid,
+    sender_name: envelope.sourceName,
+    text: newText,
+    edited_at: editedAtIso,
+  });
+  // Emit so chat-edit-sync can supersede derived KUs.
+  eventBus.emit('chat.message.edited', {
+    type: 'chat.message.edited',
+    source: 'signal',
+    timestamp: envelope.timestamp,
+    payload: {},
+    platform: 'signal',
+    chat_id: chatId,
+    message_id: originalId,
+    old_text: cached?.text ?? null,
+    new_text: newText,
+    edited_at: editedAtIso,
+    sender: sourceJid,
+  } satisfies ChatMessageEditedEvent);
+  return;
+}
 ```
 
 (Add `import { eventBus } from '../event-bus.js';` if not already imported, and `import type { ChatMessageEditedEvent } from '../events.js';`.)
@@ -247,6 +253,7 @@ git commit -m "feat(signal): emit chat.message.edited on editMessage envelopes"
 ## Task 3: Signal channel — detect remoteDelete and emit `chat.message.deleted`
 
 **Files:**
+
 - Modify: `src/channels/signal.ts`
 - Modify: `src/channels/__tests__/signal.test.ts`
 
@@ -255,33 +262,33 @@ git commit -m "feat(signal): emit chat.message.edited on editMessage envelopes"
 - [ ] **Step 1: Append failing test**:
 
 ```ts
-  it('inbound remoteDelete emits chat.message.deleted and tombstones cache', async () => {
-    const events: ChatMessageDeletedEvent[] = [];
-    eventBus.on('chat.message.deleted', (e) => events.push(e));
-    const env = {
-      source: 'alice',
-      sourceNumber: '+15551234567',
+it('inbound remoteDelete emits chat.message.deleted and tombstones cache', async () => {
+  const events: ChatMessageDeletedEvent[] = [];
+  eventBus.on('chat.message.deleted', (e) => events.push(e));
+  const env = {
+    source: 'alice',
+    sourceNumber: '+15551234567',
+    timestamp: Date.now(),
+    dataMessage: {
       timestamp: Date.now(),
-      dataMessage: {
-        timestamp: Date.now(),
-        remoteDelete: { timestamp: 9999 },
-        groupInfo: { groupId: 'group-X', type: 'DELIVER' },
-      },
-    };
-    await channel.handleEnvelope(env as any);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'chat.message.deleted',
-      platform: 'signal',
-      message_id: '9999',
-    });
-    expect(mockPutChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message_id: '9999',
-        deleted_at: expect.any(String),
-      }),
-    );
+      remoteDelete: { timestamp: 9999 },
+      groupInfo: { groupId: 'group-X', type: 'DELIVER' },
+    },
+  };
+  await channel.handleEnvelope(env as any);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'chat.message.deleted',
+    platform: 'signal',
+    message_id: '9999',
   });
+  expect(mockPutChatMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message_id: '9999',
+      deleted_at: expect.any(String),
+    }),
+  );
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL.
@@ -289,34 +296,34 @@ git commit -m "feat(signal): emit chat.message.edited on editMessage envelopes"
 - [ ] **Step 3: Add handler** in `src/channels/signal.ts` immediately after the editMessage block from Task 2:
 
 ```ts
-    if (dataMsg.remoteDelete) {
-      const targetTs = dataMsg.remoteDelete.timestamp;
-      const originalId = String(targetTs);
-      const deletedAtIso = new Date(envelope.timestamp).toISOString();
-      const cached = getChatMessage('signal', chatId, originalId);
-      // Tombstone the cache row.
-      putChatMessage({
-        platform: 'signal',
-        chat_id: chatId,
-        message_id: originalId,
-        sent_at: cached?.sent_at ?? deletedAtIso,
-        sender: cached?.sender ?? sourceJid,
-        sender_name: cached?.sender_name ?? envelope.sourceName,
-        text: cached?.text ?? null,
-        deleted_at: deletedAtIso,
-      });
-      eventBus.emit('chat.message.deleted', {
-        type: 'chat.message.deleted',
-        source: 'signal',
-        timestamp: envelope.timestamp,
-        payload: {},
-        platform: 'signal',
-        chat_id: chatId,
-        message_id: originalId,
-        deleted_at: deletedAtIso,
-      } satisfies ChatMessageDeletedEvent);
-      return;
-    }
+if (dataMsg.remoteDelete) {
+  const targetTs = dataMsg.remoteDelete.timestamp;
+  const originalId = String(targetTs);
+  const deletedAtIso = new Date(envelope.timestamp).toISOString();
+  const cached = getChatMessage('signal', chatId, originalId);
+  // Tombstone the cache row.
+  putChatMessage({
+    platform: 'signal',
+    chat_id: chatId,
+    message_id: originalId,
+    sent_at: cached?.sent_at ?? deletedAtIso,
+    sender: cached?.sender ?? sourceJid,
+    sender_name: cached?.sender_name ?? envelope.sourceName,
+    text: cached?.text ?? null,
+    deleted_at: deletedAtIso,
+  });
+  eventBus.emit('chat.message.deleted', {
+    type: 'chat.message.deleted',
+    source: 'signal',
+    timestamp: envelope.timestamp,
+    payload: {},
+    platform: 'signal',
+    chat_id: chatId,
+    message_id: originalId,
+    deleted_at: deletedAtIso,
+  } satisfies ChatMessageDeletedEvent);
+  return;
+}
 ```
 
 (Add `import type { ChatMessageDeletedEvent } from '../events.js';`.)
@@ -335,6 +342,7 @@ git commit -m "feat(signal): emit chat.message.deleted on remoteDelete envelopes
 ## Task 4: Discord channel — emit `chat.message.edited` from MessageUpdate
 
 **Files:**
+
 - Modify: `src/channels/discord.ts`
 - Modify: `src/channels/__tests__/discord.test.ts`
 
@@ -343,38 +351,38 @@ The Discord channel already updates the cache on `MessageUpdate` (around line 19
 - [ ] **Step 1: Append failing test** to `src/channels/__tests__/discord.test.ts`:
 
 ```ts
-  it('MessageUpdate emits chat.message.edited with old_text from cache', async () => {
-    const events: ChatMessageEditedEvent[] = [];
-    eventBus.on('chat.message.edited', (e) => events.push(e));
-    mockGetChatMessage.mockReturnValueOnce({
-      platform: 'discord',
-      chat_id: 'channel-1',
-      message_id: 'msg-1',
-      sent_at: '2026-04-27T00:00:00.000Z',
-      sender: 'user-1',
-      text: 'before',
-    });
-    const oldMessage = { id: 'msg-1', channelId: 'channel-1' };
-    const newMessage = {
-      id: 'msg-1',
-      channelId: 'channel-1',
-      author: { id: 'user-1', username: 'alice', bot: false },
-      content: 'after',
-      createdAt: new Date('2026-04-27'),
-      editedAt: new Date('2026-04-28'),
-      member: null,
-    };
-    await client.emit('messageUpdate', oldMessage, newMessage);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'chat.message.edited',
-      platform: 'discord',
-      chat_id: 'channel-1',
-      message_id: 'msg-1',
-      old_text: 'before',
-      new_text: 'after',
-    });
+it('MessageUpdate emits chat.message.edited with old_text from cache', async () => {
+  const events: ChatMessageEditedEvent[] = [];
+  eventBus.on('chat.message.edited', (e) => events.push(e));
+  mockGetChatMessage.mockReturnValueOnce({
+    platform: 'discord',
+    chat_id: 'channel-1',
+    message_id: 'msg-1',
+    sent_at: '2026-04-27T00:00:00.000Z',
+    sender: 'user-1',
+    text: 'before',
   });
+  const oldMessage = { id: 'msg-1', channelId: 'channel-1' };
+  const newMessage = {
+    id: 'msg-1',
+    channelId: 'channel-1',
+    author: { id: 'user-1', username: 'alice', bot: false },
+    content: 'after',
+    createdAt: new Date('2026-04-27'),
+    editedAt: new Date('2026-04-28'),
+    member: null,
+  };
+  await client.emit('messageUpdate', oldMessage, newMessage);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'chat.message.edited',
+    platform: 'discord',
+    chat_id: 'channel-1',
+    message_id: 'msg-1',
+    old_text: 'before',
+    new_text: 'after',
+  });
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL.
@@ -382,55 +390,51 @@ The Discord channel already updates the cache on `MessageUpdate` (around line 19
 - [ ] **Step 3: Modify** the `MessageUpdate` listener in `src/channels/discord.ts` (around line 195). After the existing `putChatMessage({...})` call, insert:
 
 ```ts
-      const cachedBefore = getChatMessage(
-        'discord',
-        message.channelId,
-        message.id,
-      );
-      // (cachedBefore was the OLD row; we just overwrote it via putChatMessage.
-      // For old_text, fetch BEFORE putChatMessage instead.)
+const cachedBefore = getChatMessage('discord', message.channelId, message.id);
+// (cachedBefore was the OLD row; we just overwrote it via putChatMessage.
+// For old_text, fetch BEFORE putChatMessage instead.)
 ```
 
 Actually, restructure the listener body to fetch cache first, then update, then emit:
 
 ```ts
-    this.client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
-      let message = newMessage;
-      if (message.partial) {
-        try {
-          message = await message.fetch();
-        } catch {
-          return;
-        }
-      }
-      if (message.author?.bot) return;
-      const previous = getChatMessage('discord', message.channelId, message.id);
-      const editedAtIso =
-        message.editedAt?.toISOString() ?? new Date().toISOString();
-      putChatMessage({
-        platform: 'discord',
-        chat_id: message.channelId,
-        message_id: message.id,
-        sent_at: message.createdAt.toISOString(),
-        sender: message.author?.id ?? 'unknown',
-        sender_name: message.member?.displayName ?? message.author?.username,
-        text: message.content,
-        edited_at: editedAtIso,
-      });
-      eventBus.emit('chat.message.edited', {
-        type: 'chat.message.edited',
-        source: 'discord',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'discord',
-        chat_id: message.channelId,
-        message_id: message.id,
-        old_text: previous?.text ?? null,
-        new_text: message.content ?? '',
-        edited_at: editedAtIso,
-        sender: message.author?.id ?? 'unknown',
-      } satisfies ChatMessageEditedEvent);
-    });
+this.client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
+  let message = newMessage;
+  if (message.partial) {
+    try {
+      message = await message.fetch();
+    } catch {
+      return;
+    }
+  }
+  if (message.author?.bot) return;
+  const previous = getChatMessage('discord', message.channelId, message.id);
+  const editedAtIso =
+    message.editedAt?.toISOString() ?? new Date().toISOString();
+  putChatMessage({
+    platform: 'discord',
+    chat_id: message.channelId,
+    message_id: message.id,
+    sent_at: message.createdAt.toISOString(),
+    sender: message.author?.id ?? 'unknown',
+    sender_name: message.member?.displayName ?? message.author?.username,
+    text: message.content,
+    edited_at: editedAtIso,
+  });
+  eventBus.emit('chat.message.edited', {
+    type: 'chat.message.edited',
+    source: 'discord',
+    timestamp: Date.now(),
+    payload: {},
+    platform: 'discord',
+    chat_id: message.channelId,
+    message_id: message.id,
+    old_text: previous?.text ?? null,
+    new_text: message.content ?? '',
+    edited_at: editedAtIso,
+    sender: message.author?.id ?? 'unknown',
+  } satisfies ChatMessageEditedEvent);
+});
 ```
 
 (Add `import type { ChatMessageEditedEvent } from '../events.js';` at the top.)
@@ -449,6 +453,7 @@ git commit -m "feat(discord): emit chat.message.edited on MessageUpdate"
 ## Task 5: Discord channel — emit `chat.message.deleted` from MessageDelete
 
 **Files:**
+
 - Modify: `src/channels/discord.ts`
 - Modify: `src/channels/__tests__/discord.test.ts`
 
@@ -457,19 +462,19 @@ If a `MessageDelete` listener already exists, modify it. If not, add one.
 - [ ] **Step 1: Append failing test**:
 
 ```ts
-  it('MessageDelete emits chat.message.deleted', async () => {
-    const events: ChatMessageDeletedEvent[] = [];
-    eventBus.on('chat.message.deleted', (e) => events.push(e));
-    const message = { id: 'msg-1', channelId: 'channel-1' };
-    await client.emit('messageDelete', message);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'chat.message.deleted',
-      platform: 'discord',
-      chat_id: 'channel-1',
-      message_id: 'msg-1',
-    });
+it('MessageDelete emits chat.message.deleted', async () => {
+  const events: ChatMessageDeletedEvent[] = [];
+  eventBus.on('chat.message.deleted', (e) => events.push(e));
+  const message = { id: 'msg-1', channelId: 'channel-1' };
+  await client.emit('messageDelete', message);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'chat.message.deleted',
+    platform: 'discord',
+    chat_id: 'channel-1',
+    message_id: 'msg-1',
   });
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL.
@@ -477,31 +482,27 @@ If a `MessageDelete` listener already exists, modify it. If not, add one.
 - [ ] **Step 3: Add listener** in `src/channels/discord.ts` immediately after the `MessageUpdate` listener (find the closing `});` of the update handler and add a new block):
 
 ```ts
-    this.client.on(Events.MessageDelete, async (message) => {
-      const deletedAtIso = new Date().toISOString();
-      const cached = getChatMessage(
-        'discord',
-        message.channelId,
-        message.id,
-      );
-      // Tombstone cache row.
-      if (cached) {
-        putChatMessage({
-          ...cached,
-          deleted_at: deletedAtIso,
-        });
-      }
-      eventBus.emit('chat.message.deleted', {
-        type: 'chat.message.deleted',
-        source: 'discord',
-        timestamp: Date.now(),
-        payload: {},
-        platform: 'discord',
-        chat_id: message.channelId,
-        message_id: message.id,
-        deleted_at: deletedAtIso,
-      } satisfies ChatMessageDeletedEvent);
+this.client.on(Events.MessageDelete, async (message) => {
+  const deletedAtIso = new Date().toISOString();
+  const cached = getChatMessage('discord', message.channelId, message.id);
+  // Tombstone cache row.
+  if (cached) {
+    putChatMessage({
+      ...cached,
+      deleted_at: deletedAtIso,
     });
+  }
+  eventBus.emit('chat.message.deleted', {
+    type: 'chat.message.deleted',
+    source: 'discord',
+    timestamp: Date.now(),
+    payload: {},
+    platform: 'discord',
+    chat_id: message.channelId,
+    message_id: message.id,
+    deleted_at: deletedAtIso,
+  } satisfies ChatMessageDeletedEvent);
+});
 ```
 
 (Add `import type { ChatMessageDeletedEvent } from '../events.js';`.)
@@ -520,6 +521,7 @@ git commit -m "feat(discord): emit chat.message.deleted on MessageDelete"
 ## Task 6: `chat-edit-sync` — locate KUs by message_id
 
 **Files:**
+
 - Create: `src/brain/chat-edit-sync.ts`
 - Create: `src/brain/__tests__/chat-edit-sync.test.ts`
 
@@ -534,12 +536,20 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
@@ -578,7 +588,12 @@ describe('chat-edit-sync — findRawEventsForMessage', () => {
     db.prepare(
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at)
        VALUES (?, 'signal_window', ?, ?, ?)`,
-    ).run('w1', 'group-X:2026-04-27T00:00:00.000Z', Buffer.from(evtPayload), '2026-04-27T00:00:00Z');
+    ).run(
+      'w1',
+      'group-X:2026-04-27T00:00:00.000Z',
+      Buffer.from(evtPayload),
+      '2026-04-27T00:00:00Z',
+    );
     const hits = findRawEventsForMessage(db, 'signal', 'group-X', 'msg-2');
     expect(hits.map((r) => r.id)).toEqual(['w1']);
   });
@@ -694,6 +709,7 @@ git commit -m "feat(brain): chat-edit-sync findRawEventsForMessage helper"
 ## Task 7: `chat-edit-sync` — supersede KUs on edit
 
 **Files:**
+
 - Modify: `src/brain/chat-edit-sync.ts`
 - Modify: `src/brain/__tests__/chat-edit-sync.test.ts`
 
@@ -712,10 +728,16 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
       `INSERT INTO raw_events (id, source_type, source_ref, payload, received_at, processed_at)
        VALUES ('r1', 'signal_message', 'chat-1:msg-1', ?, ?, ?)`,
     ).run(
-      Buffer.from(JSON.stringify({
-        type: 'chat.message.saved', platform: 'signal',
-        chat_id: 'chat-1', message_id: 'msg-1', text: 'pay $100', sender: 'alice',
-      })),
+      Buffer.from(
+        JSON.stringify({
+          type: 'chat.message.saved',
+          platform: 'signal',
+          chat_id: 'chat-1',
+          message_id: 'msg-1',
+          text: 'pay $100',
+          sender: 'alice',
+        }),
+      ),
       '2026-04-27T00:00:00Z',
       '2026-04-27T00:00:01Z',
     );
@@ -728,28 +750,49 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     ).run();
 
     const fakeLlm = vi.fn(async () => ({
-      claims: [{ text: 'pay $250 owed', topic_seed: 'payment', entities_mentioned: [], confidence: 0.9 }],
-      inputTokens: 10, outputTokens: 5,
+      claims: [
+        {
+          text: 'pay $250 owed',
+          topic_seed: 'payment',
+          entities_mentioned: [],
+          confidence: 0.9,
+        },
+      ],
+      inputTokens: 10,
+      outputTokens: 5,
     }));
 
     await handleChatMessageEdited(
       {
-        type: 'chat.message.edited', source: 'signal', timestamp: Date.now(),
-        payload: {}, platform: 'signal', chat_id: 'chat-1', message_id: 'msg-1',
-        old_text: 'pay $100', new_text: 'pay $250',
-        edited_at: '2026-04-28T00:00:00.000Z', sender: 'alice',
+        type: 'chat.message.edited',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-1',
+        message_id: 'msg-1',
+        old_text: 'pay $100',
+        new_text: 'pay $250',
+        edited_at: '2026-04-28T00:00:00.000Z',
+        sender: 'alice',
       },
       { llmCaller: fakeLlm, db },
     );
 
     // Old KU is now superseded.
-    const oldKu = db.prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`).get() as any;
+    const oldKu = db
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`,
+      )
+      .get() as any;
     expect(oldKu.superseded_at).not.toBeNull();
     expect(oldKu.superseded_by).not.toBeNull();
     // New KU exists with same source_ref.
-    const newKu = db.prepare(
-      `SELECT id, text, superseded_at FROM knowledge_units WHERE source_ref='chat-1:msg-1' AND id != 'k1'`,
-    ).get() as any;
+    const newKu = db
+      .prepare(
+        `SELECT id, text, superseded_at FROM knowledge_units WHERE source_ref='chat-1:msg-1' AND id != 'k1'`,
+      )
+      .get() as any;
     expect(newKu).toBeDefined();
     expect(newKu.text).toBe('pay $250 owed');
     expect(newKu.superseded_at).toBeNull();
@@ -761,10 +804,17 @@ describe('chat-edit-sync — handleChatMessageEdited', () => {
     const llm = vi.fn();
     await handleChatMessageEdited(
       {
-        type: 'chat.message.edited', source: 'signal', timestamp: Date.now(),
-        payload: {}, platform: 'signal', chat_id: 'unknown', message_id: 'unknown',
-        old_text: null, new_text: 'whatever',
-        edited_at: '2026-04-28T00:00:00.000Z', sender: 'x',
+        type: 'chat.message.edited',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'unknown',
+        message_id: 'unknown',
+        old_text: null,
+        new_text: 'whatever',
+        edited_at: '2026-04-28T00:00:00.000Z',
+        sender: 'x',
       },
       { llmCaller: llm, db },
     );
@@ -803,7 +853,12 @@ export async function handleChatMessageEdited(
   opts: ChatEditSyncOpts = {},
 ): Promise<void> {
   const db = opts.db ?? getBrainDb();
-  const matches = findRawEventsForMessage(db, evt.platform, evt.chat_id, evt.message_id);
+  const matches = findRawEventsForMessage(
+    db,
+    evt.platform,
+    evt.chat_id,
+    evt.message_id,
+  );
   if (matches.length === 0) return;
 
   for (const raw of matches) {
@@ -872,13 +927,16 @@ export async function handleChatMessageEdited(
             SET superseded_at = ?, superseded_by = ?
           WHERE id = ?`,
       );
-      for (const oldId of oldKuIds) updateOld.run(supersededAt, supersededBy, oldId);
+      for (const oldId of oldKuIds)
+        updateOld.run(supersededAt, supersededBy, oldId);
     })();
 
     // Best-effort embed/upsert for new KUs.
     const modelVersion = getEmbeddingModelVersion();
     for (const kuId of newKuIds) {
-      const row = db.prepare(`SELECT text, topic_key FROM knowledge_units WHERE id = ?`).get(kuId) as any;
+      const row = db
+        .prepare(`SELECT text, topic_key FROM knowledge_units WHERE id = ?`)
+        .get(kuId) as any;
       try {
         const vec = await embedText(row.text, 'document');
         await upsertKu({
@@ -942,6 +1000,7 @@ git commit -m "feat(brain): supersede + re-extract KUs on chat.message.edited"
 ## Task 8: `chat-edit-sync` — tombstone KUs on delete
 
 **Files:**
+
 - Modify: `src/brain/chat-edit-sync.ts`
 - Modify: `src/brain/__tests__/chat-edit-sync.test.ts`
 
@@ -969,20 +1028,31 @@ describe('chat-edit-sync — handleChatMessageDeleted', () => {
 
     await handleChatMessageDeleted(
       {
-        type: 'chat.message.deleted', source: 'signal', timestamp: Date.now(),
-        payload: {}, platform: 'signal', chat_id: 'chat-1', message_id: 'msg-1',
+        type: 'chat.message.deleted',
+        source: 'signal',
+        timestamp: Date.now(),
+        payload: {},
+        platform: 'signal',
+        chat_id: 'chat-1',
+        message_id: 'msg-1',
         deleted_at: '2026-04-28T00:00:00.000Z',
       },
       { db },
     );
 
-    const ku = db.prepare(`SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`).get() as any;
+    const ku = db
+      .prepare(
+        `SELECT superseded_at, superseded_by FROM knowledge_units WHERE id='k1'`,
+      )
+      .get() as any;
     expect(ku.superseded_at).not.toBeNull();
     expect(ku.superseded_by).toBeNull(); // deletion = no replacement
     // A deletion-marker raw_event was inserted.
-    const marker = db.prepare(
-      `SELECT * FROM raw_events WHERE source_type='signal_deletion' AND source_ref='chat-1:msg-1'`,
-    ).get() as any;
+    const marker = db
+      .prepare(
+        `SELECT * FROM raw_events WHERE source_type='signal_deletion' AND source_ref='chat-1:msg-1'`,
+      )
+      .get() as any;
     expect(marker).toBeDefined();
   });
 });
@@ -1006,7 +1076,12 @@ export async function handleChatMessageDeleted(
   opts: ChatEditSyncOpts = {},
 ): Promise<void> {
   const db = opts.db ?? getBrainDb();
-  const matches = findRawEventsForMessage(db, evt.platform, evt.chat_id, evt.message_id);
+  const matches = findRawEventsForMessage(
+    db,
+    evt.platform,
+    evt.chat_id,
+    evt.message_id,
+  );
   // Always insert the deletion marker — even if no KUs derived from this
   // message — so the audit trail is complete.
   db.prepare(
@@ -1031,7 +1106,12 @@ export async function handleChatMessageDeleted(
     }
   })();
   logger.info(
-    { platform: evt.platform, chat_id: evt.chat_id, message_id: evt.message_id, count: matches.length },
+    {
+      platform: evt.platform,
+      chat_id: evt.chat_id,
+      message_id: evt.message_id,
+      count: matches.length,
+    },
     'chat-edit-sync: tombstoned KUs from deleted message',
   );
 }
@@ -1051,6 +1131,7 @@ git commit -m "feat(brain): tombstone KUs on chat.message.deleted"
 ## Task 9: Wire `chat-edit-sync` into chat-ingest start/stop
 
 **Files:**
+
 - Modify: `src/brain/chat-edit-sync.ts`
 - Modify: `src/brain/chat-ingest.ts`
 - Modify: `src/brain/__tests__/chat-edit-sync.test.ts`
@@ -1079,14 +1160,21 @@ describe('chat-edit-sync — lifecycle', () => {
 
     startChatEditSync();
     eventBus.emit('chat.message.deleted', {
-      type: 'chat.message.deleted', source: 'signal', timestamp: Date.now(),
-      payload: {}, platform: 'signal', chat_id: 'chat-1', message_id: 'msg-1',
+      type: 'chat.message.deleted',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'chat-1',
+      message_id: 'msg-1',
       deleted_at: '2026-04-28T00:00:00.000Z',
     });
     await new Promise((r) => setTimeout(r, 50));
     stopChatEditSync();
 
-    const ku = db.prepare(`SELECT superseded_at FROM knowledge_units WHERE id='k1'`).get() as any;
+    const ku = db
+      .prepare(`SELECT superseded_at FROM knowledge_units WHERE id='k1'`)
+      .get() as any;
     expect(ku.superseded_at).not.toBeNull();
   });
 });
@@ -1132,7 +1220,9 @@ export function startChatEditSync(opts: ChatEditSyncStartOpts = {}): void {
       );
     }
   });
-  logger.info('Chat edit-sync started (chat.message.edited + chat.message.deleted)');
+  logger.info(
+    'Chat edit-sync started (chat.message.edited + chat.message.deleted)',
+  );
 }
 
 export function stopChatEditSync(): void {
@@ -1150,22 +1240,19 @@ export function stopChatEditSync(): void {
 - [ ] **Step 4: Wire** into `src/brain/chat-ingest.ts`. Add the import:
 
 ```ts
-import {
-  startChatEditSync,
-  stopChatEditSync,
-} from './chat-edit-sync.js';
+import { startChatEditSync, stopChatEditSync } from './chat-edit-sync.js';
 ```
 
 In `startChatIngest`, after `startWindowFlusher();` and before `logger.info('Chat ingest started ...')`, add:
 
 ```ts
-  startChatEditSync({ llmCaller: opts.llmCaller });
+startChatEditSync({ llmCaller: opts.llmCaller });
 ```
 
 In `stopChatIngest`, after `stopWindowFlusher();`, add:
 
 ```ts
-  stopChatEditSync();
+stopChatEditSync();
 ```
 
 - [ ] **Step 5: Run all chat tests**: `npx vitest run src/brain/__tests__/chat-ingest.test.ts src/brain/__tests__/chat-edit-sync.test.ts` — expect PASS.
@@ -1182,6 +1269,7 @@ git commit -m "feat(brain): start/stop chat-edit-sync alongside chat-ingest"
 ## Task 10: Manual end-to-end verification
 
 **Files:**
+
 - (operator-run) verification
 
 - [ ] **Step 1: Build + restart**

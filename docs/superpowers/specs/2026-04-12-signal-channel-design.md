@@ -41,12 +41,14 @@ Implements the `Channel` interface and self-registers via `registerChannel('sign
 On `connect()`, opens a WebSocket to `ws://{SIGNAL_API_URL}/v1/receive/{number}`.
 
 Each WebSocket message is a JSON envelope containing:
+
 - `envelope.dataMessage.message` — text content
 - `envelope.dataMessage.timestamp` — message timestamp
 - `envelope.sourceName` / `envelope.sourceNumber` — sender info
 - `envelope.dataMessage.groupInfo.groupId` — base64 group ID (if group message)
 
 The handler:
+
 1. Parses the envelope
 2. Derives the JID (`sig:{sourceNumber}` for 1:1, `sig:group:{groupId}` for groups)
 3. Calls `onChatMetadata()` with channel name `'signal'`
@@ -58,6 +60,7 @@ Non-text messages (attachments, reactions, etc.) are stored as placeholders: `[P
 ### Reconnection
 
 WebSocket drops are expected (network blips, container restarts). On close/error:
+
 - Reconnect with exponential backoff: 1s, 2s, 4s, 8s, capped at 30s
 - Reset backoff on successful connection
 - Log reconnection attempts at debug level, successful reconnect at info level
@@ -67,13 +70,24 @@ WebSocket drops are expected (network blips, container restarts). On close/error
 `sendMessage(jid, text)` sends via `POST {SIGNAL_API_URL}/v2/send`:
 
 For 1:1 (`sig:{phone}`):
+
 ```json
-{ "number": "{SIGNAL_PHONE_NUMBER}", "recipients": ["{phone}"], "message": "{text}" }
+{
+  "number": "{SIGNAL_PHONE_NUMBER}",
+  "recipients": ["{phone}"],
+  "message": "{text}"
+}
 ```
 
 For groups (`sig:group:{groupId}`):
+
 ```json
-{ "number": "{SIGNAL_PHONE_NUMBER}", "recipients": [], "message": "{text}", "base64_group": "{groupId}" }
+{
+  "number": "{SIGNAL_PHONE_NUMBER}",
+  "recipients": [],
+  "message": "{text}",
+  "base64_group": "{groupId}"
+}
 ```
 
 Messages over 4096 characters are split into chunks (consistent with Telegram channel behavior).
@@ -85,6 +99,7 @@ Messages over 4096 characters are split into chunks (consistent with Telegram ch
 ### Chat ID Discovery
 
 Unlike Telegram (which has a `/chatid` bot command), Signal doesn't support bot commands. Instead, the skill setup phase will:
+
 1. Tell the user to send a test message from Signal
 2. Read the logs to find the JID
 3. Or query the REST API: `GET /v1/groups/{number}` to list groups with their IDs
@@ -92,6 +107,7 @@ Unlike Telegram (which has a `/chatid` bot command), Signal doesn't support bot 
 ## Tests: `src/channels/signal.test.ts`
 
 Unit tests with mocked WebSocket and HTTP:
+
 - Factory returns `null` when env vars missing
 - Factory returns `SignalChannel` when env vars present
 - `ownsJid` returns true for `sig:` prefixed JIDs
@@ -106,16 +122,20 @@ Unit tests with mocked WebSocket and HTTP:
 Follows the same pattern as `/add-telegram`:
 
 ### Phase 1: Pre-flight
+
 - Check if `src/channels/signal.ts` exists (skip to setup if so)
 
 ### Phase 2: Apply Code Changes
+
 - Add git remote for `nanoclaw-signal` repo
 - Merge the skill branch (brings in `signal.ts`, `signal.test.ts`, barrel import, env example)
 - `npm install && npm run build`
 - Run signal channel tests
 
 ### Phase 3: Docker Setup
+
 Guide the user through:
+
 1. Pull the Docker image: `docker pull bbernhard/signal-cli-rest-api`
 2. Start the container:
    ```bash
@@ -132,17 +152,20 @@ Guide the user through:
    Or provide the link URL for the user to generate a QR code and scan with Signal app.
 
 ### Phase 4: Configure Environment
+
 - Ask for phone number
 - Add `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER` to `.env`
 - Sync to `data/env/env`
 - Build and restart
 
 ### Phase 5: Registration
+
 - Guide user to send a test message
 - Read JID from logs or query groups API
 - Register via `npx tsx setup/index.ts --step register` with `--channel signal`
 
 ### Phase 6: Verify
+
 - User sends a message, bot should respond
 - Check logs if issues
 

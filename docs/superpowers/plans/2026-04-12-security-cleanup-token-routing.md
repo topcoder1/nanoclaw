@@ -12,11 +12,11 @@
 
 ## File Map
 
-| File | Changes |
-|------|---------|
-| `src/container-runner.ts` | Tasks 1, 3 — env-file secrets, daily cost reset |
+| File                           | Changes                                                 |
+| ------------------------------ | ------------------------------------------------------- |
+| `src/container-runner.ts`      | Tasks 1, 3 — env-file secrets, daily cost reset         |
 | `src/container-runner.test.ts` | Tasks 1, 3 — test env-file generation, test daily reset |
-| `src/types.ts` | Task 2 — remove `model`, `maxThinkingTokens` |
+| `src/types.ts`                 | Task 2 — remove `model`, `maxThinkingTokens`            |
 
 ---
 
@@ -27,6 +27,7 @@
 **Fix:** Write all `-e` env vars to a temporary file, pass `--env-file /path/to/tmpfile` instead. Delete the file after container starts.
 
 **Files:**
+
 - Modify: `src/container-runner.ts:501-605` (`buildContainerArgs`)
 - Modify: `src/container-runner.ts:640-705` (`spawnContainerWithRetry` — cleanup tmpfile)
 - Test: `src/container-runner.test.ts`
@@ -97,7 +98,11 @@ async function buildContainerArgs(
   containerName: string,
   isMain: boolean,
   agentIdentifier?: string,
-): Promise<{ args: string[]; oauthToken: string | null; envFilePath: string | null }> {
+): Promise<{
+  args: string[];
+  oauthToken: string | null;
+  envFilePath: string | null;
+}> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Collect secret env vars in a tmpfile instead of -e flags.
@@ -119,10 +124,12 @@ async function buildContainerArgs(
   args.push('-e', `SUPERPILOT_MCP_URL=${SUPERPILOT_MCP_URL}`);
   args.push('-e', `SUPERPILOT_API_URL=${SUPERPILOT_API_URL}`);
 
-  const discordToken = process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
+  const discordToken =
+    process.env.DISCORD_BOT_TOKEN || containerEnv.DISCORD_BOT_TOKEN;
   if (discordToken) secretEnv.push(`DISCORD_BOT_TOKEN=${discordToken}`);
 
-  const serviceToken = process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
+  const serviceToken =
+    process.env.NANOCLAW_SERVICE_TOKEN || containerEnv.NANOCLAW_SERVICE_TOKEN;
   if (serviceToken) secretEnv.push(`NANOCLAW_SERVICE_TOKEN=${serviceToken}`);
 
   const ghToken = process.env.GH_TOKEN || containerEnv.GH_TOKEN;
@@ -166,7 +173,10 @@ async function buildContainerArgs(
   // Write secrets to a tmpfile and pass --env-file
   let envFilePath: string | null = null;
   if (secretEnv.length > 0) {
-    envFilePath = path.join(os.tmpdir(), `nanoclaw-env-${containerName}-${Date.now()}`);
+    envFilePath = path.join(
+      os.tmpdir(),
+      `nanoclaw-env-${containerName}-${Date.now()}`,
+    );
     fs.writeFileSync(envFilePath, secretEnv.join('\n') + '\n', { mode: 0o600 });
     args.push('--env-file', envFilePath);
   }
@@ -182,7 +192,11 @@ async function buildContainerArgs(
 ```typescript
 // After container spawn completes (in the close handler or after spawnContainer returns):
 if (envFilePath) {
-  try { fs.unlinkSync(envFilePath); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(envFilePath);
+  } catch {
+    /* ignore */
+  }
 }
 ```
 
@@ -232,6 +246,7 @@ and passed via --env-file. File is deleted after container starts."
 **Problem:** `RegisteredGroup.model` and `RegisteredGroup.maxThinkingTokens` are defined in `types.ts` but never read anywhere in the codebase. They create false expectations — users may set them thinking they work.
 
 **Files:**
+
 - Modify: `src/types.ts:44-45`
 - Test: `src/container-runner.test.ts` (verify no references)
 
@@ -289,6 +304,7 @@ avoid false expectations — users setting them got no effect."
 **Fix:** Add a `periodStart` timestamp. When the current time exceeds `periodStart + 24h`, reset all token costs to zero.
 
 **Files:**
+
 - Modify: `src/container-runner.ts:354-460`
 - Test: `src/container-runner.test.ts`
 

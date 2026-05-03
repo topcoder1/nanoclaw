@@ -43,6 +43,7 @@ git merge signal/main || {
 ```
 
 This merges in:
+
 - `src/channels/signal.ts` (SignalChannel class with self-registration via `registerChannel`)
 - `src/channels/signal.test.ts` (unit tests with mocked WebSocket and fetch)
 - `import './signal.js'` appended to the channel barrel file `src/channels/index.ts`
@@ -169,6 +170,7 @@ npx tsx setup/index.ts --step register -- --jid "sig:<id>" --name "<chat-name>" 
 Tell the user:
 
 > Send a message from Signal:
+>
 > - For main chat: Any message works
 > - For non-main: Include `@Andy` (or your assistant's trigger) in the message
 >
@@ -185,6 +187,7 @@ tail -f logs/nanoclaw.log | grep -i signal
 ### Bot not responding
 
 Check:
+
 1. Docker container is running: `docker ps | grep signal-api`
 2. `SIGNAL_API_URL` and `SIGNAL_PHONE_NUMBER` are set in `.env` AND synced to `data/env/env`
 3. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'sig:%'"`
@@ -202,12 +205,14 @@ If it fails, check Docker: `docker logs signal-api`
 ### Device linking expired
 
 Signal device links expire after ~60 seconds. If linking failed:
+
 1. Restart the container: `docker restart signal-api`
 2. Try the QR code link again
 
 ## After Setup
 
 If running `npm run dev` while the service is active:
+
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist

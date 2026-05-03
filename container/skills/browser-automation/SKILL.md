@@ -42,30 +42,36 @@ Use for unknown sites, complex forms (custom dropdowns, date pickers, drag-and-d
 Write a JSON file to `/workspace/ipc/tasks/` with:
 
 **browser_act** — perform an action described in natural language:
+
 ```json
 { "type": "browser_act", "instruction": "click the login button" }
 ```
 
 **browser_extract** — extract structured data:
+
 ```json
 { "type": "browser_extract", "instruction": "get all product names and prices" }
 ```
 
 **browser_observe** — understand what's on the page:
+
 ```json
-{ "type": "browser_observe", "instruction": "what form fields are on this page?" }
+{
+  "type": "browser_observe",
+  "instruction": "what form fields are on this page?"
+}
 ```
 
 ## When to Use Which
 
-| Situation | Use |
-|-----------|-----|
+| Situation                                        | Use            |
+| ------------------------------------------------ | -------------- |
 | You can read the snapshot and know what to click | Playwright MCP |
-| Standard HTML forms with labels | Playwright MCP |
-| File uploads, tab management | Playwright MCP |
-| Custom dropdowns, date pickers, rich UI | Stagehand IPC |
-| Site you've never seen, need to figure it out | Stagehand IPC |
-| Extracting structured data from messy pages | Stagehand IPC |
-| Cost-sensitive task | Playwright MCP |
+| Standard HTML forms with labels                  | Playwright MCP |
+| File uploads, tab management                     | Playwright MCP |
+| Custom dropdowns, date pickers, rich UI          | Stagehand IPC  |
+| Site you've never seen, need to figure it out    | Stagehand IPC  |
+| Extracting structured data from messy pages      | Stagehand IPC  |
+| Cost-sensitive task                              | Playwright MCP |
 
 Both layers share the same browser session — you can mix them freely within a task.

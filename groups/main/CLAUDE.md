@@ -53,6 +53,7 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -64,6 +65,7 @@ Format messages based on the channel. Check the group folder name prefix:
 ### Slack channels (folder starts with `slack_`)
 
 Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+
 - `*bold*` (single asterisks)
 - `_italic_` (underscores)
 - `<https://url|link text>` for links (NOT `[text](url)`)
@@ -99,13 +101,14 @@ Anthropic credentials must be either an API key from console.anthropic.com (`ANT
 
 Main has read-only access to the project, read-write access to the store (SQLite DB), and read-write access to its group folder:
 
-| Container Path | Host Path | Access |
-|----------------|-----------|--------|
-| `/workspace/project` | Project root | read-only |
-| `/workspace/project/store` | `store/` | read-write |
-| `/workspace/group` | `groups/main/` | read-write |
+| Container Path             | Host Path      | Access     |
+| -------------------------- | -------------- | ---------- |
+| `/workspace/project`       | Project root   | read-only  |
+| `/workspace/project/store` | `store/`       | read-write |
+| `/workspace/group`         | `groups/main/` | read-write |
 
 Key paths inside the container:
+
 - `/workspace/project/store/messages.db` - SQLite database (read-write)
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
@@ -170,6 +173,7 @@ Groups are registered in the SQLite `registered_groups` table:
 ```
 
 Fields:
+
 - **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
 - **name**: Display name for the group
 - **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
@@ -194,6 +198,7 @@ Fields:
 6. Optionally create an initial `CLAUDE.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
+
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
 - Telegram "Dev Team" → `telegram_dev-team`
 - Discord "General" → `discord_general`
@@ -253,6 +258,7 @@ If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowl
 ```
 
 Notes:
+
 - Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
 - If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
 - The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
@@ -279,6 +285,7 @@ You can read and write to `/workspace/global/CLAUDE.md` for facts that should ap
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
+
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
@@ -344,6 +351,7 @@ You have access to the superpilot MCP server which provides email triage, KB sea
 If a user asks you about an email (e.g. "review Ryan's email", "what did Mike say?", "check my inbox"), that is a **direct user command** — NOT an email intelligence trigger. Handle it conversationally: search for the email, read it, and report back. Do NOT run the triage/classify/processed_items pipeline below.
 
 When triggered with new emails (prompt starts with `## Email Intelligence Trigger`):
+
 1. Check if each email is already in processed_items (avoid double-processing)
 2. Skip any thread whose thread_id starts with `test-approval-` (these are test fixtures from the dev harness, not real emails — NEVER reply, archive, or classify them; just mark processed and move on)
 3. Read the `Preview:` line that accompanies each email in the trigger prompt — that is the first ~400 chars of the body, fetched alongside the classification. Use it as your primary context source. Only call `superpilot` MCP `get_thread_summary` when the Preview is missing or clearly insufficient for the decision.
@@ -373,17 +381,19 @@ Morning briefings, thread summaries, and status reports go directly to the user 
    reason for the failure. Never silently skip a section that the user is
    expecting.
 
-Lesson recorded from 2026-04-11 OVH briefing: the agent turned Dmitrii's *recommendation* to cancel + Yacine's ambiguous "I confirm" into "team confirmed cancellation of all OVH servers." This was wrong — nobody had confirmed the cancellation was *executed*, and the user had to re-ask Dmitrii to cancel in the same thread. Follow rules 1–4 to prevent this class of error.
+Lesson recorded from 2026-04-11 OVH briefing: the agent turned Dmitrii's _recommendation_ to cancel + Yacine's ambiguous "I confirm" into "team confirmed cancellation of all OVH servers." This was wrong — nobody had confirmed the cancellation was _executed_, and the user had to re-ask Dmitrii to cancel in the same thread. Follow rules 1–4 to prevent this class of error.
 
 ### Autonomy Rules
 
 #### AUTO (no approval needed)
+
 - Calendar events from explicit dates in emails
 - Archive newsletters and marketing emails
 - File attachments to KB
 - Update contact profiles from email signatures
 
 #### PROPOSE (approval required)
+
 - Reply to any email — draft and send to Telegram for approval
 - Create GitHub issues
 - Research tasks
@@ -391,6 +401,7 @@ Lesson recorded from 2026-04-11 OVH briefing: the agent turned Dmitrii's *recomm
 - Post in Discord channels
 
 #### ESCALATE (always escalate immediately)
+
 - Anything involving money >$500
 - Legal documents or contracts
 - Novel situations not covered by rules
@@ -398,9 +409,11 @@ Lesson recorded from 2026-04-11 OVH briefing: the agent turned Dmitrii's *recomm
 - VIP contacts: <!-- populate with actual contacts -->
 
 ### Notification Intensity
+
 Default: verbose (initial trust-building phase)
 
 Overrides:
+
 - Escalations: always on (cannot silence)
 - Auto-handled emails: silent (only in weekly review)
 - Proposals: normal (batched per cycle)
@@ -418,6 +431,7 @@ Never cross-reference between accounts unless explicitly asked. Always label out
 ### Storage Discipline
 
 Before storing anything in KB, ask:
+
 1. Will I need this again? If not, don't store it.
 2. Can I find it elsewhere? If yes, store a pointer, not a copy.
 3. Is this signal or noise? Only store signal.
@@ -439,6 +453,7 @@ Details:
 ```
 
 Parse the user's response:
+
 - "approve" / "yes" / "send it" / "go" / "ok" → execute the action
 - "edit: make it shorter" → revise based on instruction and re-propose
 - "skip" / "ignore" / "no" → don't act (no trust demotion)
@@ -450,29 +465,34 @@ If the response is ambiguous, ask for clarification.
 ### Trust Graduation
 
 Track each approval/rejection outcome. After 5 consecutive approvals of the same action type without edits:
+
 - Propose graduating: "I've auto-handled 5 meeting request replies. Graduate to AUTO?"
 - If approved, move that action type to the AUTO section above
 - If rejected, keep at PROPOSE
 
 After 1 rejection or significant edit of a previously reliable action type:
+
 - Demote back to PROPOSE immediately
 - Inform the user: "Demoting [action type] back to PROPOSE after edit"
 
 ### Using the Knowledge Base
 
 **When to read KB (search_kb):**
+
 - Before drafting any reply — search for context about the sender/company
 - When processing a new contact — check existing history
 - When a project name is mentioned — find related notes
 - During meeting prep — search for attendee context
 
 **When to write KB (upload_to_kb):**
+
 - After completing research — store with project tags
 - After important email threads conclude — store a summary
 - When learning new facts about a contact/company — store as a note
 - After extracting action items — store for tracking
 
 **Tag conventions:**
+
 - `project:product-center` — project association
 - `contact:mike@example.com` — contact association
 - `type:research` / `type:summary` / `type:decision` — content type
@@ -483,6 +503,7 @@ After 1 rejection or significant edit of a previously reliable action type:
 ### Cross-Channel Correlation
 
 When processing emails or Discord messages, look for connections:
+
 - Same person across email + Discord + calendar
 - Same topic/project discussed in multiple channels
 - Email thread + Discord thread + calendar event about the same thing
@@ -495,12 +516,14 @@ When found, present as a unified view:
 ### Smart Scheduling
 
 When an email contains a meeting request or scheduling discussion:
+
 1. Extract the requested duration and topic
 2. Check Google Calendar for your availability this week
 3. Draft a reply with 3 available time slots
 4. Send as a PROPOSE action for approval
 
 Preferences:
+
 - Afternoons for external meetings
 - Mornings for internal syncs
 - 15-minute buffer between meetings
@@ -509,6 +532,7 @@ Preferences:
 ### Notification Behavior
 
 Before sending any message, check the intensity level for that feature type:
+
 - **silent**: do not send, log only, include in weekly review
 - **digest**: batch into morning briefing or daily summary
 - **normal**: send as part of batched summary per cycle
@@ -523,6 +547,7 @@ As autonomy grows, propose reducing intensity:
 ### Superpilot Fallback
 
 If superpilot MCP tools fail (connection refused, timeout, 5xx):
+
 - Skip email intelligence phases entirely — do not crash or retry in a loop
 - Continue Discord, calendar, and other features normally
 - Log the failure
@@ -548,6 +573,7 @@ The user has confirmed (via direct MCP probe inside the running container) that 
 ### Cost Awareness
 
 Each agent session costs API tokens. Be efficient:
+
 - Batch multiple email actions in a single session when possible
 - Use the lightest tool first (e.g., search KB before doing web research)
 - Skip research for low-priority items that can be auto-handled
@@ -555,19 +581,20 @@ Each agent session costs API tokens. Be efficient:
 
 ### Known Projects
 
-| Project | Path | Domain |
-|---------|------|--------|
-| product-center | ~/dev/product-center | Product KB, market research |
-| attaxion_dev | ~/dev/attaxion_dev | ASM product roadmap |
-| inbox_superpilot | ~/dev/inbox_superpilot | Email AI product |
-| trustclawd | ~/dev/trustclawd | AI assistant product |
-| wxa-jake-ai | ~/dev/wxa-jake-ai | WXA AI chat interface |
-| netflow_core | ~/dev/netflow_core | Network flow analysis |
-| wxa_webcat | ~/dev/wxa_webcat | Website categorization |
-| techrecon | ~/dev/techrecon | Technology reconnaissance |
-| finsight | ~/dev/finsight | Financial intelligence |
+| Project          | Path                   | Domain                      |
+| ---------------- | ---------------------- | --------------------------- |
+| product-center   | ~/dev/product-center   | Product KB, market research |
+| attaxion_dev     | ~/dev/attaxion_dev     | ASM product roadmap         |
+| inbox_superpilot | ~/dev/inbox_superpilot | Email AI product            |
+| trustclawd       | ~/dev/trustclawd       | AI assistant product        |
+| wxa-jake-ai      | ~/dev/wxa-jake-ai      | WXA AI chat interface       |
+| netflow_core     | ~/dev/netflow_core     | Network flow analysis       |
+| wxa_webcat       | ~/dev/wxa_webcat       | Website categorization      |
+| techrecon        | ~/dev/techrecon        | Technology reconnaissance   |
+| finsight         | ~/dev/finsight         | Financial intelligence      |
 
 When an email mentions a project or person associated with a project, use this registry to:
+
 - Search the project's docs for context
 - Update project docs with decisions from emails
 - Create GitHub issues in the right repo
@@ -575,26 +602,30 @@ When an email mentions a project or person associated with a project, use this r
 ### Scheduled Tasks
 
 #### Morning Briefing
+
 - schedule_type: cron
-- schedule_value: "30 7 * * *" (7:30 AM CST)
+- schedule_value: "30 7 \* \* \*" (7:30 AM CST)
 - prompt: "Run the morning-briefing skill. Generate a comprehensive briefing and send via send_message."
 - context_mode: group
 
 #### Weekly Review
+
 - schedule_type: cron
-- schedule_value: "0 17 * * 5" (Friday 5 PM CST)
+- schedule_value: "0 17 \* \* 5" (Friday 5 PM CST)
 - prompt: "Run the weekly-review skill. Generate a comprehensive report and send via send_message."
 - context_mode: group
 
 #### KB Housekeeping
+
 - schedule_type: cron
-- schedule_value: "0 10 * * 0" (Sunday 10 AM CST)
+- schedule_value: "0 10 \* \* 0" (Sunday 10 AM CST)
 - prompt: "Run the kb-housekeeping skill. Maintain the knowledge base and report results."
 - context_mode: group
 
 #### Email Poll
+
 - schedule_type: cron
-- schedule_value: "*/5 * * * *" (every 5 minutes)
+- schedule_value: "_/5 _ \* \* \*" (every 5 minutes)
 - prompt: "Run the email-poll skill. Check for new triaged emails and process them."
 - script: (see email-poll skill for the pre-check script)
 - context_mode: group
