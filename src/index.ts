@@ -89,10 +89,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { isBudgetExceeded } from './budget.js';
-import {
-  formatApprovalPrompt,
-  handlePotentialApprovalReply,
-} from './trust-approval-handler.js';
+import { handlePotentialApprovalReply } from './trust-approval-handler.js';
 import { parseTrustCommand, executeTrustCommand } from './trust-commands.js';
 import {
   initKnowledgeStore,
@@ -222,12 +219,7 @@ import {
   handleConfigCommand,
   handleSmokeTest,
 } from './chat-commands.js';
-import type {
-  MessageInboundEvent,
-  MessageOutboundEvent,
-  SystemStartupEvent,
-  ProactiveSuggestionEvent,
-} from './events.js';
+import type { ProactiveSuggestionEvent } from './events.js';
 import { extractCandidates } from './memory/shared/extractor.js';
 import { runVerifierSweep } from './memory/shared/verifier.js';
 import { regenerateIndex } from './memory/shared/store.js';
@@ -2785,6 +2777,10 @@ async function main(): Promise<void> {
               'Email trigger failed with transient upstream error — alert suppressed, awaiting retry',
             );
           } else {
+            logger.error(
+              { chatJid, taskId, error: result.error },
+              'Email intelligence trigger alert firing — non-transient error',
+            );
             const telegramJid = Object.keys(registeredGroups).find((jid) =>
               jid.startsWith('tg:'),
             );
@@ -2977,7 +2973,7 @@ async function main(): Promise<void> {
       }
       await channel.sendMessage(jid, text);
     },
-    enqueueTask: (chatJid, prompt, groupFolder) => {
+    enqueueTask: (chatJid, prompt, _groupFolder) => {
       const taskId = `event-router-${Date.now()}`;
       const group = registeredGroups[chatJid];
       if (!group) return;

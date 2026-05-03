@@ -533,7 +533,6 @@ function isRateLimitError(errorMsg: string): boolean {
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-  isMain: boolean,
   agentIdentifier?: string,
 ): Promise<{
   args: string[];
@@ -798,12 +797,7 @@ async function spawnContainerWithRetry(
     args: containerArgs,
     oauthToken: selectedToken,
     envFilePath,
-  } = await buildContainerArgs(
-    mounts,
-    containerName,
-    input.isMain,
-    agentIdentifier,
-  );
+  } = await buildContainerArgs(mounts, containerName, agentIdentifier);
 
   let result: ContainerOutput;
   try {
@@ -853,12 +847,7 @@ async function spawnContainerWithRetry(
       args: retryArgs,
       oauthToken: retryToken,
       envFilePath: retryEnvFilePath,
-    } = await buildContainerArgs(
-      mounts,
-      retryName,
-      input.isMain,
-      agentIdentifier,
-    );
+    } = await buildContainerArgs(mounts, retryName, agentIdentifier);
 
     let retryResult: ContainerOutput;
     try {
@@ -985,7 +974,20 @@ async function spawnContainer(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            // .catch() is critical: without it, an onOutput throw leaves
+            // outputChain in a rejected state forever, so every subsequent
+            // outputChain.then(() => resolve(...)) below is skipped and the
+            // containerPromise hangs until the hard cap. We log+swallow so
+            // the chain stays fulfilled and the runAgent error path can
+            // surface the failure normally.
+            outputChain = outputChain
+              .then(() => onOutput(parsed))
+              .catch((err) => {
+                logger.error(
+                  { group: group.name, err: String(err) },
+                  'onOutput callback threw — recovering chain so resolve can fire',
+                );
+              });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -1063,7 +1065,7 @@ async function spawnContainer(
     };
 
     const checkInterval = Math.min(timeoutMs / 10, 60_000);
-    let timeout: NodeJS.Timeout = setInterval(() => {
+    const timeout: NodeJS.Timeout = setInterval(() => {
       if (timedOut) return;
       const now = Date.now();
       const totalRunning = now - startTime;
