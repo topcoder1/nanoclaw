@@ -11,6 +11,7 @@ Makes NanoClaw proactive by adding event routing rules, a daily digest, and a "w
 ## Tasks
 
 ### Task 1: Event Routing Rules Engine (`src/event-router.ts`)
+
 - Load rules from `groups/{name}/events.json`
 - Match events against rules (source, glob/regex patterns on payload fields)
 - Execute actions: `notify` (send message to channel), `spawn_task` (enqueue via executor pool)
@@ -18,18 +19,21 @@ Makes NanoClaw proactive by adding event routing rules, a daily digest, and a "w
 - Tests in `src/__tests__/event-router.test.ts`
 
 ### Task 2: Wire Event Sources
+
 - `src/email-sse.ts` — emit structured events to event bus when email triggers fire
 - Verify task-scheduler already emits events (it doesn't — wire it)
 - Define `email.received` and `task.scheduled.complete` event types
 
 ### Task 3: Webhook Endpoint
+
 - Add POST `/webhook/:source` to the trust gateway HTTP server
 - Accept JSON payload, emit as event on the event bus
 - Authenticate via `x-webhook-secret` header matching `WEBHOOK_SECRET` from env
 - New event type: `webhook.received`
 
 ### Task 4: Daily Digest (`src/daily-digest.ts`)
-- Register as a cron task (configurable, default "0 8 * * *" in configured timezone)
+
+- Register as a cron task (configurable, default "0 8 \* \* \*" in configured timezone)
 - Query event_log for events since last digest
 - Query pending trust approvals
 - Format a concise text brief (no LLM call for v1)
@@ -37,6 +41,7 @@ Makes NanoClaw proactive by adding event routing rules, a daily digest, and a "w
 - Tests
 
 ### Task 5: "What Did I Miss?" Command
+
 - Add to `src/trust-commands.ts` as an assistant command
 - Detect "what did I miss" (and variants) in trigger-stripped messages
 - Query event_log since user's last message timestamp
@@ -44,15 +49,16 @@ Makes NanoClaw proactive by adding event routing rules, a daily digest, and a "w
 - Return as intercepted response (like trust commands)
 
 ### Task 6: Integration + Verification
+
 - Run `npx vitest run` and verify all tests pass
 - Verify TypeScript compilation with `npm run build`
 
 ## Event Types Added
 
-| Event Type | Source | Description |
-|-----------|--------|-------------|
-| `email.received` | `email-sse` | New triaged email batch |
-| `webhook.received` | `webhook` | External webhook payload |
+| Event Type         | Source      | Description              |
+| ------------------ | ----------- | ------------------------ |
+| `email.received`   | `email-sse` | New triaged email batch  |
+| `webhook.received` | `webhook`   | External webhook payload |
 
 ## Files Changed
 

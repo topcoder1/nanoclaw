@@ -13,6 +13,7 @@
 ### Task 1: Fix Account Propagation in Expand/Collapse Cycle (Bugs 1 + 2)
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Modify: `src/__tests__/callback-router.test.ts`
 
@@ -59,6 +60,7 @@ Expected: FAIL — collapse doesn't thread account through buttons
 - [ ] **Step 2: Fix expand handler — pass account to Collapse callback**
 
 In `src/callback-router.ts`, change line 159:
+
 ```typescript
 // Before:
 callbackData: `collapse:${entityId}`,
@@ -123,6 +125,7 @@ git commit -m "fix: thread account through expand/collapse cycle (bugs 1+2)"
 ### Task 2: Add `getMessageMeta()` to GmailOps (Bug 3 + Bug 6 foundation)
 
 **Files:**
+
 - Modify: `src/gmail-ops.ts`
 - Modify: `src/channels/gmail.ts`
 - Create: `src/__tests__/gmail-get-message-meta.test.ts`
@@ -143,16 +146,19 @@ export interface EmailMeta {
 ```
 
 Add to `GmailOps` interface:
+
 ```typescript
 getMessageMeta(account: string, messageId: string): Promise<EmailMeta | null>;
 ```
 
 Add to `GmailOpsProvider` interface:
+
 ```typescript
 getMessageMeta(messageId: string): Promise<EmailMeta | null>;
 ```
 
 Add router method in `GmailOpsRouter`:
+
 ```typescript
 async getMessageMeta(account: string, messageId: string): Promise<EmailMeta | null> {
   return this.getChannel(account).getMessageMeta(messageId);
@@ -167,7 +173,9 @@ Create `src/__tests__/gmail-get-message-meta.test.ts`:
 import { describe, it, expect, vi } from 'vitest';
 import { GmailOpsRouter, type GmailOpsProvider } from '../gmail-ops.js';
 
-function mockProvider(overrides: Partial<GmailOpsProvider> = {}): GmailOpsProvider {
+function mockProvider(
+  overrides: Partial<GmailOpsProvider> = {},
+): GmailOpsProvider {
   return {
     archiveThread: vi.fn(),
     listRecentDrafts: vi.fn().mockResolvedValue([]),
@@ -261,6 +269,7 @@ git commit -m "feat: add getMessageMeta() to GmailOps for email metadata extract
 ### Task 3: Enrich Email Cache with Metadata (Bug 6)
 
 **Files:**
+
 - Modify: `src/email-preview.ts`
 - Create: `src/__tests__/email-preview.test.ts`
 
@@ -397,6 +406,7 @@ git commit -m "feat: extend email cache to store metadata alongside body"
 ### Task 4: Wire Mini App to Show Real Metadata (Bug 3 completion)
 
 **Files:**
+
 - Modify: `src/mini-app/server.ts`
 - Modify: `src/__tests__/mini-app-routes.test.ts`
 
@@ -463,7 +473,10 @@ app.get('/email/:emailId', async (req, res) => {
         body = await opts.gmailOps.getMessageBody(account, emailId);
         if (body) cacheEmailBody(emailId, body);
       } catch (err) {
-        logger.warn({ emailId, err }, 'Failed to fetch email body for Mini App');
+        logger.warn(
+          { emailId, err },
+          'Failed to fetch email body for Mini App',
+        );
       }
     }
     meta = {
@@ -509,6 +522,7 @@ git commit -m "feat: wire mini app to display real email metadata"
 ### Task 5: Sandbox Email Body in Mini App (Bug 4 — XSS)
 
 **Files:**
+
 - Modify: `src/mini-app/templates/email-full.ts`
 - Modify: `src/__tests__/mini-app-routes.test.ts`
 
@@ -519,9 +533,9 @@ Add to `src/__tests__/mini-app-routes.test.ts`:
 ```typescript
 it('GET /email/:emailId does not render raw script tags in body', async () => {
   const { app, mockGmailOps } = setup();
-  mockGmailOps.getMessageBody = vi.fn().mockResolvedValue(
-    '<script>alert("xss")</script><p>Hello</p>'
-  );
+  mockGmailOps.getMessageBody = vi
+    .fn()
+    .mockResolvedValue('<script>alert("xss")</script><p>Hello</p>');
   const res = await request(app).get('/email/xss1?account=personal');
   expect(res.text).not.toContain('<script>alert');
   expect(res.text).toMatch(/sandbox/i);
@@ -534,10 +548,13 @@ Expected: FAIL — body currently injected raw
 - [ ] **Step 2: Render body inside sandboxed iframe**
 
 In `src/mini-app/templates/email-full.ts`, replace:
+
 ```html
 <div class="body">${data.body}</div>
 ```
+
 with:
+
 ```html
 <div class="body">
   <iframe
@@ -568,6 +585,7 @@ git commit -m "fix: sandbox email body in iframe to prevent XSS (bug 4)"
 ### Task 6: Wire Mini App Archive and Open in Gmail Buttons (Bug 5)
 
 **Files:**
+
 - Modify: `src/mini-app/templates/email-full.ts`
 - Modify: `src/mini-app/server.ts`
 - Modify: `src/__tests__/mini-app-routes.test.ts`
@@ -597,7 +615,10 @@ it('POST /api/email/:emailId/archive calls gmailOps.archiveThread', async () => 
     .post('/api/email/msg100/archive')
     .send({ account: 'personal', threadId: 'thread100' });
   expect(res.status).toBe(200);
-  expect(mockGmailOps.archiveThread).toHaveBeenCalledWith('personal', 'thread100');
+  expect(mockGmailOps.archiveThread).toHaveBeenCalledWith(
+    'personal',
+    'thread100',
+  );
 });
 ```
 
@@ -625,45 +646,64 @@ export interface EmailFullData {
 - [ ] **Step 3: Replace dead buttons with functional elements**
 
 In the template, replace:
+
 ```html
 <button class="btn" style="background:#276749;color:#c6f6d5;">Archive</button>
 <button class="btn">Open in Gmail</button>
 ```
+
 with:
+
 ```html
-<button class="btn" style="background:#276749;color:#c6f6d5;"
+<button
+  class="btn"
+  style="background:#276749;color:#c6f6d5;"
   data-email-id="${escapeHtml(data.emailId || '')}"
   data-account="${escapeHtml(data.account || '')}"
-  onclick="archiveEmail(this)">Archive</button>
-<a class="btn" href="https://mail.google.com/mail/u/0/#inbox/${escapeHtml(data.emailId || '')}"
-  target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;">Open in Gmail</a>
+  onclick="archiveEmail(this)"
+>
+  Archive
+</button>
+<a
+  class="btn"
+  href="https://mail.google.com/mail/u/0/#inbox/${escapeHtml(data.emailId || '')}"
+  target="_blank"
+  rel="noopener"
+  style="text-decoration:none;display:inline-block;"
+  >Open in Gmail</a
+>
 ```
 
 Add inline JS for the Archive button:
+
 ```html
 <script>
-async function archiveEmail(btn) {
-  btn.disabled = true;
-  btn.textContent = 'Archiving...';
-  try {
-    const resp = await fetch('/api/email/' + btn.dataset.emailId + '/archive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: btn.dataset.account }),
-    });
-    if (resp.ok) {
-      btn.textContent = 'Archived';
-      btn.style.opacity = '0.5';
-      if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close();
-    } else {
+  async function archiveEmail(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Archiving...';
+    try {
+      const resp = await fetch(
+        '/api/email/' + btn.dataset.emailId + '/archive',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: btn.dataset.account }),
+        },
+      );
+      if (resp.ok) {
+        btn.textContent = 'Archived';
+        btn.style.opacity = '0.5';
+        if (window.Telegram && window.Telegram.WebApp)
+          window.Telegram.WebApp.close();
+      } else {
+        btn.textContent = 'Failed - Retry';
+        btn.disabled = false;
+      }
+    } catch (e) {
       btn.textContent = 'Failed - Retry';
       btn.disabled = false;
     }
-  } catch(e) {
-    btn.textContent = 'Failed - Retry';
-    btn.disabled = false;
   }
-}
 </script>
 ```
 
@@ -706,6 +746,7 @@ git commit -m "feat: wire Archive and Open in Gmail buttons in mini app (bug 5)"
 ### Task 7: Expand Handler Uses Enriched Cache via getMessageMeta
 
 **Files:**
+
 - Modify: `src/callback-router.ts`
 - Modify: `src/__tests__/callback-router.test.ts`
 
@@ -717,11 +758,17 @@ Add to `src/__tests__/callback-router.test.ts`:
 it('expand uses getMessageMeta when available to populate cache', async () => {
   const deps = makeDeps();
   (deps.gmailOps as any).getMessageMeta = vi.fn().mockResolvedValue({
-    subject: 'Test', from: 'a@b.com', to: 'c@d.com',
-    date: 'Mon', body: 'Full body text here',
+    subject: 'Test',
+    from: 'a@b.com',
+    to: 'c@d.com',
+    date: 'Mon',
+    body: 'Full body text here',
   });
   await handleCallback(makeQuery('expand:msg1:personal'), deps);
-  expect((deps.gmailOps as any).getMessageMeta).toHaveBeenCalledWith('personal', 'msg1');
+  expect((deps.gmailOps as any).getMessageMeta).toHaveBeenCalledWith(
+    'personal',
+    'msg1',
+  );
 });
 ```
 
@@ -771,15 +818,15 @@ git commit -m "feat: expand handler populates enriched cache via getMessageMeta"
 
 ### Summary of Changes by File
 
-| File | Changes |
-|------|---------|
-| `src/callback-router.ts` | Thread `account` through collapse callback; expand uses getMessageMeta |
-| `src/gmail-ops.ts` | Add `EmailMeta` type; add `getMessageMeta` to interfaces + router |
-| `src/channels/gmail.ts` | Implement `getMessageMeta` — extract headers from payload |
-| `src/email-preview.ts` | Add `cacheEmailMeta`, `getCachedEmailMeta`; extend cache entry type |
-| `src/mini-app/server.ts` | Use `getMessageMeta` for `/email/:emailId`; add `POST /api/email/:emailId/archive` |
-| `src/mini-app/templates/email-full.ts` | Sandbox body in iframe; wire buttons; add emailId/account to data |
-| `src/__tests__/callback-router.test.ts` | Tests for account propagation, getMessageMeta in expand |
-| `src/__tests__/mini-app-routes.test.ts` | Tests for metadata, XSS, archive API, Gmail link |
-| `src/__tests__/gmail-get-message-meta.test.ts` | New: tests for getMessageMeta |
-| `src/__tests__/email-preview.test.ts` | New: tests for enriched cache |
+| File                                           | Changes                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/callback-router.ts`                       | Thread `account` through collapse callback; expand uses getMessageMeta             |
+| `src/gmail-ops.ts`                             | Add `EmailMeta` type; add `getMessageMeta` to interfaces + router                  |
+| `src/channels/gmail.ts`                        | Implement `getMessageMeta` — extract headers from payload                          |
+| `src/email-preview.ts`                         | Add `cacheEmailMeta`, `getCachedEmailMeta`; extend cache entry type                |
+| `src/mini-app/server.ts`                       | Use `getMessageMeta` for `/email/:emailId`; add `POST /api/email/:emailId/archive` |
+| `src/mini-app/templates/email-full.ts`         | Sandbox body in iframe; wire buttons; add emailId/account to data                  |
+| `src/__tests__/callback-router.test.ts`        | Tests for account propagation, getMessageMeta in expand                            |
+| `src/__tests__/mini-app-routes.test.ts`        | Tests for metadata, XSS, archive API, Gmail link                                   |
+| `src/__tests__/gmail-get-message-meta.test.ts` | New: tests for getMessageMeta                                                      |
+| `src/__tests__/email-preview.test.ts`          | New: tests for enriched cache                                                      |

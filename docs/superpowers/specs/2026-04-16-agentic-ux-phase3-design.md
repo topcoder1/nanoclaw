@@ -54,6 +54,7 @@ Instructions:
 **Task priority:** `proactive` — lowest priority, never blocks interactive work or scheduled tasks.
 
 **Concurrency:** `evaluateEnrichment` blocks the draft watcher's poll loop until the task completes or times out. This is acceptable because:
+
 - Poll interval is 60s, timeout is 60s — worst case delays next poll by one cycle
 - `proactive` tasks only run when no interactive/scheduled work is pending
 - The draft watcher processes one draft at a time sequentially
@@ -82,6 +83,7 @@ if (clean) await onResult(clean);
 ```
 
 `formatOutbound` strips `<internal>` tags and normalizes confidence markers. It does NOT:
+
 - Classify the message category
 - Truncate email bodies
 - Attach action buttons (Expand, Archive)
@@ -115,7 +117,7 @@ onResult: async (text, meta) => {
   } else {
     await deps.sendMessage(agentJid, text);
   }
-}
+};
 ```
 
 ### 2.3 Channel Support
@@ -149,9 +151,14 @@ Use trigger context rather than text classification. The email trigger callback 
 ```typescript
 for (const email of triggerEmails) {
   const emailId = email.thread_id; // thread_id serves as emailId
-  archiveTracker.recordAction(emailId, email.thread_id, email.account, 'replied');
+  archiveTracker.recordAction(
+    emailId,
+    email.thread_id,
+    email.account,
+    'replied',
+  );
 
-  if (!meta.actions.some(a => a.callbackData?.startsWith('archive:'))) {
+  if (!meta.actions.some((a) => a.callbackData?.startsWith('archive:'))) {
     meta.actions.push({
       label: '🗄 Archive',
       callbackData: `archive:${emailId}`,
@@ -173,11 +180,11 @@ The `archiveTracker` already stores `email_id → (thread_id, account)` mappings
 
 All three changes converge in `src/index.ts`:
 
-| Change | Location | Files Modified |
-|--------|----------|---------------|
-| Draft enrichment executor | `evaluateEnrichment` callback (line 1342) | `src/index.ts` |
-| Email preview pipeline | `onOutput` in email trigger (line 1601) | `src/index.ts`, `src/ipc.ts` |
-| Archive buttons | Same `onOutput` callback | `src/index.ts` |
+| Change                    | Location                                  | Files Modified               |
+| ------------------------- | ----------------------------------------- | ---------------------------- |
+| Draft enrichment executor | `evaluateEnrichment` callback (line 1342) | `src/index.ts`               |
+| Email preview pipeline    | `onOutput` in email trigger (line 1601)   | `src/index.ts`, `src/ipc.ts` |
+| Archive buttons           | Same `onOutput` callback                  | `src/index.ts`               |
 
 ### 4.1 Data Flow
 

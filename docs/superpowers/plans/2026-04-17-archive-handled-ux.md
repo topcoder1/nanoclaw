@@ -7,13 +7,14 @@
 
 ## Scope
 
-| # | Task | Why | Size |
-|---|---|---|---|
-| 1 | `✓ Already handled` on action-detector cards (RSVP, forward-to-person) | Consistency with question-detector cards shipped in PR #12 | S |
-| 2 | Archive / Handled on pure FYI notifications and digest items | Biggest UX win — today FYI cards have no buttons at all | M |
-| 3 | Wire Handled clicks into the triage learning loop | Classifier learns which senders don't need surfacing; compounds over time | S |
+| #   | Task                                                                   | Why                                                                       | Size |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---- |
+| 1   | `✓ Already handled` on action-detector cards (RSVP, forward-to-person) | Consistency with question-detector cards shipped in PR #12                | S    |
+| 2   | Archive / Handled on pure FYI notifications and digest items           | Biggest UX win — today FYI cards have no buttons at all                   | M    |
+| 3   | Wire Handled clicks into the triage learning loop                      | Classifier learns which senders don't need surfacing; compounds over time | S    |
 
 Deliberately out of scope:
+
 - Changing Gmail archive behavior (user rule: no auto-archiving).
 - Adding snooze/defer to FYI cards (covered by existing `handleSnooze`).
 - Redesigning the digest format.
@@ -35,8 +36,8 @@ Add a second-row `✓ Already handled` button to each, emitting `answer:{aid}:ha
 
 ### Tests
 
-1. [src/__tests__/action-detector.test.ts](src/__tests__/action-detector.test.ts) — extend existing RSVP and forward tests to assert `actions[last].label === '✓ Already handled'` and `row === 1`.
-2. [src/__tests__/callback-router.test.ts](src/__tests__/callback-router.test.ts) — the `answer:q_abc:handled` test already covers the callback path; no new test needed.
+1. [src/**tests**/action-detector.test.ts](src/__tests__/action-detector.test.ts) — extend existing RSVP and forward tests to assert `actions[last].label === '✓ Already handled'` and `row === 1`.
+2. [src/**tests**/callback-router.test.ts](src/__tests__/callback-router.test.ts) — the `answer:q_abc:handled` test already covers the callback path; no new test needed.
 
 **Acceptance:** `npx vitest run src/__tests__/action-detector.test.ts` passes; Telegram smoke — trigger an RSVP-style agent message, verify 3 buttons render with Handled on row 2.
 
@@ -80,9 +81,9 @@ Go with **Option B**. Requires:
 
 ### Tests
 
-1. [src/__tests__/ipc.test.ts](src/__tests__/ipc.test.ts) or a new `ipc-fyi-card.test.ts` — assert `send_fyi_card` task invokes `sendMessageWithButtons` with the correct keyboard shape.
-2. [src/__tests__/callback-router.test.ts](src/__tests__/callback-router.test.ts) — `triage:archive:<id>` path already covered; add one test that verifies the keyboard is cleared after click (edit with `[]`).
-3. [src/__tests__/telegram-callback-matrix.test.ts](src/__tests__/telegram-callback-matrix.test.ts) — extend coverage matrix with the new `send_fyi_card` → click archive flow.
+1. [src/**tests**/ipc.test.ts](src/__tests__/ipc.test.ts) or a new `ipc-fyi-card.test.ts` — assert `send_fyi_card` task invokes `sendMessageWithButtons` with the correct keyboard shape.
+2. [src/**tests**/callback-router.test.ts](src/__tests__/callback-router.test.ts) — `triage:archive:<id>` path already covered; add one test that verifies the keyboard is cleared after click (edit with `[]`).
+3. [src/**tests**/telegram-callback-matrix.test.ts](src/__tests__/telegram-callback-matrix.test.ts) — extend coverage matrix with the new `send_fyi_card` → click archive flow.
 
 **Acceptance:** New FYI push arrives with `[✓ Archive] [✕ Dismiss]` row; click Archive → item transitions to `resolved`, keyboard clears, digest no longer re-surfaces it.
 
@@ -127,12 +128,12 @@ Each task lands as its own commit; PR bundles all three so reviewers see the ful
 
 ## Risks
 
-| Risk | Mitigation |
-|---|---|
-| Telegram inline keyboard limit (100 buttons total, row width constrained) | FYI cards only get 2 buttons; no scaling risk. |
-| Container agent doesn't always have `tracked_item_id` at FYI emit time | Fallback to text-only push; no degraded path for existing behavior. |
+| Risk                                                                               | Mitigation                                                                                                                              |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Telegram inline keyboard limit (100 buttons total, row width constrained)          | FYI cards only get 2 buttons; no scaling risk.                                                                                          |
+| Container agent doesn't always have `tracked_item_id` at FYI emit time             | Fallback to text-only push; no degraded path for existing behavior.                                                                     |
 | `triage:archive` callback already records positive example — double-recording risk | `handleTriageArchive` is idempotent; `recordExample` keys by `trackedItemId` so duplicate inserts are handled. Verify with a unit test. |
-| Button-only push on FYI conflicts with existing plain-text FYI pipeline | Keep both paths; agent picks `send_fyi_card` when `trackedItemId` is set, else plain text. |
+| Button-only push on FYI conflicts with existing plain-text FYI pipeline            | Keep both paths; agent picks `send_fyi_card` when `trackedItemId` is set, else plain text.                                              |
 
 ## Deferred / Not this round
 

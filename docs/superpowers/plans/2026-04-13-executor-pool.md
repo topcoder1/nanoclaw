@@ -16,17 +16,17 @@
 
 ## File Structure
 
-| File | Responsibility | Action |
-|------|---------------|--------|
-| `src/priority-queue.ts` | Three-level priority queue with per-group round-robin | Create |
-| `src/priority-queue.test.ts` | Unit tests for priority queue | Create |
-| `src/executor-pool.ts` | ExecutorPool (renamed + enhanced GroupQueue) | Create |
-| `src/executor-pool.test.ts` | Full unit test suite (ported + new tests) | Create |
-| `src/group-queue.ts` | Legacy file — kept as thin re-export shim | Modify |
-| `src/group-queue.test.ts` | Legacy tests — kept passing via re-export | Modify |
-| `src/events.ts` | Add warm pool event types | Modify |
-| `src/config.ts` | Add WARM_POOL_SIZE, WARM_POOL_IDLE_TIMEOUT | Modify |
-| `src/index.ts` | Import ExecutorPool instead of GroupQueue | Modify |
+| File                         | Responsibility                                        | Action |
+| ---------------------------- | ----------------------------------------------------- | ------ |
+| `src/priority-queue.ts`      | Three-level priority queue with per-group round-robin | Create |
+| `src/priority-queue.test.ts` | Unit tests for priority queue                         | Create |
+| `src/executor-pool.ts`       | ExecutorPool (renamed + enhanced GroupQueue)          | Create |
+| `src/executor-pool.test.ts`  | Full unit test suite (ported + new tests)             | Create |
+| `src/group-queue.ts`         | Legacy file — kept as thin re-export shim             | Modify |
+| `src/group-queue.test.ts`    | Legacy tests — kept passing via re-export             | Modify |
+| `src/events.ts`              | Add warm pool event types                             | Modify |
+| `src/config.ts`              | Add WARM_POOL_SIZE, WARM_POOL_IDLE_TIMEOUT            | Modify |
+| `src/index.ts`               | Import ExecutorPool instead of GroupQueue             | Modify |
 
 ---
 
@@ -35,6 +35,7 @@
 Write tests first, then implement. The priority queue is a pure data structure with no I/O.
 
 **Files:**
+
 - Create: `src/priority-queue.test.ts`
 - Create: `src/priority-queue.ts`
 
@@ -145,7 +146,11 @@ describe('PriorityQueue', () => {
 
 export type TaskPriority = 'interactive' | 'scheduled' | 'proactive';
 
-const PRIORITY_ORDER: TaskPriority[] = ['interactive', 'scheduled', 'proactive'];
+const PRIORITY_ORDER: TaskPriority[] = [
+  'interactive',
+  'scheduled',
+  'proactive',
+];
 
 interface Entry<T> {
   item: T;
@@ -170,7 +175,9 @@ interface DequeueResult<T> {
  * Within each level, groups are served in round-robin order so no single group
  * can starve others at the same priority level.
  */
-export class PriorityQueue<T extends { groupJid?: never } | { groupJid: never } | object = object> {
+export class PriorityQueue<
+  T extends { groupJid?: never } | { groupJid: never } | object = object,
+> {
   // Per-priority bucket: each bucket is a Map<groupJid, Entry<T>[]>
   // The bucket also maintains a round-robin pointer (lastServedGroup) per
   // priority level so we rotate fairly.
@@ -187,7 +194,8 @@ export class PriorityQueue<T extends { groupJid?: never } | { groupJid: never } 
     // groupJid can come from item or be passed explicitly
     const gid =
       groupJid ??
-      ((item as unknown as { groupJid?: string }).groupJid ?? '__global__');
+      (item as unknown as { groupJid?: string }).groupJid ??
+      '__global__';
     const bucket = this.buckets.get(priority)!;
     if (!bucket.has(gid)) {
       bucket.set(gid, []);
@@ -279,6 +287,7 @@ cd /Users/topcoder1/dev/nanoclaw/.claude/worktrees/infallible-blackburn && npx v
 ```
 
 Expected output:
+
 ```
  ✓ src/priority-queue.test.ts (9)
    ✓ PriorityQueue > dequeues interactive before scheduled before proactive
@@ -306,6 +315,7 @@ cd /Users/topcoder1/dev/nanoclaw/.claude/worktrees/infallible-blackburn && git a
 ### Task 2: Add Config Values for Warm Pool
 
 **Files:**
+
 - Modify: `src/config.ts`
 
 - [ ] **Step 1: Add WARM_POOL_SIZE and WARM_POOL_IDLE_TIMEOUT to config**
@@ -336,6 +346,7 @@ Expected: no errors.
 ### Task 3: Add Warm Pool Event Types
 
 **Files:**
+
 - Modify: `src/events.ts`
 
 - [ ] **Step 1: Add warm pool event interfaces**
@@ -416,6 +427,7 @@ Expected: no errors.
 This is the core task. Create `src/executor-pool.ts` as a full rewrite of `src/group-queue.ts` that preserves all existing behavior while adding priority scheduling and warm pool integration.
 
 **Files:**
+
 - Create: `src/executor-pool.ts`
 
 - [ ] **Step 1: Create executor-pool.ts**
@@ -467,7 +479,7 @@ interface GroupState {
 }
 
 interface WarmContainer {
-  id: string;            // unique identifier for this warm slot
+  id: string; // unique identifier for this warm slot
   createdAt: number;
   evictTimer: ReturnType<typeof setTimeout>;
 }
@@ -490,7 +502,8 @@ export class ExecutorPool {
    */
   private waitingQueue = new PriorityQueue<{ groupJid: string }>();
 
-  private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null = null;
+  private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
+    null;
   private shuttingDown = false;
 
   // Warm pool: pre-started containers ready to be assigned to tasks
@@ -609,10 +622,7 @@ export class ExecutorPool {
     // Run immediately
     this._runTask(groupJid, { id: taskId, groupJid, fn, priority }).catch(
       (err) =>
-        logger.error(
-          { groupJid, taskId, err },
-          'Unhandled error in _runTask',
-        ),
+        logger.error({ groupJid, taskId, err }, 'Unhandled error in _runTask'),
     );
   }
 
@@ -705,7 +715,10 @@ export class ExecutorPool {
     if (this.shuttingDown) return;
     const id = `warm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const evictTimer = setTimeout(() => {
-      this._evictWarmContainer({ id, createdAt: 0, evictTimer: null as any }, 'idle_timeout');
+      this._evictWarmContainer(
+        { id, createdAt: 0, evictTimer: null as any },
+        'idle_timeout',
+      );
     }, WARM_POOL_IDLE_TIMEOUT);
     evictTimer.unref?.(); // don't keep the process alive for this
 
@@ -719,14 +732,20 @@ export class ExecutorPool {
       payload: { containerId: id, poolSize: this.warmPool.length },
     };
     eventBus.emit('pool.warm.created', event);
-    logger.debug({ containerId: id, poolSize: this.warmPool.length }, 'Warm container added');
+    logger.debug(
+      { containerId: id, poolSize: this.warmPool.length },
+      'Warm container added',
+    );
   }
 
   /**
    * Take a warm container from the pool (if available) for an in-flight task.
    * Triggers async replacement so the pool stays full.
    */
-  private _takeWarmContainer(groupJid: string, taskId: string): WarmContainer | null {
+  private _takeWarmContainer(
+    groupJid: string,
+    taskId: string,
+  ): WarmContainer | null {
     if (this.warmPool.length === 0) return null;
     const warm = this.warmPool.shift()!;
     clearTimeout(warm.evictTimer);
@@ -738,7 +757,10 @@ export class ExecutorPool {
       payload: { containerId: warm.id, groupJid, taskId },
     };
     eventBus.emit('pool.warm.used', event);
-    logger.debug({ containerId: warm.id, groupJid, taskId }, 'Warm container used');
+    logger.debug(
+      { containerId: warm.id, groupJid, taskId },
+      'Warm container used',
+    );
 
     // Async replacement — don't await
     if (!this.shuttingDown) {
@@ -747,7 +769,10 @@ export class ExecutorPool {
     return warm;
   }
 
-  private _evictWarmContainer(warm: WarmContainer, reason: PoolWarmEvictedEvent['payload']['reason']): void {
+  private _evictWarmContainer(
+    warm: WarmContainer,
+    reason: PoolWarmEvictedEvent['payload']['reason'],
+  ): void {
     clearTimeout(warm.evictTimer);
     const idx = this.warmPool.findIndex((w) => w.id === warm.id);
     if (idx >= 0) this.warmPool.splice(idx, 1);
@@ -763,7 +788,10 @@ export class ExecutorPool {
 
     // Recreate on crash (not on shutdown/idle_timeout eviction during normal ops)
     if (reason === 'crash' && !this.shuttingDown) {
-      logger.warn({ containerId: warm.id }, 'Warm container crashed, recreating');
+      logger.warn(
+        { containerId: warm.id },
+        'Warm container crashed, recreating',
+      );
       setTimeout(() => this._addWarmContainer(), 0);
     }
   }
@@ -1071,6 +1099,7 @@ Expected: no errors.
 Port all 18 tests from `group-queue.test.ts` to `executor-pool.test.ts`, updating imports and adding new tests for priority scheduling and warm pool events.
 
 **Files:**
+
 - Create: `src/executor-pool.test.ts`
 
 - [ ] **Step 1: Create executor-pool.test.ts**
@@ -1086,7 +1115,7 @@ import { ExecutorPool } from './executor-pool.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
-  WARM_POOL_SIZE: 0,         // disable warm pool by default in unit tests
+  WARM_POOL_SIZE: 0, // disable warm pool by default in unit tests
   WARM_POOL_IDLE_TIMEOUT: 600000,
 }));
 
@@ -1170,7 +1199,9 @@ describe('ExecutorPool', () => {
 
     const processMessages = vi.fn(async (_groupJid: string) => {
       if (executionOrder.length === 0) {
-        await new Promise<void>((resolve) => { resolveFirst = resolve; });
+        await new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        });
       }
       executionOrder.push('messages');
       return true;
@@ -1180,7 +1211,9 @@ describe('ExecutorPool', () => {
     pool.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    const taskFn = vi.fn(async () => { executionOrder.push('task'); });
+    const taskFn = vi.fn(async () => {
+      executionOrder.push('task');
+    });
     pool.enqueueTask('group1@g.us', 'task-1', taskFn);
     pool.enqueueMessageCheck('group1@g.us');
 
@@ -1193,7 +1226,10 @@ describe('ExecutorPool', () => {
 
   it('retries with exponential backoff on failure', async () => {
     let callCount = 0;
-    const processMessages = vi.fn(async () => { callCount++; return false; });
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false;
+    });
 
     pool.setProcessMessagesFn(processMessages);
     pool.enqueueMessageCheck('group1@g.us');
@@ -1221,7 +1257,10 @@ describe('ExecutorPool', () => {
 
   it('stops retrying after MAX_RETRIES and resets', async () => {
     let callCount = 0;
-    const processMessages = vi.fn(async () => { callCount++; return false; });
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false;
+    });
 
     pool.setProcessMessagesFn(processMessages);
     pool.enqueueMessageCheck('group1@g.us');
@@ -1270,7 +1309,9 @@ describe('ExecutorPool', () => {
 
     const taskFn = vi.fn(async () => {
       taskCallCount++;
-      await new Promise<void>((resolve) => { resolveTask = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
     });
 
     pool.enqueueTask('group1@g.us', 'task-1', taskFn);
@@ -1292,7 +1333,9 @@ describe('ExecutorPool', () => {
     let resolveProcess: () => void;
 
     const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => { resolveProcess = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
       return true;
     });
 
@@ -1319,7 +1362,9 @@ describe('ExecutorPool', () => {
     let resolveProcess: () => void;
 
     const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => { resolveProcess = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
       return true;
     });
 
@@ -1349,7 +1394,9 @@ describe('ExecutorPool', () => {
     let resolveProcess: () => void;
 
     const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => { resolveProcess = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
       return true;
     });
 
@@ -1379,7 +1426,9 @@ describe('ExecutorPool', () => {
     let resolveTask: () => void;
 
     const taskFn = vi.fn(async () => {
-      await new Promise<void>((resolve) => { resolveTask = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
     });
 
     pool.enqueueTask('group1@g.us', 'task-1', taskFn);
@@ -1447,7 +1496,9 @@ describe('ExecutorPool', () => {
     const events: NanoClawEvent[] = [];
     const unsub = eventBus.onAny((e) => events.push(e));
 
-    const taskFn = vi.fn(async () => { throw new Error('task failed'); });
+    const taskFn = vi.fn(async () => {
+      throw new Error('task failed');
+    });
     pool.enqueueTask('group1@g.us', 'fail-task', taskFn);
     await vi.advanceTimersByTimeAsync(10);
     unsub();
@@ -1487,7 +1538,9 @@ describe('ExecutorPool', () => {
     let resolveProcess: () => void;
 
     const processMessages = vi.fn(async () => {
-      await new Promise<void>((resolve) => { resolveProcess = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
       return true;
     });
 
@@ -1539,7 +1592,12 @@ describe('ExecutorPool', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Queue a scheduled task and an interactive message
-    pool.enqueueTask('sched-group@g.us', 'sched-1', async () => {}, 'scheduled');
+    pool.enqueueTask(
+      'sched-group@g.us',
+      'sched-1',
+      async () => {},
+      'scheduled',
+    );
     pool.enqueueMessageCheck('interactive-group@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
@@ -1662,6 +1720,7 @@ Expected: all tests pass.
 Keep `src/group-queue.ts` working so any code that hasn't been migrated yet still compiles.
 
 **Files:**
+
 - Modify: `src/group-queue.ts`
 
 - [ ] **Step 1: Replace group-queue.ts with a thin re-export shim**
@@ -1696,6 +1755,7 @@ Expected: no errors.
 ### Task 7: Update src/index.ts to Use ExecutorPool
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Update import**
@@ -1744,6 +1804,7 @@ cd /Users/topcoder1/dev/nanoclaw/.claude/worktrees/infallible-blackburn && npx v
 ```
 
 Expected:
+
 ```
  ✓ src/priority-queue.test.ts (9)
  ✓ src/executor-pool.test.ts (22+)
@@ -1768,6 +1829,7 @@ cd /Users/topcoder1/dev/nanoclaw/.claude/worktrees/infallible-blackburn && git a
 Verify the full flow end-to-end in a test environment (no real containers required).
 
 **Files:**
+
 - Create: `src/executor-pool.integration.test.ts`
 
 - [ ] **Step 1: Write integration test**
@@ -1860,7 +1922,9 @@ describe('ExecutorPool integration', () => {
     expect(usedEvents).toHaveLength(1);
 
     // A replacement warm container should have been created
-    const createdEvents = allEvents.filter((e) => e.type === 'pool.warm.created');
+    const createdEvents = allEvents.filter(
+      (e) => e.type === 'pool.warm.created',
+    );
     // Initial 2 + 1 replacement = 3 creates
     expect(createdEvents.length).toBeGreaterThanOrEqual(2);
 
@@ -1930,6 +1994,7 @@ cd /Users/topcoder1/dev/nanoclaw/.claire/worktrees/infallible-blackburn && npm r
 ```
 
 Expected:
+
 ```
 > nanoclaw@x.x.x build
 > tsc

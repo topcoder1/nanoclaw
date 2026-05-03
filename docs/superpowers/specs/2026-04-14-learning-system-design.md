@@ -35,12 +35,12 @@ Distills outcomes, user feedback, and agent self-reports into actionable rules.
 ```typescript
 interface LearnedRule {
   id: string;
-  rule: string;              // "Refresh Gmail OAuth tokens before email operations"
+  rule: string; // "Refresh Gmail OAuth tokens before email operations"
   source: 'outcome_pattern' | 'user_feedback' | 'agent_reported';
-  actionClasses: string[];   // ["email.read", "email.send"]
-  groupId: string | null;    // null = global
-  confidence: number;        // 0.0–1.0
-  evidenceCount: number;     // how many outcomes support this rule
+  actionClasses: string[]; // ["email.read", "email.send"]
+  groupId: string | null; // null = global
+  confidence: number; // 0.0–1.0
+  evidenceCount: number; // how many outcomes support this rule
   createdAt: string;
   lastMatchedAt: string;
 }
@@ -85,10 +85,16 @@ When rules contradict for the same action class: `user_feedback > outcome_patter
 #### API
 
 ```typescript
-function addRule(rule: Omit<LearnedRule, 'id' | 'createdAt' | 'lastMatchedAt'>): string;
-function queryRules(actionClasses: string[], groupId: string, limit?: number): LearnedRule[];
+function addRule(
+  rule: Omit<LearnedRule, 'id' | 'createdAt' | 'lastMatchedAt'>,
+): string;
+function queryRules(
+  actionClasses: string[],
+  groupId: string,
+  limit?: number,
+): LearnedRule[];
 function markMatched(ruleId: string): void;
-function pruneStaleRules(): number;        // returns count pruned
+function pruneStaleRules(): number; // returns count pruned
 function deleteRule(id: string): void;
 ```
 
@@ -148,9 +154,9 @@ On `task.started`: begin collecting IPC actions for the `groupId + taskId` pair 
 
 ```typescript
 interface TracedAction {
-  type: string;          // "browser_navigate", "send_message", etc.
+  type: string; // "browser_navigate", "send_message", etc.
   timestamp: number;
-  inputSummary: string;  // first 200 chars of input
+  inputSummary: string; // first 200 chars of input
   result: 'success' | 'error';
 }
 ```
@@ -158,6 +164,7 @@ interface TracedAction {
 Each call to `processTaskIpc` appends to the buffer (the recorder exposes an `addTrace(groupId, taskId, action)` method called from the IPC handler).
 
 On `task.complete`:
+
 - **Success:** Convert trace to procedure candidate, save via procedure-store
 - **Failure:** Discard trace
 - **Either way:** Clear the buffer for that task
@@ -173,14 +180,21 @@ The container learning skill instructs agents to optionally emit a `_procedure` 
     "trigger": "check PR status",
     "description": "Check GitHub PR status and summarize",
     "steps": [
-      { "action": "github_api", "details": "GET /repos/{owner}/{repo}/pulls/{number}" },
-      { "action": "format_response", "details": "Summarize PR title, status, reviewers" }
+      {
+        "action": "github_api",
+        "details": "GET /repos/{owner}/{repo}/pulls/{number}"
+      },
+      {
+        "action": "format_response",
+        "details": "Summarize PR title, status, reviewers"
+      }
     ]
   }
 }
 ```
 
 **Merge logic:** If the agent provides a `_procedure` block:
+
 - Use the agent's human-readable `description` and step `details` for readability
 - Validate against the IPC trace: drop steps the agent mentions that didn't appear in the trace (hallucination guard)
 - Add IPC trace actions the agent omitted
@@ -190,6 +204,7 @@ If no `_procedure` block, save the raw IPC trace as the procedure with auto-gene
 #### Deduplication
 
 Before saving, call `findProcedure(trigger, groupId)`. If a matching procedure exists:
+
 - Same steps (>70% overlap): increment `success_count`
 - Different steps (<70% overlap): save as a new variant
 
@@ -202,7 +217,12 @@ Only save procedures with 2+ IPC actions. Single-action tasks (e.g., one `send_m
 ```typescript
 function startTrace(groupId: string, taskId: string): void;
 function addTrace(groupId: string, taskId: string, action: TracedAction): void;
-function finalizeTrace(groupId: string, taskId: string, success: boolean, agentProcedure?: AgentProcedure): void;
+function finalizeTrace(
+  groupId: string,
+  taskId: string,
+  success: boolean,
+  agentProcedure?: AgentProcedure,
+): void;
 ```
 
 ---
@@ -225,6 +245,7 @@ On `message.inbound`:
 #### Execution Flow
 
 **`auto_execute: false`:**
+
 ```
 User: "Check PR status for nanoclaw"
 Bot: "I have a learned procedure for this (87% success rate, ran 8 times).
@@ -236,6 +257,7 @@ Bot: "I have a learned procedure for this (87% success rate, ran 8 times).
 - "No" → proceed with normal agent run
 
 **`auto_execute: true`:**
+
 ```
 User: "Check PR status for nanoclaw"
 → Execute procedure silently, report result
@@ -260,6 +282,7 @@ No new execution engine — reuses the existing container infrastructure. The pr
 #### Failed Auto-Execute Recovery
 
 If an auto-executed procedure fails:
+
 1. Set `auto_execute = false`
 2. Increment `failure_count` via `updateProcedureStats(name, false, groupId)`
 3. Send brief note to user: "Learned procedure failed, running normally."
@@ -299,11 +322,13 @@ When a user message arrives within 2 minutes of the last bot response for the sa
 **Positive keywords:** `"perfect"`, `"exactly"`, `"great"`, `"keep doing"`, `"that worked"`
 
 If correction detected:
+
 - Extract the actionable content (the full user message minus filler)
 - Save as a rule with `source: 'user_feedback'`, `confidence: 0.9`
 - Infer `actionClasses` from the preceding bot response context
 
 If positive detected:
+
 - Find the most recent outcome for this group
 - Boost its associated rules' confidence by 0.1
 
@@ -312,7 +337,11 @@ If positive detected:
 Containers can forward user corrections programmatically:
 
 ```json
-{ "type": "learn_feedback", "feedback": "Use API not browser for GitHub", "groupId": "g1" }
+{
+  "type": "learn_feedback",
+  "feedback": "Use API not browser for GitHub",
+  "groupId": "g1"
+}
 ```
 
 Saved as a rule with `source: 'user_feedback'`, `confidence: 0.9`.
@@ -336,6 +365,7 @@ function initLearningSystem(eventBus: EventBus, deps: LearningDeps): void;
 Called from `src/index.ts` after `startEventLog(eventBus)`, following the same pattern.
 
 **LearningDeps:**
+
 ```typescript
 interface LearningDeps {
   eventBus: EventBus;
@@ -346,6 +376,7 @@ interface LearningDeps {
 ```
 
 Subscribers wired:
+
 - `task.started` → `procedureRecorder.startTrace()`
 - `task.complete` → `procedureRecorder.finalizeTrace()`, outcome pattern analysis
 - `message.inbound` → `procedureMatcher.checkMatch()`, `feedbackCapture.check()`
@@ -356,15 +387,15 @@ Subscribers wired:
 
 Added to `src/events.ts` EventMap:
 
-| Event | Payload | When |
-|-------|---------|------|
-| `learn.rule_created` | `{ ruleId, rule, source, groupId }` | Rule distilled from outcomes/feedback |
-| `learn.rule_applied` | `{ ruleId, groupId, taskId }` | Rule injected into agent prompt |
-| `learn.procedure_saved` | `{ name, trigger, groupId, stepCount }` | Procedure recorded from successful task |
-| `learn.procedure_matched` | `{ name, trigger, groupId, autoExecute }` | Inbound message matched a procedure |
-| `learn.procedure_executed` | `{ name, groupId, success, durationMs }` | Procedure ran to completion |
-| `learn.procedure_promoted` | `{ name, fromGroups, stepCount }` | Procedure promoted to global scope |
-| `learn.feedback_received` | `{ ruleId, feedback, groupId }` | User correction captured as rule |
+| Event                      | Payload                                   | When                                    |
+| -------------------------- | ----------------------------------------- | --------------------------------------- |
+| `learn.rule_created`       | `{ ruleId, rule, source, groupId }`       | Rule distilled from outcomes/feedback   |
+| `learn.rule_applied`       | `{ ruleId, groupId, taskId }`             | Rule injected into agent prompt         |
+| `learn.procedure_saved`    | `{ name, trigger, groupId, stepCount }`   | Procedure recorded from successful task |
+| `learn.procedure_matched`  | `{ name, trigger, groupId, autoExecute }` | Inbound message matched a procedure     |
+| `learn.procedure_executed` | `{ name, groupId, success, durationMs }`  | Procedure ran to completion             |
+| `learn.procedure_promoted` | `{ name, fromGroups, stepCount }`         | Procedure promoted to global scope      |
+| `learn.feedback_received`  | `{ ruleId, feedback, groupId }`           | User correction captured as rule        |
 
 ---
 
@@ -427,10 +458,10 @@ container/skills/learning/
 
 ## Integration Points
 
-| Existing Code | Change |
-|---------------|--------|
-| `src/index.ts` | Call `initLearningSystem()` after `startEventLog()`. Call `buildRulesBlock()` before `runAgent()` and append to prompt. |
-| `src/ipc.ts` | Call `procedureRecorder.addTrace()` in `processTaskIpc()`. Add `learn_feedback` IPC type. |
-| `src/events.ts` | Add 7 `learn.*` event type definitions to EventMap. |
-| `src/container-runner.ts` | Parse `_procedure` and `_lesson` blocks from ContainerOutput. |
-| `container/skills/learning/SKILL.md` | New file — agent instructions for optional output blocks. |
+| Existing Code                        | Change                                                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`                       | Call `initLearningSystem()` after `startEventLog()`. Call `buildRulesBlock()` before `runAgent()` and append to prompt. |
+| `src/ipc.ts`                         | Call `procedureRecorder.addTrace()` in `processTaskIpc()`. Add `learn_feedback` IPC type.                               |
+| `src/events.ts`                      | Add 7 `learn.*` event type definitions to EventMap.                                                                     |
+| `src/container-runner.ts`            | Parse `_procedure` and `_lesson` blocks from ContainerOutput.                                                           |
+| `container/skills/learning/SKILL.md` | New file — agent instructions for optional output blocks.                                                               |

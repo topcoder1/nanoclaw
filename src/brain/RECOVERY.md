@@ -5,10 +5,10 @@
 
 The augmented brain has two persistence surfaces and two recovery paths.
 
-| Surface | Source of truth | Loss recovery path |
-|---------|-----------------|--------------------|
-| `store/brain.db` (SQLite) | primary store for KUs, entities, raw_events, cost, system_state | restore from `store/backups/brain-YYYY-MM-DD.db`, or — if no backup survives — re-derive via raw_events + legacy `store/messages.db` |
-| Qdrant collection `ku_nomic-embed-text-v1.5_768` | embedded vectors only | re-embed from `brain.db` via `scripts/reembed-all.ts`, or restore from `store/qdrant-snapshots/` |
+| Surface                                          | Source of truth                                                 | Loss recovery path                                                                                                                   |
+| ------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `store/brain.db` (SQLite)                        | primary store for KUs, entities, raw_events, cost, system_state | restore from `store/backups/brain-YYYY-MM-DD.db`, or — if no backup survives — re-derive via raw_events + legacy `store/messages.db` |
+| Qdrant collection `ku_nomic-embed-text-v1.5_768` | embedded vectors only                                           | re-embed from `brain.db` via `scripts/reembed-all.ts`, or restore from `store/qdrant-snapshots/`                                     |
 
 Backups run nightly (see `src/brain/backup.ts`):
 
@@ -19,7 +19,7 @@ Backups run nightly (see `src/brain/backup.ts`):
 
 ## Scenario 1: Qdrant lost (collection dropped, container wiped, etc.)
 
-This is the *benign* scenario — the SQLite side retains every KU's text, so re-embedding is always possible.
+This is the _benign_ scenario — the SQLite side retains every KU's text, so re-embedding is always possible.
 
 ```bash
 # Start-of-task smoke
@@ -40,7 +40,7 @@ npx tsx scripts/reembed-all.ts
 
 ## Scenario 2: `brain.db` lost
 
-This is the *severe* scenario — SQLite is the source of truth. Recovery uses whatever backup + raw_events are available.
+This is the _severe_ scenario — SQLite is the source of truth. Recovery uses whatever backup + raw_events are available.
 
 ### Step 1 — restore the most recent backup
 

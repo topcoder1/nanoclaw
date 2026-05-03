@@ -65,6 +65,7 @@ Mark message ID processed in SQLite regardless of outcome
 ### 1. Skill registration
 
 Self-registers via NanoClaw's existing skill registry pattern at startup. Adds:
+
 - A scheduled task entry (hourly) in `task-scheduler.ts` config
 - A new SQLite table `processed_marketing_review_messages(message_id TEXT PRIMARY KEY, processed_at INTEGER, status TEXT)`
 
@@ -142,11 +143,11 @@ marketing_review_safety_net:
   enabled: true
   poll_interval_minutes: 60
   gmail_query: 'from:alexandre.francois@whoisxmlapi.com subject:"Marketing OTE"'
-  brand_id: "wxa"
-  ingest_url: "https://marketing-center.internal/api/monthly_review/external_ingest"
-  ingest_secret_env_var: "WXA_MARKETING_INGEST_SECRET"
-  telegram_alert_channel: "primary"
-  retired: false  # set to true after 2-3 clean cycles
+  brand_id: 'wxa'
+  ingest_url: 'https://marketing-center.internal/api/monthly_review/external_ingest'
+  ingest_secret_env_var: 'WXA_MARKETING_INGEST_SECRET'
+  telegram_alert_channel: 'primary'
+  retired: false # set to true after 2-3 clean cycles
 ```
 
 ## Error Handling

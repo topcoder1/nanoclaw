@@ -16,40 +16,41 @@
 
 ### NanoClaw (~/dev/nanoclaw)
 
-| File | Action | Responsibility |
-|------|--------|----------------|
-| `src/config.ts` | Modify | Add `EMAIL_INTELLIGENCE_ENABLED` flag |
-| `src/db.ts` | Modify | Add `processed_items` table + CRUD functions |
-| `src/ipc.ts` | Modify | Handle `email_trigger` IPC type → spawn agent session |
-| `src/types.ts` | Modify | Add `ProcessedItem` interface |
+| File                    | Action | Responsibility                                                      |
+| ----------------------- | ------ | ------------------------------------------------------------------- |
+| `src/config.ts`         | Modify | Add `EMAIL_INTELLIGENCE_ENABLED` flag                               |
+| `src/db.ts`             | Modify | Add `processed_items` table + CRUD functions                        |
+| `src/ipc.ts`            | Modify | Handle `email_trigger` IPC type → spawn agent session               |
+| `src/types.ts`          | Modify | Add `ProcessedItem` interface                                       |
 | `groups/main/CLAUDE.md` | Modify | Add autonomy rules, email intelligence section, notification config |
-| `src/db.test.ts` | Create | Tests for processed_items CRUD |
-| `src/ipc.test.ts` | Modify | Tests for email_trigger IPC handling |
+| `src/db.test.ts`        | Create | Tests for processed_items CRUD                                      |
+| `src/ipc.test.ts`       | Modify | Tests for email_trigger IPC handling                                |
 
 ### Superpilot (~/dev/inbox_superpilot)
 
-| File | Action | Responsibility |
-|------|--------|----------------|
-| `backend/app/api/nanoclaw_bridge.py` | Create | New API endpoints for NanoClaw: `/api/nanoclaw/triaged-emails`, `/api/nanoclaw/kb/search` |
-| `backend/app/middleware/auth.py` | Modify | Add localhost service token auth bypass |
-| `backend/app/api/ipc_writer.py` | Create | Write IPC trigger files to NanoClaw's IPC directory after triage |
-| `backend/tests/test_nanoclaw_bridge.py` | Create | Tests for bridge endpoints |
-| `backend/tests/test_service_token_auth.py` | Create | Tests for service token auth |
+| File                                       | Action | Responsibility                                                                            |
+| ------------------------------------------ | ------ | ----------------------------------------------------------------------------------------- |
+| `backend/app/api/nanoclaw_bridge.py`       | Create | New API endpoints for NanoClaw: `/api/nanoclaw/triaged-emails`, `/api/nanoclaw/kb/search` |
+| `backend/app/middleware/auth.py`           | Modify | Add localhost service token auth bypass                                                   |
+| `backend/app/api/ipc_writer.py`            | Create | Write IPC trigger files to NanoClaw's IPC directory after triage                          |
+| `backend/tests/test_nanoclaw_bridge.py`    | Create | Tests for bridge endpoints                                                                |
+| `backend/tests/test_service_token_auth.py` | Create | Tests for service token auth                                                              |
 
 ### Superpilot MCP Server (new sidecar)
 
-| File | Action | Responsibility |
-|------|--------|----------------|
-| `mcp_server/server.py` | Create | MCP server main: 6 tools wrapping superpilot REST API |
-| `mcp_server/requirements.txt` | Create | Dependencies: mcp, httpx |
-| `mcp_server/README.md` | Create | Setup and usage docs |
-| `mcp_server/test_server.py` | Create | Integration tests for MCP tools |
+| File                          | Action | Responsibility                                        |
+| ----------------------------- | ------ | ----------------------------------------------------- |
+| `mcp_server/server.py`        | Create | MCP server main: 6 tools wrapping superpilot REST API |
+| `mcp_server/requirements.txt` | Create | Dependencies: mcp, httpx                              |
+| `mcp_server/README.md`        | Create | Setup and usage docs                                  |
+| `mcp_server/test_server.py`   | Create | Integration tests for MCP tools                       |
 
 ---
 
 ## Task 1: Kill Switch Config (NanoClaw)
 
 **Files:**
+
 - Modify: `src/config.ts`
 
 - [ ] **Step 1: Add EMAIL_INTELLIGENCE_ENABLED to config**
@@ -92,6 +93,7 @@ git commit -m "feat: add EMAIL_INTELLIGENCE_ENABLED kill switch config"
 ## Task 2: Processed Items Table (NanoClaw)
 
 **Files:**
+
 - Modify: `src/types.ts`
 - Modify: `src/db.ts`
 - Create: `src/db.test.ts` (or modify existing)
@@ -102,10 +104,10 @@ git commit -m "feat: add EMAIL_INTELLIGENCE_ENABLED kill switch config"
 // At the end of src/types.ts:
 
 export interface ProcessedItem {
-  item_id: string;       // e.g., "email:thread_abc123" or "discord:msg_456"
-  source: string;        // "superpilot" | "discord" | "poll"
-  processed_at: string;  // ISO timestamp
-  action_taken: string;  // "auto:calendar" | "propose:reply" | "escalate" | "skip"
+  item_id: string; // e.g., "email:thread_abc123" or "discord:msg_456"
+  source: string; // "superpilot" | "discord" | "poll"
+  processed_at: string; // ISO timestamp
+  action_taken: string; // "auto:calendar" | "propose:reply" | "escalate" | "skip"
 }
 ```
 
@@ -254,6 +256,7 @@ git commit -m "feat: add processed_items table for email intelligence idempotenc
 ## Task 3: Email Trigger IPC Handler (NanoClaw)
 
 **Files:**
+
 - Modify: `src/ipc.ts`
 - Modify: `src/config.ts` (import)
 
@@ -356,6 +359,7 @@ git commit -m "feat: add email_trigger IPC handler for email intelligence"
 ## Task 4: Superpilot Service Token Auth
 
 **Files:**
+
 - Modify: `~/dev/inbox_superpilot/backend/app/middleware/auth.py`
 - Create: `~/dev/inbox_superpilot/backend/tests/test_service_token_auth.py`
 
@@ -443,6 +447,7 @@ git commit -m "feat: add localhost service token auth for NanoClaw bridge"
 ## Task 5: Superpilot NanoClaw Bridge API
 
 **Files:**
+
 - Create: `~/dev/inbox_superpilot/backend/app/api/nanoclaw_bridge.py`
 - Modify: `~/dev/inbox_superpilot/backend/app/main.py` (register router)
 
@@ -591,6 +596,7 @@ git commit -m "feat: add NanoClaw bridge API (triaged-emails + kb/search endpoin
 ## Task 6: Superpilot IPC Writer
 
 **Files:**
+
 - Create: `~/dev/inbox_superpilot/backend/app/api/ipc_writer.py`
 
 This module writes IPC trigger files to NanoClaw's IPC directory after superpilot triages an email.
@@ -674,6 +680,7 @@ git commit -m "feat: add NanoClaw IPC writer for email trigger notifications"
 ## Task 7: Superpilot MCP Server
 
 **Files:**
+
 - Create: `~/dev/inbox_superpilot/mcp_server/server.py`
 - Create: `~/dev/inbox_superpilot/mcp_server/requirements.txt`
 
@@ -879,6 +886,7 @@ git commit -m "feat: add superpilot MCP server with 6 tools for NanoClaw"
 ## Task 8: Main Group CLAUDE.md — Email Intelligence Section
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/groups/main/CLAUDE.md`
 
 - [ ] **Step 1: Append email intelligence instructions to main CLAUDE.md**
@@ -904,6 +912,7 @@ You have access to the superpilot MCP server which provides email triage, KB sea
 ### Processing Flow
 
 When triggered with new emails:
+
 1. Check if each email is already in `processed_items` (avoid double-processing)
 2. Classify each email into action tier (AUTO / PROPOSE / ESCALATE)
 3. Execute actions per tier rules below
@@ -913,26 +922,31 @@ When triggered with new emails:
 ### Autonomy Rules
 
 #### AUTO (no approval needed)
+
 - Calendar events from explicit dates in emails
 - Archive newsletters and marketing emails
 - File attachments to KB
 - Update contact profiles from email signatures
 
 #### PROPOSE (approval required)
+
 - Reply to any email → draft and send to Telegram for approval
 - Create GitHub issues
 - Research tasks
 - Schedule meetings
 
 #### ESCALATE (always escalate immediately)
+
 - Anything involving money >$500
 - Legal documents or contracts
 - Novel situations not covered by rules
 
 ### Notification Intensity
+
 Default: verbose (initial trust-building phase)
 
 Overrides:
+
 - Escalations: always on (can't silence)
 - Auto-handled emails: silent (only in weekly review)
 - Proposals: normal (batched per cycle)
@@ -950,6 +964,7 @@ Never cross-reference between accounts unless explicitly asked.
 ### Storage Discipline
 
 Before storing anything, ask:
+
 1. Will I need this again? If not, don't store it.
 2. Can I find it elsewhere? If yes, store a pointer, not a copy.
 3. Is this signal or noise? Only store signal.
@@ -971,6 +986,7 @@ git commit -m "feat: add email intelligence instructions to main group CLAUDE.md
 ## Task 9: Wire MCP Server to Container Runner
 
 **Files:**
+
 - Modify: `~/dev/nanoclaw/src/container-runner.ts`
 
 The container agent needs to reach the superpilot MCP server. Add the MCP server as a tool available to main group containers.
@@ -982,7 +998,8 @@ In `src/container-runner.ts`, find where `ONECLI_URL` is passed as an env var to
 ```typescript
 // After the ONECLI_URL env var, add:
 if (input.isMain) {
-  const superpilotMcpUrl = process.env.SUPERPILOT_MCP_URL || 'http://host.docker.internal:8100';
+  const superpilotMcpUrl =
+    process.env.SUPERPILOT_MCP_URL || 'http://host.docker.internal:8100';
   // The MCP server runs on host — container reaches it via host.docker.internal
   envVars.push(`SUPERPILOT_MCP_URL=${superpilotMcpUrl}`);
 }
@@ -1031,6 +1048,7 @@ EOF
 ```
 
 Expected: NanoClaw logs show:
+
 - `Email trigger dispatched to main group`
 - Container agent spawns for main group
 - Agent reads the email intelligence instructions from CLAUDE.md
@@ -1072,17 +1090,17 @@ git commit -m "test: end-to-end smoke test for email intelligence pipeline"
 
 ## Summary
 
-| Task | Codebase | What it adds |
-|------|----------|-------------|
-| 1 | NanoClaw | Kill switch config |
-| 2 | NanoClaw | Processed items table + CRUD |
-| 3 | NanoClaw | Email trigger IPC handler |
-| 4 | Superpilot | Service token auth |
-| 5 | Superpilot | Bridge API (triaged-emails + kb/search) |
-| 6 | Superpilot | IPC writer module |
-| 7 | Superpilot | MCP server (6 tools) |
-| 8 | NanoClaw | Main group CLAUDE.md email intelligence section |
-| 9 | NanoClaw | Wire MCP URL to container runner |
-| 10 | NanoClaw | End-to-end smoke test |
+| Task | Codebase   | What it adds                                    |
+| ---- | ---------- | ----------------------------------------------- |
+| 1    | NanoClaw   | Kill switch config                              |
+| 2    | NanoClaw   | Processed items table + CRUD                    |
+| 3    | NanoClaw   | Email trigger IPC handler                       |
+| 4    | Superpilot | Service token auth                              |
+| 5    | Superpilot | Bridge API (triaged-emails + kb/search)         |
+| 6    | Superpilot | IPC writer module                               |
+| 7    | Superpilot | MCP server (6 tools)                            |
+| 8    | NanoClaw   | Main group CLAUDE.md email intelligence section |
+| 9    | NanoClaw   | Wire MCP URL to container runner                |
+| 10   | NanoClaw   | End-to-end smoke test                           |
 
 **After Phase 1:** You can write an IPC file and NanoClaw spawns an agent that reads email intelligence instructions, calls superpilot MCP tools, and proposes actions on Telegram. The bridge API returns empty results until the TODO queries are implemented against superpilot's actual DB models — that's Phase 1b work (wiring `get_triaged_emails` to real data).

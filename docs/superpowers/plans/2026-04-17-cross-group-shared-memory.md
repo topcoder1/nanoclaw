@@ -15,6 +15,7 @@
 ## File Structure
 
 **New:**
+
 - `src/memory/shared/types.ts` — frontmatter & candidate types
 - `src/memory/shared/paths.ts` — filesystem path helpers (memory dir, candidate dir, audit log)
 - `src/memory/shared/store.ts` — read/write fact files, regenerate MEMORY.md
@@ -33,6 +34,7 @@
 - `docs/memory-cc-compat.md`
 
 **Modified:**
+
 - `src/events.ts` — add `TurnCompletedEvent` + register in `EventMap`
 - `src/event-bus.ts` — no change (type-safe via EventMap)
 - `src/env.ts` — add `NANOCLAW_MEMORY_EXTRACT`, `NANOCLAW_MEMORY_VERIFY` env vars
@@ -45,6 +47,7 @@
 ## Task 1: Filesystem paths & types
 
 **Files:**
+
 - Create: `src/memory/shared/types.ts`
 - Create: `src/memory/shared/paths.ts`
 - Test: (none — pure types/constants, exercised by later tests)
@@ -159,7 +162,12 @@ export function factPath(slug: string): string {
 
 /** Create all directories used by the store (idempotent). */
 export function ensureMemoryDirs(): void {
-  for (const dir of [memoryRoot(), candidateDir(), rejectedDir(), archivedDir()]) {
+  for (const dir of [
+    memoryRoot(),
+    candidateDir(),
+    rejectedDir(),
+    archivedDir(),
+  ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
@@ -177,6 +185,7 @@ git commit -m "feat(memory): add shared-memory types and path helpers"
 ## Task 2: Store (read/write fact files + index regeneration)
 
 **Files:**
+
 - Create: `src/memory/shared/store.ts`
 - Test: `src/memory/shared/__tests__/store.test.ts`
 
@@ -402,12 +411,10 @@ export function archiveFact(slug: string): boolean {
   return true;
 }
 
-function parseFrontmatter(raw: string):
-  | {
-      frontmatter: Record<string, unknown>;
-      body: string;
-    }
-  | null {
+function parseFrontmatter(raw: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} | null {
   if (!raw.startsWith(FRONTMATTER_DELIM)) return null;
   const end = raw.indexOf(`\n${FRONTMATTER_DELIM}`, FRONTMATTER_DELIM.length);
   if (end < 0) return null;
@@ -448,6 +455,7 @@ git commit -m "feat(memory): add fact store with idempotent index regeneration"
 ## Task 3: Audit log
 
 **Files:**
+
 - Create: `src/memory/shared/audit.ts`
 - Test: `src/memory/shared/__tests__/audit.test.ts`
 
@@ -470,8 +478,18 @@ describe('audit log', () => {
   });
 
   it('appends entries and reads them back in order', () => {
-    logAudit({ action: 'create', slug: 'feedback_a', source: 'main', reason: 'x' });
-    logAudit({ action: 'merge', slug: 'feedback_a', source: 'tg', reason: 'reinforced' });
+    logAudit({
+      action: 'create',
+      slug: 'feedback_a',
+      source: 'main',
+      reason: 'x',
+    });
+    logAudit({
+      action: 'merge',
+      slug: 'feedback_a',
+      source: 'tg',
+      reason: 'reinforced',
+    });
     const lines = readAudit();
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatchObject({ action: 'create', slug: 'feedback_a' });
@@ -540,6 +558,7 @@ git commit -m "feat(memory): add audit log for promotion/merge/reject events"
 ## Task 4: `turn.completed` event type
 
 **Files:**
+
 - Modify: `src/events.ts`
 
 - [ ] **Step 1: Add the event interface and EventMap entry**
@@ -583,6 +602,7 @@ git commit -m "feat(events): add turn.completed event for memory extraction"
 ## Task 5: Extractor (Haiku per-turn)
 
 **Files:**
+
 - Create: `src/memory/shared/extractor.ts`
 - Test: `src/memory/shared/__tests__/extractor.test.ts`
 
@@ -649,7 +669,9 @@ describe('extractor', () => {
       userMessage: 'be terse from now on',
       agentReply: 'OK, will keep it short.',
     });
-    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    const files = fs
+      .readdirSync(candidateDir())
+      .filter((f) => f.endsWith('.md'));
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/telegram_main/);
     const raw = fs.readFileSync(path.join(candidateDir(), files[0]), 'utf8');
@@ -667,8 +689,9 @@ describe('extractor', () => {
       userMessage: 'random question',
       agentReply: 'random answer',
     });
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 
   it('does not throw on malformed LLM output (fail closed)', async () => {
@@ -694,7 +717,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `src/memory/shared/extractor.ts`**
 
-```typescript
+````typescript
 // src/memory/shared/extractor.ts
 import fs from 'fs';
 import path from 'path';
@@ -716,7 +739,10 @@ const TRIVIAL_PATTERNS = [
 
 const MIN_TURN_TOKENS = 30; // approx by char count / 4
 
-export function isTrivialTurn(userMessage: string, agentReply: string): boolean {
+export function isTrivialTurn(
+  userMessage: string,
+  agentReply: string,
+): boolean {
   const total = userMessage.length + agentReply.length;
   if (total < MIN_TURN_TOKENS * 4) return true;
   for (const pattern of TRIVIAL_PATTERNS) {
@@ -801,7 +827,10 @@ Skip ephemeral things (current task progress, one-off questions, agent confusion
 Return { "candidates": [] } if nothing qualifies. Output JSON ONLY, no prose.`;
 
 function parseLLMOutput(text: string): ExtractorResult {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/, '');
   const parsed = JSON.parse(trimmed) as ExtractorResult;
   if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
     return { candidates: [] };
@@ -834,7 +863,10 @@ function writeCandidate(cand: ExtractedCandidate, input: ExtractInput): void {
     scopes: cand.scopes,
     extracted_from: input.groupName,
     extracted_at: new Date().toISOString(),
-    turn_excerpt: truncate(`USER: ${input.userMessage}\nAGENT: ${input.agentReply}`, 600),
+    turn_excerpt: truncate(
+      `USER: ${input.userMessage}\nAGENT: ${input.agentReply}`,
+      600,
+    ),
     proposed_action: cand.proposed_action,
     confidence: cand.confidence,
   };
@@ -845,17 +877,19 @@ function writeCandidate(cand: ExtractedCandidate, input: ExtractInput): void {
 }
 
 function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact'
+  );
 }
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max) + '…';
 }
-```
+````
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -874,6 +908,7 @@ git commit -m "feat(memory): add per-turn Haiku extractor for candidate facts"
 ## Task 6: Verifier (sweep + promote/merge/reject)
 
 **Files:**
+
 - Create: `src/memory/shared/verifier.ts`
 - Test: `src/memory/shared/__tests__/verifier.test.ts`
 
@@ -948,8 +983,9 @@ describe('verifier sweep', () => {
     await runVerifierSweep();
 
     expect(fs.existsSync(factPath('feedback_prefers_terse'))).toBe(true);
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 
   it('merges into existing fact, incrementing count and source', async () => {
@@ -1020,10 +1056,12 @@ describe('verifier sweep', () => {
 
     await runVerifierSweep();
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(0);
-    expect(fs.readdirSync(rejectedDir()).filter((f) => f.endsWith('.md')))
-      .toHaveLength(1);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
+    expect(
+      fs.readdirSync(rejectedDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(1);
   });
 });
 ```
@@ -1035,7 +1073,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `src/memory/shared/verifier.ts`**
 
-```typescript
+````typescript
 // src/memory/shared/verifier.ts
 import fs from 'fs';
 import path from 'path';
@@ -1043,11 +1081,7 @@ import yaml from 'js-yaml';
 import { generateText } from 'ai';
 import { resolveUtilityModel } from '../../llm/utility.js';
 import { logger } from '../../logger.js';
-import {
-  candidateDir,
-  rejectedDir,
-  ensureMemoryDirs,
-} from './paths.js';
+import { candidateDir, rejectedDir, ensureMemoryDirs } from './paths.js';
 import { readFact, writeFact, regenerateIndex } from './store.js';
 import { logAudit } from './audit.js';
 import type {
@@ -1172,11 +1206,18 @@ function mergeFact(existing: Fact, cand: Candidate): void {
 
   const newBody = cand.body.trim();
   if (newBody && newBody !== existing.body.trim()) {
-    fm.history = [existing.body.trim(), ...(fm.history ?? [])].slice(0, MAX_HISTORY);
+    fm.history = [existing.body.trim(), ...(fm.history ?? [])].slice(
+      0,
+      MAX_HISTORY,
+    );
     fm.last_value = newBody.split('\n')[0].slice(0, 80);
   }
 
-  writeFact({ slug: existing.slug, frontmatter: fm, body: newBody || existing.body });
+  writeFact({
+    slug: existing.slug,
+    frontmatter: fm,
+    body: newBody || existing.body,
+  });
 }
 
 interface Verdict {
@@ -1207,18 +1248,25 @@ Reject if: transient state (current task progress), agent confusion, hallucinati
   try {
     const llm = await generateText({
       model,
-      system: 'You are a careful gatekeeper for a long-term memory store. Output JSON only.',
+      system:
+        'You are a careful gatekeeper for a long-term memory store. Output JSON only.',
       messages: [{ role: 'user', content: prompt }],
       maxOutputTokens: 200,
     });
     text = llm.text;
   } catch (err) {
-    return { pass: false, reason: `verifier LLM error: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      pass: false,
+      reason: `verifier LLM error: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   try {
     const parsed = JSON.parse(
-      text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, ''),
+      text
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/, ''),
     ) as Verdict & { verdict: 'pass' | 'fail' };
     return { pass: parsed.verdict === 'pass', reason: parsed.reason };
   } catch {
@@ -1245,7 +1293,9 @@ function listCandidates(): Candidate[] {
   return out;
 }
 
-function parseFront(raw: string): { frontmatter: Record<string, unknown>; body: string } | null {
+function parseFront(
+  raw: string,
+): { frontmatter: Record<string, unknown>; body: string } | null {
   if (!raw.startsWith('---')) return null;
   const end = raw.indexOf('\n---', 3);
   if (end < 0) return null;
@@ -1266,14 +1316,15 @@ function rejectCandidate(cand: Candidate, reason: string): void {
 }
 
 function slugFor(cand: Candidate): string {
-  const base = cand.frontmatter.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  const base =
+    cand.frontmatter.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact';
   return `${cand.frontmatter.type}_${base}`;
 }
-```
+````
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1292,6 +1343,7 @@ git commit -m "feat(memory): add verifier sweep with quality gate, merge, and re
 ## Task 7: `remember` MCP tool
 
 **Files:**
+
 - Create: `src/memory/shared/remember-tool.ts`
 - Test: `src/memory/shared/__tests__/remember-tool.test.ts`
 
@@ -1323,7 +1375,9 @@ describe('remember tool', () => {
       body: 'Never auto-archive emails.',
       scopes: ['personal'],
     });
-    const files = fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'));
+    const files = fs
+      .readdirSync(candidateDir())
+      .filter((f) => f.endsWith('.md'));
     expect(files).toHaveLength(1);
     const raw = fs.readFileSync(path.join(candidateDir(), files[0]), 'utf8');
     expect(raw).toContain('confidence: 1');
@@ -1372,9 +1426,13 @@ export interface RememberInput {
   scopes?: string[];
 }
 
-export async function rememberTool(input: RememberInput): Promise<{ slug: string }> {
+export async function rememberTool(
+  input: RememberInput,
+): Promise<{ slug: string }> {
   if (!VALID_TYPES.includes(input.type)) {
-    throw new Error(`Invalid type: ${input.type}. Must be one of ${VALID_TYPES.join(', ')}`);
+    throw new Error(
+      `Invalid type: ${input.type}. Must be one of ${VALID_TYPES.join(', ')}`,
+    );
   }
   if (!input.name?.trim() || !input.body?.trim()) {
     throw new Error('name and body are required');
@@ -1406,11 +1464,13 @@ export async function rememberTool(input: RememberInput): Promise<{ slug: string
 }
 
 function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40) || 'fact';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'fact'
+  );
 }
 ```
 
@@ -1431,6 +1491,7 @@ git commit -m "feat(memory): add remember tool handler for explicit fact saves"
 ## Task 8: Chat commands (`/memory list|show|forget`)
 
 **Files:**
+
 - Create: `src/memory/shared/commands.ts`
 - Test: `src/memory/shared/__tests__/commands.test.ts`
 - Modify: `src/chat-commands.ts` — add parsing + dispatch
@@ -1543,7 +1604,8 @@ export function parseMemoryCommand(text: string): MemoryCommand | null {
   const action = parts[1]?.toLowerCase();
   if (action === 'list') return { action: 'list' };
   if (action === 'show' && parts[2]) return { action: 'show', slug: parts[2] };
-  if (action === 'forget' && parts[2]) return { action: 'forget', slug: parts[2] };
+  if (action === 'forget' && parts[2])
+    return { action: 'forget', slug: parts[2] };
   return null;
 }
 
@@ -1605,8 +1667,8 @@ export type ChatCommand =
 In `parseCommand` (around line 31), before the `config`-specific block, add:
 
 ```typescript
-  const mem = parseMemoryCommand(trimmed);
-  if (mem) return { type: 'memory', ...mem };
+const mem = parseMemoryCommand(trimmed);
+if (mem) return { type: 'memory', ...mem };
 ```
 
 Add a new exported handler near `handleConfigCommand`:
@@ -1641,6 +1703,7 @@ git commit -m "feat(memory): add /memory list|show|forget chat commands"
 ## Task 9: Orchestrator wiring
 
 **Files:**
+
 - Modify: `src/env.ts` — add kill-switch env vars
 - Modify: `src/index.ts` — register extractor + verifier; emit `turn.completed`
 - Modify: `src/container-runner.ts` — ensure `groups/global/memory/` exists, regenerate index before each container start
@@ -1660,6 +1723,7 @@ If `env.ts` uses a strict schema (e.g. zod), add the keys with sensible defaults
 - [ ] **Step 2: Wire extractor in `src/index.ts`**
 
 Read [src/index.ts](../../../src/index.ts) to find:
+
 1. Where `eventBus` is imported (probably already is).
 2. Where the agent reply is sent back to the user (this is the natural place to emit `turn.completed`).
 3. Where startup-time event subscriptions are registered.
@@ -1707,8 +1771,8 @@ eventBus.emit('turn.completed', {
   timestamp: Date.now(),
   payload: {
     groupName: group.folder, // e.g. "telegram_main"
-    userMessage,             // local variable holding the inbound user text
-    agentReply,              // local variable holding the agent's reply text
+    userMessage, // local variable holding the inbound user text
+    agentReply, // local variable holding the agent's reply text
     durationMs: Date.now() - startedAt,
   },
 });
@@ -1738,6 +1802,7 @@ try {
 ```
 
 This ensures:
+
 1. `groups/global/memory/` always exists when a container starts.
 2. The mounted `MEMORY.md` is fresh (in case promotions happened since last container start).
 
@@ -1814,6 +1879,7 @@ git commit -m "feat(memory): wire extractor, verifier, and remember tool into or
 ## Task 10: Integration test (end-to-end flow)
 
 **Files:**
+
 - Create: `src/memory/shared/__tests__/flow.integration.test.ts`
 
 - [ ] **Step 1: Write the integration test**
@@ -1827,11 +1893,7 @@ import path from 'path';
 import { extractCandidates } from '../extractor.js';
 import { runVerifierSweep } from '../verifier.js';
 import { listFacts } from '../store.js';
-import {
-  ensureMemoryDirs,
-  candidateDir,
-  indexPath,
-} from '../paths.js';
+import { ensureMemoryDirs, candidateDir, indexPath } from '../paths.js';
 
 vi.mock('../../../llm/utility.js', () => ({
   resolveUtilityModel: vi.fn(() => ({ id: 'mock' })),
@@ -1882,7 +1944,9 @@ describe('memory flow integration', () => {
       agentReply: 'Got it, I will keep replies short.',
     });
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(1);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(1);
 
     await runVerifierSweep();
 
@@ -1896,7 +1960,9 @@ describe('memory flow integration', () => {
     expect(index).toContain('Prefers terse responses');
     expect(index).toContain('feedback_prefers_terse_responses.md');
 
-    expect(fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md'))).toHaveLength(0);
+    expect(
+      fs.readdirSync(candidateDir()).filter((f) => f.endsWith('.md')),
+    ).toHaveLength(0);
   });
 
   it('reinforcement from a second group merges and updates count + sources', async () => {
@@ -1987,6 +2053,7 @@ git commit -m "test(memory): end-to-end integration test for extract→verify→
 ## Task 11: CC compatibility documentation
 
 **Files:**
+
 - Create: `docs/memory-cc-compat.md`
 
 - [ ] **Step 1: Write the doc**
@@ -2012,8 +2079,8 @@ shared brain."
 
 Each fact is a markdown file with YAML frontmatter:
 
-\`\`\`markdown
----
+## \`\`\`markdown
+
 name: <short title>
 description: <one-line summary>
 type: user | feedback | project | reference
@@ -2024,6 +2091,7 @@ last_seen: <ISO date>
 last_value: <optional>
 sources: { <groupName>: <count>, ... }
 history: [<prior bodies, newest first, capped at 5>]
+
 ---
 
 <body — 1-3 paragraphs>
@@ -2040,9 +2108,9 @@ to your CC settings. In `~/.claude/settings.json`:
 
 \`\`\`json
 {
-  "additionalDirectories": [
-    "/path/to/nanoclaw/groups/global/memory"
-  ]
+"additionalDirectories": [
+"/path/to/nanoclaw/groups/global/memory"
+]
 }
 \`\`\`
 
@@ -2063,15 +2131,15 @@ Add a second mount for the host CC memory dir:
 
 \`\`\`typescript
 const ccMemDir = path.join(
-  os.homedir(),
-  '.claude/projects/-Users-<you>-dev-nanoclaw/memory',
+os.homedir(),
+'.claude/projects/-Users-<you>-dev-nanoclaw/memory',
 );
 if (fs.existsSync(ccMemDir)) {
-  mounts.push({
-    hostPath: ccMemDir,
-    containerPath: '/workspace/cc-memory',
-    readonly: true,
-  });
+mounts.push({
+hostPath: ccMemDir,
+containerPath: '/workspace/cc-memory',
+readonly: true,
+});
 }
 \`\`\`
 

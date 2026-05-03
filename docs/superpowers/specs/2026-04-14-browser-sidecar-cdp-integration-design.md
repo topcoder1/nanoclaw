@@ -7,6 +7,7 @@
 ## Context
 
 The Apr 13 scope expansion built the browser sidecar scaffolding:
+
 - `src/browser/session-manager.ts` — state machine only, no real CDP connections
 - `src/browser/profile-crypto.ts` — AES-256-GCM encryption, fully implemented
 - `docker-compose.browser.yml` — Playwright sidecar on port 9222, not connected to anything
@@ -38,10 +39,10 @@ Both connect to:
 
 ### Why Dual-Layer
 
-| Layer | When to Use | Cost | Reliability |
-|-------|-------------|------|-------------|
-| Playwright MCP | Known sites, predictable structure, step-by-step workflows | Zero extra LLM calls | High for standard HTML |
-| Stagehand | Unknown sites, complex forms (custom dropdowns, date pickers), "figure it out" | 1-3 Haiku calls/action | High for dynamic UIs |
+| Layer          | When to Use                                                                    | Cost                   | Reliability            |
+| -------------- | ------------------------------------------------------------------------------ | ---------------------- | ---------------------- |
+| Playwright MCP | Known sites, predictable structure, step-by-step workflows                     | Zero extra LLM calls   | High for standard HTML |
+| Stagehand      | Unknown sites, complex forms (custom dropdowns, date pickers), "figure it out" | 1-3 Haiku calls/action | High for dynamic UIs   |
 
 The agent chooses which layer to use per task. Both operate on the same browser context — an agent can navigate via Playwright MCP, then switch to Stagehand for a complex form, seamlessly.
 
@@ -62,6 +63,7 @@ Named Docker network `nanoclaw` connects sidecar and agent containers.
 `ensureBrowserSidecar()` — runs `docker compose -f docker-compose.browser.yml up -d`. Health-checks the CDP endpoint via TCP on port 9222.
 
 **Startup sequence in `index.ts`:**
+
 ```
 1. ensureContainerRuntimeRunning()     (existing)
 2. ensureDockerNetwork("nanoclaw")     (new)
@@ -76,12 +78,14 @@ Named Docker network `nanoclaw` connects sidecar and agent containers.
 ### Container Runner Changes
 
 **In `container-runner.ts`:**
+
 - Add `--network nanoclaw` to `docker run` args for every agent container
 - Pass `BROWSER_CDP_URL=ws://browser-sidecar:9222` as env var
 
 ### Docker Compose Changes
 
 **`docker-compose.browser.yml`:**
+
 - Bump `mem_limit: 512m` → `mem_limit: 1536m` (5 contexts × ~200-300MB each)
 - Network config already references `nanoclaw` as external — no change needed
 
@@ -89,13 +93,13 @@ Named Docker network `nanoclaw` connects sidecar and agent containers.
 
 ### Dependencies
 
-| Package | Location | Purpose |
-|---------|----------|---------|
-| `playwright-core` | Orchestrator | CDP connection to sidecar |
-| `generic-pool` | Orchestrator | Context pooling, idle eviction |
-| `@browserbasehq/stagehand` | Orchestrator | Natural language browser automation |
-| `@playwright/mcp` | Agent container | MCP server for direct browser tools |
-| `pixelmatch` | Orchestrator | Visual diff for monitoring |
+| Package                    | Location        | Purpose                             |
+| -------------------------- | --------------- | ----------------------------------- |
+| `playwright-core`          | Orchestrator    | CDP connection to sidecar           |
+| `generic-pool`             | Orchestrator    | Context pooling, idle eviction      |
+| `@browserbasehq/stagehand` | Orchestrator    | Natural language browser automation |
+| `@playwright/mcp`          | Agent container | MCP server for direct browser tools |
+| `pixelmatch`               | Orchestrator    | Visual diff for monitoring          |
 
 ### New File: `src/browser/playwright-client.ts`
 
@@ -111,23 +115,28 @@ Manages the WebSocket connection to the sidecar.
 Replaces v1 state-machine-only code with `generic-pool` managing real Playwright contexts.
 
 **Pool configuration:**
+
 ```typescript
-const contextPool = createPool<PlaywrightBrowserContext>({
-  create: async () => playwrightClient.newContext(),
-  destroy: async (ctx) => ctx.close(),
-  validate: async (ctx) => ctx.isConnected(),
-}, {
-  max: BROWSER_MAX_CONTEXTS,          // default 5, env override
-  min: 0,                             // no pre-warmed contexts
-  idleTimeoutMillis: 600_000,         // 10min idle eviction
-  acquireTimeoutMillis: 30_000,       // queue up to 30s for a slot
-  evictionRunIntervalMillis: 60_000,  // check for idle every 60s
-});
+const contextPool = createPool<PlaywrightBrowserContext>(
+  {
+    create: async () => playwrightClient.newContext(),
+    destroy: async (ctx) => ctx.close(),
+    validate: async (ctx) => ctx.isConnected(),
+  },
+  {
+    max: BROWSER_MAX_CONTEXTS, // default 5, env override
+    min: 0, // no pre-warmed contexts
+    idleTimeoutMillis: 600_000, // 10min idle eviction
+    acquireTimeoutMillis: 30_000, // queue up to 30s for a slot
+    evictionRunIntervalMillis: 60_000, // check for idle every 60s
+  },
+);
 ```
 
 **Why `generic-pool`:** Battle-proven resource pooling (2M+ npm downloads/week, used by node-postgres, mysql2). Handles max size, idle eviction, acquire queuing, and resource validation. Replaces a custom resource manager that would have used unreliable `os.freemem()` polling.
 
 **Memory management strategy:**
+
 - Pool enforces max concurrent contexts (default 5)
 - Docker `mem_limit` on the sidecar container caps total Chromium memory (1536MB)
 - Idle eviction reclaims unused contexts after 10 minutes
@@ -137,6 +146,7 @@ const contextPool = createPool<PlaywrightBrowserContext>({
 **Session manager methods:**
 
 `acquireContext(groupId)`:
+
 1. If group already has an active context, return it (reset idle timer)
 2. If encrypted profile exists at `groups/{name}/browser/`, decrypt to temp dir
 3. Acquire from pool with decrypted storage state
@@ -144,6 +154,7 @@ const contextPool = createPool<PlaywrightBrowserContext>({
 5. Emit `browser.context.created`
 
 `releaseContext(groupId)`:
+
 1. Export storage state from Playwright context
 2. Save to `groups/{name}/browser/state.json`
 3. Encrypt profile dir, clean up temp dir
@@ -151,12 +162,14 @@ const contextPool = createPool<PlaywrightBrowserContext>({
 5. Emit `browser.context.closed`
 
 `executeAction(groupId, action) → BrowserResult`:
+
 1. acquireContext (get-or-create, resets idle timer)
 2. Get or create page (max `BROWSER_MAX_PAGES` per context, default 2)
 3. Execute action via Playwright
 4. Return result
 
 `shutdown()`:
+
 1. Export + encrypt all active profiles
 2. `contextPool.drain()` then `contextPool.clear()`
 
@@ -177,6 +190,7 @@ BROWSER_ACQUIRE_TIMEOUT  default 30000   (30s queue, new)
 Runs as an MCP server inside each agent container. Claude interacts via standard tool calls — no IPC needed.
 
 **Container setup:**
+
 - `@playwright/mcp` installed in agent container image (`container/Dockerfile`)
 - MCP server config in container's Claude configuration, pointing to `ws://browser-sidecar:9222`
 - Claude receives tools: `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select_option`, `browser_file_upload`, `browser_tab_new`, `browser_tab_select`, `browser_take_screenshot`, `browser_press_key`, `browser_pdf_save`
@@ -198,15 +212,15 @@ Runs in the orchestrator process. Agents request it via IPC for complex tasks.
 ```typescript
 interface StagehandRequest {
   type: 'act' | 'extract' | 'observe';
-  instruction: string;       // natural language
-  schema?: ZodSchema;        // for extract — structured output
-  contextId: string;         // which browser context to use
+  instruction: string; // natural language
+  schema?: ZodSchema; // for extract — structured output
+  contextId: string; // which browser context to use
 }
 
 interface StagehandResponse {
   success: boolean;
-  data?: unknown;             // extracted data, observation results
-  action?: string;            // description of what was done
+  data?: unknown; // extracted data, observation results
+  action?: string; // description of what was done
   error?: string;
 }
 ```
@@ -218,11 +232,11 @@ interface StagehandResponse {
 
 **Three IPC tools:**
 
-| IPC Tool | Maps To | Trust | Use Case |
-|----------|---------|-------|----------|
-| `browser_act` | `stagehand.act(instruction)` | write (per-action) | "click the submit button", "select California from dropdown" |
-| `browser_extract` | `stagehand.extract({ instruction, schema })` | read (session) | "get all product names and prices as JSON" |
-| `browser_observe` | `stagehand.observe(instruction)` | read (session) | "what form fields are on this page?" |
+| IPC Tool          | Maps To                                      | Trust              | Use Case                                                     |
+| ----------------- | -------------------------------------------- | ------------------ | ------------------------------------------------------------ |
+| `browser_act`     | `stagehand.act(instruction)`                 | write (per-action) | "click the submit button", "select California from dropdown" |
+| `browser_extract` | `stagehand.extract({ instruction, schema })` | read (session)     | "get all product names and prices as JSON"                   |
+| `browser_observe` | `stagehand.observe(instruction)`             | read (session)     | "what form fields are on this page?"                         |
 
 ### Shared Browser Context
 
@@ -249,6 +263,7 @@ An agent can navigate via Playwright MCP, then call `browser_act` via IPC for a 
 New file: `container/skills/browser/SKILL.md`
 
 Provides agent guidance on when to use each layer:
+
 - Playwright MCP: known sites, predictable structure, cost-sensitive
 - Stagehand IPC: unknown sites, complex UI components, "figure it out"
 
@@ -310,11 +325,21 @@ Agent IPC: { tool: "browser_act", instruction: "click the delete account button"
 ```
 
 **Destructive intent patterns:**
+
 ```typescript
 const DESTRUCTIVE_BROWSER_PATTERNS = [
-  'delete', 'remove', 'cancel', 'unsubscribe',
-  'transfer', 'send money', 'pay', 'purchase', 'buy',
-  'submit order', 'confirm payment', 'place order',
+  'delete',
+  'remove',
+  'cancel',
+  'unsubscribe',
+  'transfer',
+  'send money',
+  'pay',
+  'purchase',
+  'buy',
+  'submit order',
+  'confirm payment',
+  'place order',
 ];
 ```
 
@@ -396,6 +421,7 @@ const PROFILE_KEY = getProfileKey();
 ### Lifecycle
 
 **Context create:**
+
 1. Check `groups/{name}/browser/state.json` exists
 2. If yes: decrypt file with master key → temp file
 3. Parse JSON → pass as `storageState` to Playwright `newContext()`
@@ -403,12 +429,14 @@ const PROFILE_KEY = getProfileKey();
 5. Agent has all prior cookies/sessions
 
 **Context close (explicit or idle eviction):**
+
 1. `context.storageState()` → export cookies + localStorage
 2. Write to `groups/{name}/browser/state.json` (plaintext, temp)
 3. Encrypt file with master key → overwrites with ciphertext
 4. Close Playwright context
 
 **NanoClaw shutdown:**
+
 1. `sessionManager.shutdown()` → exports + encrypts all active profiles
 2. On next boot, all profiles are encrypted at rest
 
@@ -435,10 +463,10 @@ The existing recursive `encryptProfile()`/`decryptProfile()` functions stay avai
 ```typescript
 interface DiffResult {
   changed: boolean;
-  diffPercentage: number;    // 0-100
-  threshold: number;         // the threshold used (default 5%)
-  screenshotBefore: string;  // base64 PNG (stored)
-  screenshotAfter: string;   // base64 PNG (current)
+  diffPercentage: number; // 0-100
+  threshold: number; // the threshold used (default 5%)
+  screenshotBefore: string; // base64 PNG (stored)
+  screenshotAfter: string; // base64 PNG (current)
 }
 ```
 
@@ -485,6 +513,7 @@ Returns intercepted API responses alongside the page result.
 ### Event Integration
 
 When a visual diff detects a change above threshold:
+
 1. Emit `browser.visual.changed` event to EventBus
 2. Event router picks it up and routes per group rules
 3. Daily digest includes browser watch results
@@ -538,47 +567,49 @@ Visual monitoring always uses the orchestrator's Stagehand/Playwright layer (not
 
 ### New Files
 
-| File | Purpose | LOC Estimate |
-|------|---------|-------------|
-| `src/browser/playwright-client.ts` | CDP connection to sidecar | ~150 |
-| `src/browser/stagehand-bridge.ts` | Stagehand wrapper + IPC handler | ~120 |
-| `src/browser/visual-diff.ts` | Screenshot comparison via pixelmatch | ~80 |
-| `container/skills/browser/SKILL.md` | Agent guidance for both layers | ~80 |
+| File                                | Purpose                              | LOC Estimate |
+| ----------------------------------- | ------------------------------------ | ------------ |
+| `src/browser/playwright-client.ts`  | CDP connection to sidecar            | ~150         |
+| `src/browser/stagehand-bridge.ts`   | Stagehand wrapper + IPC handler      | ~120         |
+| `src/browser/visual-diff.ts`        | Screenshot comparison via pixelmatch | ~80          |
+| `container/skills/browser/SKILL.md` | Agent guidance for both layers       | ~80          |
 
 ### Modified Files
 
-| File | Changes |
-|------|---------|
-| `src/browser/session-manager.ts` | Rewrite: generic-pool + real Playwright contexts |
-| `src/browser/profile-crypto.ts` | Add single-file wrappers, OneCLI key loading |
-| `src/container-runtime.ts` | Add `ensureDockerNetwork()`, `ensureBrowserSidecar()` |
-| `src/container-runner.ts` | Add `--network nanoclaw`, pass `BROWSER_CDP_URL` env |
-| `src/trust-engine.ts` | Add browser tools to `TOOL_CLASS_MAP` |
-| `src/ipc.ts` | Add 3 Stagehand IPC handlers with hybrid trust |
-| `src/config.ts` | Update defaults, add new config vars |
-| `src/index.ts` | Call network/sidecar setup at startup, shutdown on exit |
-| `docker-compose.browser.yml` | Bump `mem_limit` to `1536m` |
-| `container/Dockerfile` | Add `@playwright/mcp` |
+| File                             | Changes                                                 |
+| -------------------------------- | ------------------------------------------------------- |
+| `src/browser/session-manager.ts` | Rewrite: generic-pool + real Playwright contexts        |
+| `src/browser/profile-crypto.ts`  | Add single-file wrappers, OneCLI key loading            |
+| `src/container-runtime.ts`       | Add `ensureDockerNetwork()`, `ensureBrowserSidecar()`   |
+| `src/container-runner.ts`        | Add `--network nanoclaw`, pass `BROWSER_CDP_URL` env    |
+| `src/trust-engine.ts`            | Add browser tools to `TOOL_CLASS_MAP`                   |
+| `src/ipc.ts`                     | Add 3 Stagehand IPC handlers with hybrid trust          |
+| `src/config.ts`                  | Update defaults, add new config vars                    |
+| `src/index.ts`                   | Call network/sidecar setup at startup, shutdown on exit |
+| `docker-compose.browser.yml`     | Bump `mem_limit` to `1536m`                             |
+| `container/Dockerfile`           | Add `@playwright/mcp`                                   |
 
 ### New Dependencies
 
-| Package | Where | Size | Purpose |
-|---------|-------|------|---------|
-| `playwright-core` | Orchestrator | ~5MB | CDP client (no bundled browsers) |
-| `generic-pool` | Orchestrator | ~30KB | Context pooling |
-| `@browserbasehq/stagehand` | Orchestrator | ~varies | Natural language browser automation |
-| `@playwright/mcp` | Agent container | ~varies | MCP server for direct browser tools |
-| `pixelmatch` | Orchestrator | ~50KB | Visual diff |
+| Package                    | Where           | Size    | Purpose                             |
+| -------------------------- | --------------- | ------- | ----------------------------------- |
+| `playwright-core`          | Orchestrator    | ~5MB    | CDP client (no bundled browsers)    |
+| `generic-pool`             | Orchestrator    | ~30KB   | Context pooling                     |
+| `@browserbasehq/stagehand` | Orchestrator    | ~varies | Natural language browser automation |
+| `@playwright/mcp`          | Agent container | ~varies | MCP server for direct browser tools |
+| `pixelmatch`               | Orchestrator    | ~50KB   | Visual diff                         |
 
 ## Milestones
 
 ### Milestone 1: Connectivity
+
 - Docker network creation + sidecar management in `container-runtime.ts`
 - Playwright client connecting to sidecar
 - `generic-pool` replacing state-machine-only session manager
 - Test: create/close browser contexts programmatically
 
 ### Milestone 2: Agent Access
+
 - Playwright MCP installed in agent container + MCP config
 - Stagehand bridge + 3 IPC tool handlers
 - Trust engine entries for all browser tools
@@ -587,6 +618,7 @@ Visual monitoring always uses the orchestrator's Stagehand/Playwright layer (not
 - Test: agent navigates a page and extracts content via both layers
 
 ### Milestone 3: Persistence & Security
+
 - OneCLI key loading in profile-crypto
 - Storage state export/encrypt on context close
 - Storage state decrypt/restore on context create
@@ -594,6 +626,7 @@ Visual monitoring always uses the orchestrator's Stagehand/Playwright layer (not
 - Test: agent logs in, profile saved encrypted, next session resumes
 
 ### Milestone 4: Full Automation
+
 - Visual diff via pixelmatch
 - Network interception via `page.route()`
 - Scheduled browser checks via event router
@@ -602,13 +635,13 @@ Visual monitoring always uses the orchestrator's Stagehand/Playwright layer (not
 
 ## Decisions Log
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| CDP client library | Playwright (via Stagehand + Playwright MCP) | Matches sidecar, TypeScript-native |
-| Resource pooling | `generic-pool` | Battle-proven (2M+ downloads/week), zero deps |
-| Memory management | Docker `mem_limit` + pool max | Reliable cgroup limits vs unreliable `os.freemem()` |
-| Container networking | Shared Docker network `nanoclaw` | Portable, proper DNS, no host.docker.internal dependency |
-| Encryption key | Single master key via OneCLI vault | Simple, consistent with existing credential pattern |
-| Trust model | Hybrid: session-level read, per-action write | Balances speed (reads) and safety (writes) |
-| Browser automation | Dual-layer (Playwright MCP + Stagehand) | Cost-efficient for known sites, autonomous for unknown |
-| Visual diffing | `pixelmatch` | Used by Playwright itself, zero deps, 3M downloads/week |
+| Decision             | Choice                                       | Rationale                                                |
+| -------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| CDP client library   | Playwright (via Stagehand + Playwright MCP)  | Matches sidecar, TypeScript-native                       |
+| Resource pooling     | `generic-pool`                               | Battle-proven (2M+ downloads/week), zero deps            |
+| Memory management    | Docker `mem_limit` + pool max                | Reliable cgroup limits vs unreliable `os.freemem()`      |
+| Container networking | Shared Docker network `nanoclaw`             | Portable, proper DNS, no host.docker.internal dependency |
+| Encryption key       | Single master key via OneCLI vault           | Simple, consistent with existing credential pattern      |
+| Trust model          | Hybrid: session-level read, per-action write | Balances speed (reads) and safety (writes)               |
+| Browser automation   | Dual-layer (Playwright MCP + Stagehand)      | Cost-efficient for known sites, autonomous for unknown   |
+| Visual diffing       | `pixelmatch`                                 | Used by Playwright itself, zero deps, 3M downloads/week  |

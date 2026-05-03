@@ -27,9 +27,9 @@ Run this skill daily at 9 AM, or when the user asks for a Discord digest.
 2. Skip channels in categories named "CLOSED" or with no activity
 3. Group messages by channel and summarize:
    - Key discussions and decisions
-   - Action items or requests (especially in #*-requests channels)
+   - Action items or requests (especially in #\*-requests channels)
    - @mentions of Jonathan
-   - Important announcements (in #*-news channels)
+   - Important announcements (in #\*-news channels)
 4. Format as a structured digest and DM to Jonathan via Discord
 
 ## Digest format

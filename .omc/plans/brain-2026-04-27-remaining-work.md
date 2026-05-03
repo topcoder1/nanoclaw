@@ -13,12 +13,12 @@
 
 Three more pieces from v1 design + one observation-gated promotion + (separately) the deferred frontier patterns. Ranked by impact-vs-effort and prerequisite dependencies.
 
-| Phase | Deliverable | Effort | Blocks | Triggers / readiness |
-|---|---|---|---|---|
-| **3** | Wiki projection layer | 3–4 days | — | None — can start now |
-| **4** | `/wikilint` command | 1–1.5 days | Phase 3 (wiki layer must exist) | After #31 + Phase 3 in main |
-| **5** | Brain-reflection → live prompt injection | 0.5 day | #31 in main + 30 days observation | After 4+ weeks of digests with stable rules |
-| **6+** | Deferred frontier patterns (Letta tool memory, Graphiti edges, Granola) | varies | dedicated re-eval triggers | data signals — not blocked by 3–5 |
+| Phase  | Deliverable                                                             | Effort     | Blocks                            | Triggers / readiness                        |
+| ------ | ----------------------------------------------------------------------- | ---------- | --------------------------------- | ------------------------------------------- |
+| **3**  | Wiki projection layer                                                   | 3–4 days   | —                                 | None — can start now                        |
+| **4**  | `/wikilint` command                                                     | 1–1.5 days | Phase 3 (wiki layer must exist)   | After #31 + Phase 3 in main                 |
+| **5**  | Brain-reflection → live prompt injection                                | 0.5 day    | #31 in main + 30 days observation | After 4+ weeks of digests with stable rules |
+| **6+** | Deferred frontier patterns (Letta tool memory, Graphiti edges, Granola) | varies     | dedicated re-eval triggers        | data signals — not blocked by 3–5           |
 
 ---
 
@@ -89,6 +89,7 @@ Three independent trigger paths writing into the same projection module:
 - Manual smoke: run `npx tsx scripts/wiki-materialize.ts`, eyeball a few generated pages.
 
 **Definition of done:**
+
 - ✅ Typecheck + brain test suite green
 - ✅ Independent code-reviewer pass clean (HIGH/MED findings addressed)
 - ✅ One real entity rendered to disk and visually inspected
@@ -96,6 +97,7 @@ Three independent trigger paths writing into the same projection module:
 - ✅ Stacked PR opened (base = main if #29/#31 are merged, else stacked)
 
 **Risks:**
+
 - LLM summary drift — mitigated by the regen trigger + bounded prompt.
 - Disk pressure on large entity sets — mitigated by per-entity files (not one giant index) + `wiki_summary` cached in DB.
 - Race between on-insert coalesce and daily-pass — both writers go through the same `AsyncWriteQueue`; collision is a no-op (last write wins, deterministic content).
@@ -141,6 +143,7 @@ Surface four classes of issue:
 - Reuse `add-karpathy-llm-wiki` skill's lint cron pattern; one less abstraction.
 
 **Definition of done:**
+
 - ✅ Typecheck + tests green
 - ✅ Independent code-reviewer pass clean
 - ✅ Manual run on real `brain.db` produces a non-empty report — eyeball the findings
@@ -157,6 +160,7 @@ The promotion path the design doc explicitly defers. **Don't ship until 30+ days
 ### Readiness check (manual, not code)
 
 After 4+ weekly digests with `📐 New procedural rules` populated, evaluate:
+
 - Are the rules specific and imperative (not "be helpful")?
 - Are they consistent with how you'd want the agent to behave?
 - Are supersession decisions matching your judgment?
@@ -179,6 +183,7 @@ If yes → ship Phase 5. If no → tune the prompt in `procedural-reflect.ts:bui
 - Add an integration test verifying that a brain-reflection rule with no matches in 30 days decays toward prune threshold.
 
 **Definition of done:**
+
 - ✅ Live in production behind the env flag
 - ✅ One golden-set retrieval test that verifies a brain-reflection rule influences agent behavior
 - ✅ Design doc updated with the promotion note + measurement window
@@ -189,11 +194,11 @@ If yes → ship Phase 5. If no → tune the prompt in `procedural-reflect.ts:bui
 
 Pinned in the design doc with explicit re-eval triggers. **Don't pre-build any of these** — they need data justification.
 
-| Pattern | Re-eval trigger |
-|---|---|
-| Letta-style `core_memory_*` tool calls | When the agent regularly needs to write to brain mid-turn (not just read) |
+| Pattern                                      | Re-eval trigger                                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Letta-style `core_memory_*` tool calls       | When the agent regularly needs to write to brain mid-turn (not just read)                                                                        |
 | Zep Graphiti edge-embedded bi-temporal graph | When `/recall` queries regularly need multi-hop temporal reasoning and the golden set shows current `valid_from/until` filtering is insufficient |
-| Granola/Limitless ambient capture | If meeting transcripts become a regular ingest source |
+| Granola/Limitless ambient capture            | If meeting transcripts become a regular ingest source                                                                                            |
 
 When a trigger fires, write a new design doc (`brain-architecture-v3-...md`), don't extend v1.
 
@@ -204,11 +209,13 @@ When a trigger fires, write a new design doc (`brain-architecture-v3-...md`), do
 ### Stacking strategy
 
 If #29 + #31 haven't merged when Phase 3 starts:
+
 - Phase 3 base = `claude/brain-procedural-memory` (top of stack)
 - Phase 4 base = `claude/brain-wiki-projection`
 - When upstream PRs merge, GitHub auto-rebases the children
 
 If #29 + #31 are merged:
+
 - Phase 3 base = `main`, simpler
 - Phase 4 base = Phase 3's branch (still stacked because it depends on `last_synthesis_at`)
 
@@ -225,6 +232,7 @@ Every phase ends with an independent `code-reviewer` agent pass. Don't self-appr
 ### Cost ceiling
 
 Total LLM spend across all phases worst case:
+
 - Procedural reflection (already shipped): ~$0.50/yr
 - Wiki summaries (Phase 3.2): ~250 tokens × ~50 entities × weekly = ~$0.05/wk × 52 = **~$3/yr**
 - Wikilint near-duplicate scoring uses existing local cosine, no LLM cost.
@@ -234,6 +242,7 @@ Total brain LLM budget: well under $10/yr above the existing `extract.ts` Haiku 
 ### Observability
 
 Each new module logs to the existing `pino` instance. Each phase adds:
+
 - One line per scheduler tick (info-level)
 - One line per emitted artifact (created/updated count)
 - Warn on degraded paths (no LLM, no DB, etc.)
@@ -244,11 +253,11 @@ No new metrics tables — ride on `system_state` for last-fire timestamps, `cost
 
 ## Estimated total
 
-| Phase | Effort | Calendar |
-|---|---|---|
-| 3 — Wiki projection | 3–4 days | 1 week, parallel-able with Phase 5 readiness window |
-| 4 — `/wikilint` | 1–1.5 days | After Phase 3 merges |
-| 5 — Live injection (if greenlit) | 0.5 day | ≥30 days after #31 merges |
+| Phase                            | Effort     | Calendar                                            |
+| -------------------------------- | ---------- | --------------------------------------------------- |
+| 3 — Wiki projection              | 3–4 days   | 1 week, parallel-able with Phase 5 readiness window |
+| 4 — `/wikilint`                  | 1–1.5 days | After Phase 3 merges                                |
+| 5 — Live injection (if greenlit) | 0.5 day    | ≥30 days after #31 merges                           |
 
 **Total active engineering: ~5 days. Calendar: ~6 weeks** (mostly waiting on the Phase 5 observation window).
 

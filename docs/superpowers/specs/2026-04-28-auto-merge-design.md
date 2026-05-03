@@ -57,11 +57,11 @@ The sweep is idempotent: high-confidence merges leave a single canonical entity 
 
 ## Confidence tiers (deterministic v1)
 
-| Tier   | Rule                                                                                                                                                                                                                       | Action                                                                                                       | Confidence |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------- |
-| HIGH   | Two entities share an exact `entity_aliases.field_value` for any of: `email` (lowercased), `phone` (E.164-normalized), `signal_uuid`, `discord_snowflake`, `whatsapp_jid`. These identifiers are unique-by-design per human. | Silent auto-merge. Write `entity_merge_log` row with `merged_by='auto:high'`, `confidence=1.0`.              | 1.0        |
-| MEDIUM | `canonical->>'name'` exact match (case-insensitive, whitespace-trimmed) AND same `entity_type` AND no conflicting hard identifier (defined below).                                                                          | Persist to `entity_merge_suggestions`. Emit `entity.merge.suggested` event. Send chat suggestion to operator. | 0.5–0.8    |
-| LOW    | Name fuzzy match, edit-distance ≤ 2, same email-domain only.                                                                                                                                                              | Drop. Increment `auto_merge_low_conf_dropped` metric. No row written.                                       | <0.5       |
+| Tier   | Rule                                                                                                                                                                                                                         | Action                                                                                                        | Confidence |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------- |
+| HIGH   | Two entities share an exact `entity_aliases.field_value` for any of: `email` (lowercased), `phone` (E.164-normalized), `signal_uuid`, `discord_snowflake`, `whatsapp_jid`. These identifiers are unique-by-design per human. | Silent auto-merge. Write `entity_merge_log` row with `merged_by='auto:high'`, `confidence=1.0`.               | 1.0        |
+| MEDIUM | `canonical->>'name'` exact match (case-insensitive, whitespace-trimmed) AND same `entity_type` AND no conflicting hard identifier (defined below).                                                                           | Persist to `entity_merge_suggestions`. Emit `entity.merge.suggested` event. Send chat suggestion to operator. | 0.5–0.8    |
+| LOW    | Name fuzzy match, edit-distance ≤ 2, same email-domain only.                                                                                                                                                                 | Drop. Increment `auto_merge_low_conf_dropped` metric. No row written.                                         | <0.5       |
 
 **Conflicting hard identifier** — entity A has email `alice@x.com` AND entity B has email `bob@y.com` (or different `signal_uuid`, etc.). If both entities have the same hard-identifier field with different values, they cannot be the same person and the medium-tier rule short-circuits to no match.
 
@@ -113,8 +113,8 @@ One new event type added to `src/events.ts`:
 export interface EntityMergeSuggestedEvent {
   type: 'entity.merge.suggested';
   suggestionId: string;
-  entityIdA: string;            // lex-smaller
-  entityIdB: string;            // lex-larger
+  entityIdA: string; // lex-smaller
+  entityIdB: string; // lex-larger
   confidence: number;
   reasonCode: 'name_exact' | 'phone_normalized' | 'email_exact' | string;
   evidence: {
@@ -167,13 +167,13 @@ The lex-ordering of `(entity_id_a, entity_id_b)` in the suggestions table means 
 
 ## Operator escape hatches (env vars)
 
-| Var                                       | Default | Purpose                                                   |
-| ----------------------------------------- | ------- | --------------------------------------------------------- |
-| `BRAIN_MERGE_AUTO_ENABLED`                | `false` | Master switch. When false, sweep is a no-op.              |
-| `BRAIN_MERGE_AUTO_HIGH_CONF_THRESHOLD`    | `1.0`   | Minimum confidence for silent auto-merge.                 |
-| `BRAIN_MERGE_AUTO_SUGGEST_THRESHOLD`      | `0.5`   | Minimum confidence for chat suggestion.                   |
-| `BRAIN_MERGE_AUTO_DRY_RUN`                | `false` | Log would-merges and would-suggestions; perform no writes.|
-| `BRAIN_MERGE_AUTO_NOTIFY_CHAT`            | `true`  | Set false to record suggestions silently (no chat reply). |
+| Var                                    | Default | Purpose                                                    |
+| -------------------------------------- | ------- | ---------------------------------------------------------- |
+| `BRAIN_MERGE_AUTO_ENABLED`             | `false` | Master switch. When false, sweep is a no-op.               |
+| `BRAIN_MERGE_AUTO_HIGH_CONF_THRESHOLD` | `1.0`   | Minimum confidence for silent auto-merge.                  |
+| `BRAIN_MERGE_AUTO_SUGGEST_THRESHOLD`   | `0.5`   | Minimum confidence for chat suggestion.                    |
+| `BRAIN_MERGE_AUTO_DRY_RUN`             | `false` | Log would-merges and would-suggestions; perform no writes. |
+| `BRAIN_MERGE_AUTO_NOTIFY_CHAT`         | `true`  | Set false to record suggestions silently (no chat reply).  |
 
 Dry-run mode writes a JSON-line log to `~/.nanoclaw/logs/auto-merge-dry-run.log` for inspection. The existing `BRAIN_MERGE_AUTO_LOW_CONF_REJECT` placeholder in `.env.example` is removed — low-conf is unconditionally rejected in v1, so the gate has no behavior to control.
 
@@ -217,17 +217,17 @@ The pre-existing concrete fixture (`Jonathan` × 2 in production) is preserved a
 
 ## Files touched
 
-| File                                                        | Type   | Approx LOC |
-| ----------------------------------------------------------- | ------ | ---------- |
-| `src/brain/auto-merge.ts`                                   | new    | ~250       |
-| `src/brain/__tests__/auto-merge.test.ts`                    | new    | ~200       |
-| `src/brain/schema.sql`                                      | edit   | +30        |
-| `src/events.ts`                                             | edit   | +25        |
-| `src/brain/identity-merge-handler.ts`                       | edit   | +40        |
-| `src/brain/identity-merge.ts`                               | edit   | +60 (`claw merge-reject` + `mergeEntities` lifecycle hook) |
-| `src/task-scheduler.ts`                                     | edit   | +15        |
-| `.env.example`                                              | edit   | +5 / -1    |
-| `docs/superpowers/specs/2026-04-28-auto-merge-design.md`    | new    | this file  |
+| File                                                     | Type | Approx LOC                                                 |
+| -------------------------------------------------------- | ---- | ---------------------------------------------------------- |
+| `src/brain/auto-merge.ts`                                | new  | ~250                                                       |
+| `src/brain/__tests__/auto-merge.test.ts`                 | new  | ~200                                                       |
+| `src/brain/schema.sql`                                   | edit | +30                                                        |
+| `src/events.ts`                                          | edit | +25                                                        |
+| `src/brain/identity-merge-handler.ts`                    | edit | +40                                                        |
+| `src/brain/identity-merge.ts`                            | edit | +60 (`claw merge-reject` + `mergeEntities` lifecycle hook) |
+| `src/task-scheduler.ts`                                  | edit | +15                                                        |
+| `.env.example`                                           | edit | +5 / -1                                                    |
+| `docs/superpowers/specs/2026-04-28-auto-merge-design.md` | new  | this file                                                  |
 
 Total: ~615 LOC of new code + ~150 LOC of edits.
 

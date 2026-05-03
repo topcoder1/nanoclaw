@@ -16,30 +16,30 @@
 
 **New files:**
 
-| Path | Purpose |
-|---|---|
-| `src/chat-message-cache.ts` | 24h SQLite cache of inbound chat messages (used by reaction lookup + future window flusher). |
-| `src/chat-message-cache.test.ts` | Unit tests for the cache. |
-| `src/chat-attachments.ts` | Download, store, sha256-dedup, retry sweep for inbound attachments. |
-| `src/chat-attachments.test.ts` | Unit tests for the attachment store. |
-| `src/brain/chat-extract.ts` | Chat-aware extraction prompt + entity helpers; thin wrapper over `extractPipeline`. |
-| `src/brain/chat-extract.test.ts` | Tests for chat-mode extraction. |
-| `src/brain/chat-ingest.ts` | Handler for `chat.message.saved` — raw_events insert, extract, KU + Qdrant. |
-| `src/brain/chat-ingest.test.ts` | Tests for the chat ingest handler. |
+| Path                             | Purpose                                                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------------------- |
+| `src/chat-message-cache.ts`      | 24h SQLite cache of inbound chat messages (used by reaction lookup + future window flusher). |
+| `src/chat-message-cache.test.ts` | Unit tests for the cache.                                                                    |
+| `src/chat-attachments.ts`        | Download, store, sha256-dedup, retry sweep for inbound attachments.                          |
+| `src/chat-attachments.test.ts`   | Unit tests for the attachment store.                                                         |
+| `src/brain/chat-extract.ts`      | Chat-aware extraction prompt + entity helpers; thin wrapper over `extractPipeline`.          |
+| `src/brain/chat-extract.test.ts` | Tests for chat-mode extraction.                                                              |
+| `src/brain/chat-ingest.ts`       | Handler for `chat.message.saved` — raw_events insert, extract, KU + Qdrant.                  |
+| `src/brain/chat-ingest.test.ts`  | Tests for the chat ingest handler.                                                           |
 
 **Modified files:**
 
-| Path | Change |
-|---|---|
-| `src/db.ts` | Add `chat_messages` CREATE TABLE + indexes (idempotent migration block). |
-| `src/brain/db.ts` | Add idempotent `ALTER TABLE knowledge_units ADD COLUMN superseded_by TEXT` migration. |
-| `src/events.ts` | Add `ChatMessageSavedEvent`, `ChatAttachment` interfaces; register `'chat.message.saved'` in `EventTypes`. |
-| `src/brain/extract.ts` | Add `mode?: 'email' \| 'chat_single' \| 'chat_window'` to `ExtractInput`; bypass signal-score gate when chat mode; chat-aware prompt branch in `buildPrompt`. |
-| `src/brain/entities.ts` | Export `findEntityIdByAlias`; add `createPersonFromHandle(platform, handle, displayName?)`. |
-| `src/brain/ingest.ts` | Register `eventBus.on('chat.message.saved', ...)` in `start()`; track unsubscribes as an array so the new handler can be torn down. |
-| `src/channels/discord.ts` | Add `GuildMessageReactions` + `DirectMessageReactions` intents; persist incoming messages to cache; handle `MessageUpdate` (cache update); handle `MessageReactionAdd` (🧠 → emit event); register `/save` slash command. |
-| `src/channels/signal.ts` | Persist incoming messages to cache; detect `dataMessage.reaction` → emit event; detect `^claw save` text → emit event; detect `editMessage` / `remoteDelete` (cache update only — handlers in PR 4); fetch attachments via `/v1/attachments/<id>`. |
-| `.env.example` | Add `BRAIN_SAVE_EMOJI`, `CHAT_CACHE_TTL_HOURS`, `BRAIN_ATTACHMENT_MAX_BYTES`, `BRAIN_IMAGE_VISION`. |
+| Path                      | Change                                                                                                                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/db.ts`               | Add `chat_messages` CREATE TABLE + indexes (idempotent migration block).                                                                                                                                                                           |
+| `src/brain/db.ts`         | Add idempotent `ALTER TABLE knowledge_units ADD COLUMN superseded_by TEXT` migration.                                                                                                                                                              |
+| `src/events.ts`           | Add `ChatMessageSavedEvent`, `ChatAttachment` interfaces; register `'chat.message.saved'` in `EventTypes`.                                                                                                                                         |
+| `src/brain/extract.ts`    | Add `mode?: 'email' \| 'chat_single' \| 'chat_window'` to `ExtractInput`; bypass signal-score gate when chat mode; chat-aware prompt branch in `buildPrompt`.                                                                                      |
+| `src/brain/entities.ts`   | Export `findEntityIdByAlias`; add `createPersonFromHandle(platform, handle, displayName?)`.                                                                                                                                                        |
+| `src/brain/ingest.ts`     | Register `eventBus.on('chat.message.saved', ...)` in `start()`; track unsubscribes as an array so the new handler can be torn down.                                                                                                                |
+| `src/channels/discord.ts` | Add `GuildMessageReactions` + `DirectMessageReactions` intents; persist incoming messages to cache; handle `MessageUpdate` (cache update); handle `MessageReactionAdd` (🧠 → emit event); register `/save` slash command.                          |
+| `src/channels/signal.ts`  | Persist incoming messages to cache; detect `dataMessage.reaction` → emit event; detect `^claw save` text → emit event; detect `editMessage` / `remoteDelete` (cache update only — handlers in PR 4); fetch attachments via `/v1/attachments/<id>`. |
+| `.env.example`            | Add `BRAIN_SAVE_EMOJI`, `CHAT_CACHE_TTL_HOURS`, `BRAIN_ATTACHMENT_MAX_BYTES`, `BRAIN_IMAGE_VISION`.                                                                                                                                                |
 
 **Out of scope for PR 1** (PRs 2–4): window flusher, identity-merge engine, edit/delete sync, `chat.window.flushed` event handler, `chat_window` extraction prompt content (the `mode` value is added in this PR but only `chat_single` produces output).
 
@@ -48,6 +48,7 @@
 ## Task 1: `superseded_by` column migration
 
 **Files:**
+
 - Modify: `src/brain/db.ts`
 - Test: `src/brain/__tests__/schema.test.ts`
 
@@ -60,7 +61,9 @@ Open `src/brain/__tests__/schema.test.ts` and append:
 ```ts
 it('knowledge_units has a superseded_by column for forward-link supersession', () => {
   const db = openTestBrainDb(); // existing helper in this file
-  const cols = db.prepare(`PRAGMA table_info(knowledge_units)`).all() as Array<{ name: string }>;
+  const cols = db.prepare(`PRAGMA table_info(knowledge_units)`).all() as Array<{
+    name: string;
+  }>;
   const names = cols.map((c) => c.name);
   expect(names).toContain('superseded_at');
   expect(names).toContain('superseded_by');
@@ -111,6 +114,7 @@ git commit -m "feat(brain): add knowledge_units.superseded_by for edit-sync forw
 ## Task 2: `chat_messages` cache table and module
 
 **Files:**
+
 - Create: `src/chat-message-cache.ts`
 - Create: `src/chat-message-cache.test.ts`
 - Modify: `src/db.ts`
@@ -201,15 +205,27 @@ describe('chat-message-cache', () => {
 
   it('upserts on conflicting key — newer write replaces older', () => {
     putChatMessage(sample);
-    putChatMessage({ ...sample, text: 'edited body', edited_at: '2026-04-27T12:05:00.000Z' });
+    putChatMessage({
+      ...sample,
+      text: 'edited body',
+      edited_at: '2026-04-27T12:05:00.000Z',
+    });
     const got = getChatMessage('discord', 'channel-1', 'msg-1')!;
     expect(got.text).toBe('edited body');
     expect(got.edited_at).toBe('2026-04-27T12:05:00.000Z');
   });
 
   it('prunes rows older than the cutoff', () => {
-    putChatMessage({ ...sample, message_id: 'old', sent_at: '2026-04-25T00:00:00.000Z' });
-    putChatMessage({ ...sample, message_id: 'new', sent_at: '2026-04-27T12:00:00.000Z' });
+    putChatMessage({
+      ...sample,
+      message_id: 'old',
+      sent_at: '2026-04-25T00:00:00.000Z',
+    });
+    putChatMessage({
+      ...sample,
+      message_id: 'new',
+      sent_at: '2026-04-27T12:00:00.000Z',
+    });
     const removed = pruneChatMessages('2026-04-26T00:00:00.000Z');
     expect(removed).toBe(1);
     expect(getChatMessage('discord', 'channel-1', 'old')).toBeNull();
@@ -217,9 +233,21 @@ describe('chat-message-cache', () => {
   });
 
   it('lists messages in a chat ordered by sent_at descending', () => {
-    putChatMessage({ ...sample, message_id: 'a', sent_at: '2026-04-27T12:00:00.000Z' });
-    putChatMessage({ ...sample, message_id: 'b', sent_at: '2026-04-27T12:05:00.000Z' });
-    putChatMessage({ ...sample, message_id: 'c', sent_at: '2026-04-27T11:55:00.000Z' });
+    putChatMessage({
+      ...sample,
+      message_id: 'a',
+      sent_at: '2026-04-27T12:00:00.000Z',
+    });
+    putChatMessage({
+      ...sample,
+      message_id: 'b',
+      sent_at: '2026-04-27T12:05:00.000Z',
+    });
+    putChatMessage({
+      ...sample,
+      message_id: 'c',
+      sent_at: '2026-04-27T11:55:00.000Z',
+    });
     const list = listChatMessages('discord', 'channel-1', { limit: 10 });
     expect(list.map((m) => m.message_id)).toEqual(['b', 'a', 'c']);
   });
@@ -333,7 +361,9 @@ export function listChatMessages(
       opts.sinceIso ?? null,
       opts.sinceIso ?? null,
       opts.limit ?? 200,
-    ) as Array<Omit<ChatMessageRow, 'attachments'> & { attachments: string | null }>;
+    ) as Array<
+    Omit<ChatMessageRow, 'attachments'> & { attachments: string | null }
+  >;
   return rows.map((r) => ({
     ...r,
     attachments: r.attachments ? JSON.parse(r.attachments) : undefined,
@@ -385,6 +415,7 @@ git commit -m "feat(chat): chat_messages cache table + cache module"
 ## Task 3: New event types
 
 **Files:**
+
 - Modify: `src/events.ts`
 - Test: `src/event-bus.test.ts`
 
@@ -467,9 +498,11 @@ Run: `npx vitest run src/event-bus.test.ts -t ChatMessageSavedEvent`
 Expected: PASS.
 
 Run a wider build check:
+
 ```bash
 npx tsc --noEmit
 ```
+
 Expected: clean.
 
 - [ ] **Step 5: Commit**
@@ -484,6 +517,7 @@ git commit -m "feat(events): add ChatMessageSavedEvent + ChatAttachment types"
 ## Task 4: Attachment storage with sha256-dedup and retry counter
 
 **Files:**
+
 - Create: `src/chat-attachments.ts`
 - Create: `src/chat-attachments.test.ts`
 - Modify: `.env.example`
@@ -554,7 +588,11 @@ describe('chat-attachments', () => {
     const fetcher = vi.fn();
     const desc = await storeAttachment(
       { platform: 'discord', chat_id: 'c1', message_id: 'm1' },
-      { filename: 'too-big.bin', mime: 'application/octet-stream', size_bytes: 100 },
+      {
+        filename: 'too-big.bin',
+        mime: 'application/octet-stream',
+        size_bytes: 100,
+      },
       fetcher,
     );
     expect(desc).toBeNull();
@@ -588,11 +626,7 @@ Create `src/chat-attachments.ts`:
 
 ```ts
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -614,7 +648,10 @@ export interface AttachmentDescriptor {
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
 export function attachmentRoot(): string {
-  return process.env.BRAIN_ATTACHMENT_DIR ?? join(homedir(), '.nanoclaw', 'chat-attachments');
+  return (
+    process.env.BRAIN_ATTACHMENT_DIR ??
+    join(homedir(), '.nanoclaw', 'chat-attachments')
+  );
 }
 
 function maxBytes(): number {
@@ -636,7 +673,12 @@ export async function storeAttachment(
 ): Promise<ChatAttachment | null> {
   if (desc.size_bytes > maxBytes()) {
     logger.warn(
-      { ...ref, filename: desc.filename, size: desc.size_bytes, cap: maxBytes() },
+      {
+        ...ref,
+        filename: desc.filename,
+        size: desc.size_bytes,
+        cap: maxBytes(),
+      },
       'attachment exceeds size cap — skipping download',
     );
     return null;
@@ -646,7 +688,11 @@ export async function storeAttachment(
     buf = await fetcher();
   } catch (err) {
     logger.warn(
-      { ...ref, filename: desc.filename, err: err instanceof Error ? err.message : String(err) },
+      {
+        ...ref,
+        filename: desc.filename,
+        err: err instanceof Error ? err.message : String(err),
+      },
       'attachment fetch failed',
     );
     return null;
@@ -698,6 +744,7 @@ git commit -m "feat(chat): attachment store with sha256-dedup and size cap"
 ## Task 5: Attachment-to-text adapters (PDF, image, audio, fallback)
 
 **Files:**
+
 - Modify: `src/chat-attachments.ts`
 - Modify: `src/chat-attachments.test.ts`
 
@@ -716,7 +763,13 @@ describe('describeAttachment', () => {
     const path = join(baseDir, 'a.zip');
     writeFileSync(path, Buffer.from('PK\x03\x04'));
     const out = await describeAttachment(
-      { filename: 'archive.zip', mime: 'application/zip', sha256: 'x', local_path: path, size_bytes: 4 },
+      {
+        filename: 'archive.zip',
+        mime: 'application/zip',
+        sha256: 'x',
+        local_path: path,
+        size_bytes: 4,
+      },
       { imageVision: false, voiceTranscribe: false },
     );
     expect(out).toBe('[Attachment: archive.zip, 4 B]');
@@ -726,7 +779,13 @@ describe('describeAttachment', () => {
     const path = join(baseDir, 'a.png');
     writeFileSync(path, Buffer.alloc(8));
     const out = await describeAttachment(
-      { filename: 'pic.png', mime: 'image/png', sha256: 'x', local_path: path, size_bytes: 8 },
+      {
+        filename: 'pic.png',
+        mime: 'image/png',
+        sha256: 'x',
+        local_path: path,
+        size_bytes: 8,
+      },
       { imageVision: false, voiceTranscribe: false },
     );
     expect(out).toBe('[Attachment image: pic.png]');
@@ -735,9 +794,17 @@ describe('describeAttachment', () => {
   it('extracts text from a PDF when pdftotext is available', async () => {
     // pdftotext is invoked by the impl; we'll mock spawn/exec behind an injection point.
     // For this unit test, pass a stubbed extractor.
-    const stub = vi.fn().mockResolvedValue('Quarterly report — Q3 revenue up 12%.');
+    const stub = vi
+      .fn()
+      .mockResolvedValue('Quarterly report — Q3 revenue up 12%.');
     const out = await describeAttachment(
-      { filename: 'q3.pdf', mime: 'application/pdf', sha256: 'x', local_path: '/dev/null', size_bytes: 100 },
+      {
+        filename: 'q3.pdf',
+        mime: 'application/pdf',
+        sha256: 'x',
+        local_path: '/dev/null',
+        size_bytes: 100,
+      },
       { imageVision: false, voiceTranscribe: false, _pdfExtractor: stub },
     );
     expect(out.startsWith('[Attachment PDF: q3.pdf]')).toBe(true);
@@ -779,10 +846,20 @@ function fmtBytes(n: number): string {
 
 async function defaultPdfExtractor(path: string): Promise<string> {
   try {
-    const { stdout } = await pExecFile('pdftotext', ['-layout', '-q', '-l', '50', path, '-']);
+    const { stdout } = await pExecFile('pdftotext', [
+      '-layout',
+      '-q',
+      '-l',
+      '50',
+      path,
+      '-',
+    ]);
     return stdout.trim();
   } catch (err) {
-    logger.warn({ path, err: err instanceof Error ? err.message : String(err) }, 'pdftotext failed');
+    logger.warn(
+      { path, err: err instanceof Error ? err.message : String(err) },
+      'pdftotext failed',
+    );
     return '';
   }
 }
@@ -821,8 +898,11 @@ export async function describeAttachment(
       : `[Attachment image: ${att.filename}]`;
   }
   if (att.mime.startsWith('audio/')) {
-    if (!opts.voiceTranscribe) return `[Attachment audio: ${att.filename}, ${size}]`;
-    const tx = (await (opts._audioTranscriber ?? defaultAudioTranscriber)(att.local_path)).trim();
+    if (!opts.voiceTranscribe)
+      return `[Attachment audio: ${att.filename}, ${size}]`;
+    const tx = (
+      await (opts._audioTranscriber ?? defaultAudioTranscriber)(att.local_path)
+    ).trim();
     return tx
       ? `[Attachment audio: ${att.filename}]\n${tx}`
       : `[Attachment audio: ${att.filename}, ${size}]`;
@@ -848,6 +928,7 @@ git commit -m "feat(chat): describeAttachment adapters (PDF/image/audio/fallback
 ## Task 6: ExtractInput.mode + chat-aware prompt + bypass signal-score gate
 
 **Files:**
+
 - Modify: `src/brain/extract.ts`
 - Modify: `src/brain/__tests__/extract.test.ts`
 
@@ -860,24 +941,32 @@ Append to `src/brain/__tests__/extract.test.ts`:
 ```ts
 it('chat_single mode bypasses the signal-score gate even on plain chat', async () => {
   const calls: Array<{ system: string; user: string }> = [];
-  const fakeLlm = vi.fn(async ({ system, user }: { system: string; user: string }) => {
-    calls.push({ system, user });
-    return {
-      claims: [{
-        text: 'Launch moved to next Wednesday',
-        topic_seed: 'launch date',
-        topic_key: 'launch_date',
-        entities_mentioned: [],
-        confidence: 0.85,
-        needs_review: false,
-        extracted_by: 'llm',
-      }],
-      _usage: { input_tokens: 200, output_tokens: 50 },
-    };
-  });
+  const fakeLlm = vi.fn(
+    async ({ system, user }: { system: string; user: string }) => {
+      calls.push({ system, user });
+      return {
+        claims: [
+          {
+            text: 'Launch moved to next Wednesday',
+            topic_seed: 'launch date',
+            topic_key: 'launch_date',
+            entities_mentioned: [],
+            confidence: 0.85,
+            needs_review: false,
+            extracted_by: 'llm',
+          },
+        ],
+        _usage: { input_tokens: 200, output_tokens: 50 },
+      };
+    },
+  );
   const claims = await extractPipeline(
     { text: "ok let's call it — launch = next Wed", mode: 'chat_single' },
-    { llmCaller: fakeLlm as unknown as LlmCaller, db: testDb, day: '2026-04-27' },
+    {
+      llmCaller: fakeLlm as unknown as LlmCaller,
+      db: testDb,
+      day: '2026-04-27',
+    },
   );
   expect(fakeLlm).toHaveBeenCalledTimes(1);
   expect(claims.length).toBeGreaterThan(0);
@@ -888,7 +977,11 @@ it('default email mode still gates on signal score', async () => {
   const fakeLlm = vi.fn();
   await extractPipeline(
     { text: 'hi how are you', sender: 'a@b.com' }, // no $/deal/dates → signal=0
-    { llmCaller: fakeLlm as unknown as LlmCaller, db: testDb, day: '2026-04-27' },
+    {
+      llmCaller: fakeLlm as unknown as LlmCaller,
+      db: testDb,
+      day: '2026-04-27',
+    },
   );
   expect(fakeLlm).not.toHaveBeenCalled();
 });
@@ -926,7 +1019,7 @@ Locate `extractLLM` (search for `function extractLLM(`). Inside, before the line
 ```ts
 const isChat = input.mode === 'chat_single' || input.mode === 'chat_window';
 if (!isChat && opts.signalScore < 0.3) {
-  return [];  // existing email-mode gate
+  return []; // existing email-mode gate
 }
 // chat modes proceed regardless of signal score; the trigger is the signal.
 ```
@@ -946,16 +1039,22 @@ function buildPrompt(input: ExtractInput): string {
       `Skip greetings, acknowledgements, and pure reactions.`,
       input.sender ? `Sender: ${input.sender}` : '',
       `Message: ${input.text}`,
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
   if (input.mode === 'chat_window') {
     return [
       `You extract durable knowledge from a chat-conversation transcript. Return JSON {claims: [...]}.`,
       `Identify distinct factual statements, decisions, and commitments — one claim per topic.`,
       `Skip chitchat, greetings, and pure reactions. Use participant names where attribution matters.`,
-      input.participants?.length ? `Participants: ${input.participants.join(', ')}` : '',
+      input.participants?.length
+        ? `Participants: ${input.participants.join(', ')}`
+        : '',
       `Transcript:\n${input.text}`,
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
   // ... existing email prompt body unchanged below ...
 }
@@ -978,6 +1077,7 @@ git commit -m "feat(brain): ExtractInput.mode — chat extraction bypasses email
 ## Task 7: `createPersonFromHandle` + entity-alias namespaces
 
 **Files:**
+
 - Modify: `src/brain/entities.ts`
 - Modify: `src/brain/__tests__/entities.test.ts`
 
@@ -994,14 +1094,22 @@ describe('createPersonFromHandle', () => {
   it('creates a person and discord_username alias for a Discord handle', async () => {
     const e = await createPersonFromHandle('discord', 'alice#1234', 'Alice');
     expect(e.kind).toBe('person');
-    const found = findEntityIdByAlias(getBrainDb(), 'discord_username', 'alice');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'discord_username',
+      'alice',
+    );
     expect(found).toBe(e.id);
   });
 
   it('creates a person and signal_phone alias normalized to E.164', async () => {
     const e = await createPersonFromHandle('signal', '+1 (555) 123-4567');
     expect(e.kind).toBe('person');
-    const found = findEntityIdByAlias(getBrainDb(), 'signal_phone', '+15551234567');
+    const found = findEntityIdByAlias(
+      getBrainDb(),
+      'signal_phone',
+      '+15551234567',
+    );
     expect(found).toBe(e.id);
   });
 
@@ -1032,7 +1140,10 @@ interface HandleNamespace {
   normalize: (raw: string) => string | null;
 }
 
-function pickNamespace(platform: ChatPlatform, raw: string): HandleNamespace | null {
+function pickNamespace(
+  platform: ChatPlatform,
+  raw: string,
+): HandleNamespace | null {
   if (platform === 'discord') {
     if (/^\d{17,20}$/.test(raw)) {
       return { field: 'discord_snowflake', normalize: (s) => s };
@@ -1068,9 +1179,13 @@ export async function createPersonFromHandle(
   displayName?: string,
 ): Promise<Entity> {
   const ns = pickNamespace(platform, rawHandle);
-  if (!ns) throw new Error(`createPersonFromHandle: cannot classify '${rawHandle}'`);
+  if (!ns)
+    throw new Error(`createPersonFromHandle: cannot classify '${rawHandle}'`);
   const value = ns.normalize(rawHandle);
-  if (!value) throw new Error(`createPersonFromHandle: empty after normalize '${rawHandle}'`);
+  if (!value)
+    throw new Error(
+      `createPersonFromHandle: empty after normalize '${rawHandle}'`,
+    );
 
   const db = getBrainDb();
   const existingId = findEntityIdByAlias(db, ns.field, value);
@@ -1115,6 +1230,7 @@ git commit -m "feat(brain): createPersonFromHandle for Discord/Signal entity ali
 ## Task 8: Discord channel — cache write, MessageUpdate, reactions, /save slash command
 
 **Files:**
+
 - Modify: `src/channels/discord.ts`
 - Modify: `src/channels/discord.test.ts`
 
@@ -1130,7 +1246,10 @@ import * as cache from '../chat-message-cache.js';
 describe('Discord chat-ingest hooks', () => {
   it('persists every inbound MessageCreate to the chat_messages cache', async () => {
     const ch = await connectMockDiscord(); // helper that returns a connected channel + emit-message stub
-    ch.emit('MessageCreate', mockMessage({ id: 'msg-1', channelId: 'channel-1', content: 'hello' }));
+    ch.emit(
+      'MessageCreate',
+      mockMessage({ id: 'msg-1', channelId: 'channel-1', content: 'hello' }),
+    );
     const got = cache.getChatMessage('discord', 'channel-1', 'msg-1');
     expect(got).not.toBeNull();
     expect(got!.text).toBe('hello');
@@ -1149,7 +1268,15 @@ describe('Discord chat-ingest hooks', () => {
     const ch = await connectMockDiscord();
     const seen: ChatMessageSavedEvent[] = [];
     eventBus.on('chat.message.saved', (e) => seen.push(e));
-    ch.emit('MessageReactionAdd', mockReaction({ emoji: '🧠', messageId: 'msg-7', channelId: 'channel-1', userId: 'me' }));
+    ch.emit(
+      'MessageReactionAdd',
+      mockReaction({
+        emoji: '🧠',
+        messageId: 'msg-7',
+        channelId: 'channel-1',
+        userId: 'me',
+      }),
+    );
     await flushPromises();
     expect(seen).toHaveLength(1);
     expect(seen[0].text).toBe('Launch is next Wednesday');
@@ -1160,7 +1287,15 @@ describe('Discord chat-ingest hooks', () => {
     const ch = await connectMockDiscord();
     const seen: ChatMessageSavedEvent[] = [];
     eventBus.on('chat.message.saved', (e) => seen.push(e));
-    ch.emit('MessageReactionAdd', mockReaction({ emoji: '🧠', messageId: 'msg-1', channelId: 'channel-1', userId: BOT_USER_ID }));
+    ch.emit(
+      'MessageReactionAdd',
+      mockReaction({
+        emoji: '🧠',
+        messageId: 'msg-1',
+        channelId: 'channel-1',
+        userId: BOT_USER_ID,
+      }),
+    );
     await flushPromises();
     expect(seen).toHaveLength(0);
   });
@@ -1169,7 +1304,14 @@ describe('Discord chat-ingest hooks', () => {
     const ch = await connectMockDiscord();
     const seen: ChatMessageSavedEvent[] = [];
     eventBus.on('chat.message.saved', (e) => seen.push(e));
-    ch.emit('InteractionCreate', mockSlashSave({ text: 'remember: KV cache hit ratio is 80%', userId: 'me', channelId: 'channel-1' }));
+    ch.emit(
+      'InteractionCreate',
+      mockSlashSave({
+        text: 'remember: KV cache hit ratio is 80%',
+        userId: 'me',
+        channelId: 'channel-1',
+      }),
+    );
     await flushPromises();
     expect(seen).toHaveLength(1);
     expect(seen[0].trigger).toBe('slash');
@@ -1205,8 +1347,8 @@ this.client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildMessageReactions,    // NEW
-    GatewayIntentBits.DirectMessageReactions,   // NEW
+    GatewayIntentBits.GuildMessageReactions, // NEW
+    GatewayIntentBits.DirectMessageReactions, // NEW
   ],
 });
 ```
@@ -1231,7 +1373,11 @@ Add a `MessageUpdate` listener (immediately after the existing `MessageCreate` r
 ```ts
 this.client.on(Events.MessageUpdate, async (_old, message) => {
   if (message.partial) {
-    try { await message.fetch(); } catch { return; }
+    try {
+      await message.fetch();
+    } catch {
+      return;
+    }
   }
   if (message.author?.bot) return;
   putChatMessage({
@@ -1254,12 +1400,20 @@ Add a `MessageReactionAdd` listener:
 this.client.on(Events.MessageReactionAdd, async (reaction, user) => {
   const targetEmoji = process.env.BRAIN_SAVE_EMOJI ?? '🧠';
   if (reaction.partial) {
-    try { await reaction.fetch(); } catch { return; }
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
+    }
   }
   if (reaction.emoji.name !== targetEmoji) return;
   if (user.id === this.client?.user?.id) return; // ignore self
 
-  const cached = getChatMessage('discord', reaction.message.channelId, reaction.message.id);
+  const cached = getChatMessage(
+    'discord',
+    reaction.message.channelId,
+    reaction.message.id,
+  );
   if (!cached) {
     logger.warn(
       { messageId: reaction.message.id, channelId: reaction.message.channelId },
@@ -1292,15 +1446,21 @@ this.client.once(Events.ClientReady, async (c) => {
     await c.application?.commands.create({
       name: 'save',
       description: 'Save text to your brain',
-      options: [{ name: 'text', description: 'What to save', type: 3, required: true }], // 3 = STRING
+      options: [
+        { name: 'text', description: 'What to save', type: 3, required: true },
+      ], // 3 = STRING
     });
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Discord /save command registration failed');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Discord /save command registration failed',
+    );
   }
 });
 
 this.client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== 'save') return;
+  if (!interaction.isChatInputCommand() || interaction.commandName !== 'save')
+    return;
   const text = interaction.options.getString('text', true);
   const evt: ChatMessageSavedEvent = {
     type: 'chat.message.saved',
@@ -1338,6 +1498,7 @@ git commit -m "feat(discord): cache writes + 🧠-react + /save → ChatMessageS
 ## Task 9: Signal channel — cache write, reactions, `claw save`, attachments
 
 **Files:**
+
 - Modify: `src/channels/signal.ts`
 - Modify: `src/channels/signal.test.ts`
 
@@ -1385,7 +1546,9 @@ describe('Signal chat-ingest hooks', () => {
     const ch = await connectMockSignal({ phone: '+15550000000' });
     ch.deliver({
       envelope: {
-        source: '+15551234567', sourceName: 'Alice', timestamp: 1714000000000,
+        source: '+15551234567',
+        sourceName: 'Alice',
+        timestamp: 1714000000000,
         dataMessage: { timestamp: 1714000000000, message: 'hello from signal' },
       },
     });
@@ -1397,19 +1560,28 @@ describe('Signal chat-ingest hooks', () => {
 
   it('emits ChatMessageSavedEvent when 🧠 reaction arrives for a cached message', async () => {
     cache.putChatMessage({
-      platform: 'signal', chat_id: '+15551234567', message_id: '1714000000000',
+      platform: 'signal',
+      chat_id: '+15551234567',
+      message_id: '1714000000000',
       sent_at: new Date(1714000000000).toISOString(),
-      sender: '+15551234567', sender_name: 'Alice', text: 'Launch is next Wed',
+      sender: '+15551234567',
+      sender_name: 'Alice',
+      text: 'Launch is next Wed',
     });
     const ch = await connectMockSignal({ phone: '+15550000000' });
     const seen: ChatMessageSavedEvent[] = [];
     eventBus.on('chat.message.saved', (e) => seen.push(e));
     ch.deliver({
       envelope: {
-        source: '+15550000001', timestamp: 1714000005000,
+        source: '+15550000001',
+        timestamp: 1714000005000,
         dataMessage: {
           timestamp: 1714000005000,
-          reaction: { emoji: '🧠', targetAuthor: '+15551234567', targetSentTimestamp: 1714000000000 },
+          reaction: {
+            emoji: '🧠',
+            targetAuthor: '+15551234567',
+            targetSentTimestamp: 1714000000000,
+          },
         },
       },
     });
@@ -1425,7 +1597,8 @@ describe('Signal chat-ingest hooks', () => {
     eventBus.on('chat.message.saved', (e) => seen.push(e));
     ch.deliver({
       envelope: {
-        source: '+15550000001', timestamp: 1714000010000,
+        source: '+15550000001',
+        timestamp: 1714000010000,
         dataMessage: {
           timestamp: 1714000010000,
           message: 'claw save This is the gem',
@@ -1554,6 +1727,7 @@ git commit -m "feat(signal): cache writes + 🧠-react + claw save → ChatMessa
 ## Task 10: Brain ingest handler for `chat.message.saved`
 
 **Files:**
+
 - Create: `src/brain/chat-ingest.ts`
 - Create: `src/brain/__tests__/chat-ingest.test.ts`
 - Modify: `src/brain/ingest.ts`
@@ -1572,55 +1746,97 @@ import type { ChatMessageSavedEvent } from '../../events.js';
 import { startChatIngest, stopChatIngest } from '../chat-ingest.js';
 import { getBrainDb } from '../db.js';
 // helpers below come from the existing ingest-pipeline test:
-import { setupTestBrain, teardownTestBrain, mockEmbed, mockUpsertKu } from './_brain-test-helpers.js';
+import {
+  setupTestBrain,
+  teardownTestBrain,
+  mockEmbed,
+  mockUpsertKu,
+} from './_brain-test-helpers.js';
 
 describe('chat-ingest', () => {
   beforeEach(() => setupTestBrain());
-  afterEach(() => { stopChatIngest(); teardownTestBrain(); });
+  afterEach(() => {
+    stopChatIngest();
+    teardownTestBrain();
+  });
 
   it('inserts a raw_events row and produces a knowledge_unit for a saved chat message', async () => {
     const fakeLlm = vi.fn(async () => ({
-      claims: [{ text: 'Launch moved to next Wednesday', topic_seed: 'launch', topic_key: 'launch_date',
-                 entities_mentioned: [], confidence: 0.9, needs_review: false, extracted_by: 'llm' }],
+      claims: [
+        {
+          text: 'Launch moved to next Wednesday',
+          topic_seed: 'launch',
+          topic_key: 'launch_date',
+          entities_mentioned: [],
+          confidence: 0.9,
+          needs_review: false,
+          extracted_by: 'llm',
+        },
+      ],
       _usage: { input_tokens: 100, output_tokens: 30 },
     }));
     startChatIngest({ llmCaller: fakeLlm });
     const evt: ChatMessageSavedEvent = {
-      type: 'chat.message.saved', timestamp: Date.now(),
-      platform: 'discord', chat_id: 'channel-1', message_id: 'msg-7',
-      sender: 'user-7', sender_display: 'Alice',
+      type: 'chat.message.saved',
+      timestamp: Date.now(),
+      platform: 'discord',
+      chat_id: 'channel-1',
+      message_id: 'msg-7',
+      sender: 'user-7',
+      sender_display: 'Alice',
       sent_at: '2026-04-27T12:00:00.000Z',
-      text: "ok let's call it — launch = next Wed", trigger: 'emoji',
+      text: "ok let's call it — launch = next Wed",
+      trigger: 'emoji',
     };
     eventBus.emit('chat.message.saved', evt);
     await flushPromises();
 
     const db = getBrainDb();
-    const raw = db.prepare(`SELECT * FROM raw_events WHERE source_type = 'discord_message'`).get() as any;
+    const raw = db
+      .prepare(`SELECT * FROM raw_events WHERE source_type = 'discord_message'`)
+      .get() as any;
     expect(raw).toBeDefined();
     expect(raw.source_ref).toBe('channel-1:msg-7');
 
-    const ku = db.prepare(`SELECT * FROM knowledge_units WHERE source_type = 'discord_message'`).get() as any;
+    const ku = db
+      .prepare(
+        `SELECT * FROM knowledge_units WHERE source_type = 'discord_message'`,
+      )
+      .get() as any;
     expect(ku).toBeDefined();
     expect(ku.text).toContain('Launch');
     expect(mockUpsertKu).toHaveBeenCalledTimes(1);
   });
 
   it('dedups via raw_events UNIQUE — same message twice produces one KU', async () => {
-    const fakeLlm = vi.fn(async () => ({ claims: [], _usage: { input_tokens: 50, output_tokens: 10 } }));
+    const fakeLlm = vi.fn(async () => ({
+      claims: [],
+      _usage: { input_tokens: 50, output_tokens: 10 },
+    }));
     startChatIngest({ llmCaller: fakeLlm });
     const evt: ChatMessageSavedEvent = {
-      type: 'chat.message.saved', timestamp: Date.now(),
-      platform: 'signal', chat_id: '+1555', message_id: '1714000000000',
-      sender: '+1555', sent_at: '2026-04-27T12:00:00.000Z',
-      text: 'hello', trigger: 'text',
+      type: 'chat.message.saved',
+      timestamp: Date.now(),
+      platform: 'signal',
+      chat_id: '+1555',
+      message_id: '1714000000000',
+      sender: '+1555',
+      sent_at: '2026-04-27T12:00:00.000Z',
+      text: 'hello',
+      trigger: 'text',
     };
     eventBus.emit('chat.message.saved', evt);
     eventBus.emit('chat.message.saved', evt);
     await flushPromises();
 
     const db = getBrainDb();
-    const count = (db.prepare(`SELECT COUNT(*) AS n FROM raw_events WHERE source_type = 'signal_message'`).get() as { n: number }).n;
+    const count = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM raw_events WHERE source_type = 'signal_message'`,
+        )
+        .get() as { n: number }
+    ).n;
     expect(count).toBe(1);
   });
 });
@@ -1645,10 +1861,7 @@ import { getBrainDb } from './db.js';
 import { extractPipeline, type LlmCaller } from './extract.js';
 import { embedText } from './embed.js';
 import { upsertKu } from './qdrant.js';
-import {
-  createPersonFromHandle,
-  type Entity,
-} from './entities.js';
+import { createPersonFromHandle, type Entity } from './entities.js';
 import { newId } from './ulid.js';
 
 export interface ChatIngestOpts {
@@ -1659,16 +1872,22 @@ let unsubscribe: (() => void) | null = null;
 
 export function startChatIngest(opts: ChatIngestOpts = {}): void {
   if (unsubscribe) return; // already started
-  unsubscribe = eventBus.on('chat.message.saved', async (evt: ChatMessageSavedEvent) => {
-    try {
-      await handleChatMessageSaved(evt, opts);
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), msgId: evt.message_id },
-        'chat ingest: handler failed',
-      );
-    }
-  });
+  unsubscribe = eventBus.on(
+    'chat.message.saved',
+    async (evt: ChatMessageSavedEvent) => {
+      try {
+        await handleChatMessageSaved(evt, opts);
+      } catch (err) {
+        logger.error(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            msgId: evt.message_id,
+          },
+          'chat ingest: handler failed',
+        );
+      }
+    },
+  );
   logger.info('Chat ingest started (chat.message.saved handler)');
 }
 
@@ -1725,11 +1944,17 @@ async function handleChatMessageSaved(
       evt.sender_display,
     );
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'chat ingest: entity resolve failed');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'chat ingest: entity resolve failed',
+    );
   }
 
   if (claims.length === 0) {
-    db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(receivedAt, rawId);
+    db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(
+      receivedAt,
+      rawId,
+    );
     return;
   }
 
@@ -1759,7 +1984,15 @@ async function handleChatMessageSaved(
     }
     try {
       const vec = await embedText(claim.text);
-      await upsertKu({ id: kuId, vector: vec, payload: { text: claim.text, source_type: sourceType, source_ref: sourceRef } });
+      await upsertKu({
+        id: kuId,
+        vector: vec,
+        payload: {
+          text: claim.text,
+          source_type: sourceType,
+          source_ref: sourceRef,
+        },
+      });
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), kuId },
@@ -1767,7 +2000,10 @@ async function handleChatMessageSaved(
       );
     }
   }
-  db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(receivedAt, rawId);
+  db.prepare(`UPDATE raw_events SET processed_at = ? WHERE id = ?`).run(
+    receivedAt,
+    rawId,
+  );
 }
 ```
 
@@ -1797,9 +2033,11 @@ Run: `npx vitest run src/brain/__tests__/chat-ingest.test.ts`
 Expected: PASS (2 tests).
 
 Run a wider sanity sweep:
+
 ```bash
 npx vitest run src/brain/__tests__/ingest-pipeline.test.ts src/brain/__tests__/chat-ingest.test.ts
 ```
+
 Expected: all PASS — confirms the existing email path still works.
 
 - [ ] **Step 6: Commit**
@@ -1820,6 +2058,7 @@ This task is **operator-run**, not automated. Skipping it = shipping blind.
 - [ ] **Step 1: Build and start NanoClaw with credentials**
 
 Set in `.env`:
+
 ```
 DISCORD_BOT_TOKEN=<your bot token>
 SIGNAL_API_URL=http://localhost:18080
@@ -1850,6 +2089,7 @@ Expected: at least one row matching the message you reacted to.
 - [ ] **Step 3: Discord — `/save` path**
 
 In any Discord channel, run `/save text:"my brain test note"`. Verify:
+
 - Bot replies ephemerally `🧠 saved.`
 - Same SQL query above shows a new row.
 
@@ -1870,12 +2110,14 @@ Send `claw save This is my Signal test note` in any chat. Verify a new `signal_m
 - [ ] **Step 6: Attachment path**
 
 Drop a small PDF into a Discord channel where the bot is present, then 🧠-react it. Verify:
+
 - File present under `~/.nanoclaw/chat-attachments/sha256/<...>`.
 - The corresponding `knowledge_units.text` includes content extracted from the PDF.
 
 - [ ] **Step 7: Cleanup**
 
 If anything from steps 2–6 produced a malformed KU, delete it:
+
 ```bash
 sqlite3 ~/.nanoclaw/brain.db "DELETE FROM knowledge_units WHERE id = '<id>';"
 ```
@@ -1893,6 +2135,7 @@ git commit --allow-empty -m "chore(chat): manual verification PR1 — Discord/Si
 This was run before publishing this plan. Outcome:
 
 **1. Spec coverage** — every PR-1 phase from the spec maps to a task:
+
 - §1 cache → Task 2
 - §2 attachments + adapters → Tasks 4, 5
 - §3 Discord wiring → Task 8

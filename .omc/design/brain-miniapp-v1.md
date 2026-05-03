@@ -31,6 +31,7 @@ I explored the codebase before writing this. The miniapp is NOT what I originall
 6. **One-click feedback** — mark KU as "important" (boosts `access_count` in retrieval) directly from detail page.
 
 **Out of scope for v1** (→ v2+):
+
 - Manual entity merge UI
 - Trigger dashboard with historical charts
 - Decay config sliders
@@ -84,6 +85,7 @@ Visual: same `#f4f6f8` + white card aesthetic as existing home. Add a subtle bra
 ### 4.2 `/brain/search`
 
 Query params:
+
 - `q` — search text (required, mandatory for query)
 - `source` — filter by source_type (`email`, `gong`, `hubspot`, `tracked_item`, ...) — multi-value
 - `entity` — filter by entity_id
@@ -215,6 +217,7 @@ export function brainShell(title: string, body: string, opts?): string {
 ```
 
 Shared CSS pulls from existing home page plus adds:
+
 - `.pill` for entity/source badges
 - `.confidence-bar` 0-1 visual indicator
 - `.feedback-btn` styling for ⭐ / 🟢 / 🔴 buttons
@@ -243,6 +246,7 @@ Review page additionally polls on window focus — this is where you'd leave the
 ## 9. Auth
 
 **v1 inherits existing miniapp auth** — which is "trust the tunnel URL." This isn't ideal but:
+
 - Existing miniapp is already this way (attention queue, archive queue, email bodies are all already served without auth)
 - Brain exposes no more sensitive data than email bodies already do
 - Proper Telegram initData HMAC validation is a **separate cross-cutting concern** that should land for the whole miniapp, not just the brain tab
@@ -301,11 +305,13 @@ Each commit is self-contained with unit tests and leaves the tree green.
 ## 13. What comes after v1
 
 **v2 (after 1-2 weeks of v1 usage):**
+
 - Trigger dashboard with current/threshold/trajectory for v2 §13 re-eval triggers
 - Manual entity merge UI (`entity_merge_log` with `merged_by='human:user_id'`)
 - Cost/trend charts over 7/30/90d
 
 **v3 (after measurement phase):**
+
 - Decay half-life slider per query-intent category
 - Extraction rule editor for `extractCheap` patterns
 - Settings page for budget caps + alert thresholds
@@ -326,6 +332,7 @@ Each commit is self-contained with unit tests and leaves the tree green.
 ## 15. Ship decision
 
 If you green-light v1:
+
 - I spawn an executor with this spec
 - 8 commits, targeting ~1500 LOC
 - Full review pass (Opus) before merge

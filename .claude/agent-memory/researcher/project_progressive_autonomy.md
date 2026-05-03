@@ -51,13 +51,16 @@ Research conducted April 2026, training data through Aug 2025. 8-month gap ackno
 ## Novelty Assessment for NanoClaw Features
 
 High novelty (no one has shipped):
+
 - Approval-pattern learning → automatic permission escalation
 - Passive execution outcome observation → persistent behavioral memory
 
 Medium novelty (gap confirmed, work underway):
+
 - Pre-action verification pipeline natively in agent loop
 - Browser trust tiers based on earned autonomy per site/action type
 
 Lower novelty (existing tools to build on):
+
 - Semantic memory (use Mem0 as base, add outcome layer on top)
 - Anti-hallucination middleware (build on Guardrails.ai or NeMo)

@@ -43,13 +43,15 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
 ## Email Rules
 
-*NEVER delete or archive emails.* These actions are forbidden:
+_NEVER delete or archive emails._ These actions are forbidden:
+
 - Do not call `delete_email` or `batch_delete_emails` — ever
 - Do not remove the INBOX label (no `removeLabelIds: ["INBOX"]` in `modify_email` or `batch_modify_emails`)
 - Do not delete labels or filters
@@ -63,6 +65,7 @@ Format messages based on the channel you're responding to. Check your group fold
 ### Slack channels (folder starts with `slack_`)
 
 Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+
 - `*bold*` (single asterisks)
 - `_italic_` (underscores)
 - `<https://url|link text>` for links (NOT `[text](url)`)

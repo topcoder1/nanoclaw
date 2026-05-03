@@ -9,6 +9,7 @@
 **Tech Stack:** `ai` (Vercel AI SDK v6), `@modelcontextprotocol/sdk` (StdioClientTransport), `zod`, vitest
 
 **Reference files:**
+
 - Design spec: `docs/superpowers/specs/2026-04-15-llm-provider-layer-design.md`
 - Vercel runner: `container/agent-runner/src/vercel-runner.ts`
 - Tool bridge: `container/agent-runner/src/tool-bridge.ts`
@@ -26,6 +27,7 @@
 The Vercel runner currently flattens all message `content` to strings when saving sessions (`vercel-runner.ts:192-203`). This corrupts tool_use/tool_result content parts — when the session is reloaded, the LLM sees stringified JSON instead of proper structured messages, breaking multi-turn tool conversations.
 
 **Files:**
+
 - Modify: `container/agent-runner/src/session-store.ts`
 - Modify: `container/agent-runner/src/vercel-runner.ts:160-205`
 - Create: `src/llm/session-store.test.ts` (tests run in host vitest suite)
@@ -53,9 +55,8 @@ describe('session-store structured messages', () => {
   });
 
   it('preserves tool_use content parts through save/load', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
 
     const messages = [
       { role: 'user', content: 'search for cats' },
@@ -111,9 +112,8 @@ describe('session-store structured messages', () => {
   });
 
   it('handles mixed string and structured content', async () => {
-    const { saveSession, loadSession } = await import(
-      '../../container/agent-runner/src/session-store.js'
-    );
+    const { saveSession, loadSession } =
+      await import('../../container/agent-runner/src/session-store.js');
 
     const messages = [
       { role: 'user', content: 'hello' },
@@ -188,41 +188,38 @@ In `container/agent-runner/src/vercel-runner.ts`, replace the session save block
 Replace lines 160-204 (the messages construction through session save) with:
 
 ```typescript
-    const sessionDir = '/workspace/group/sessions/vercel';
-    const sessionMessages = loadSession(sessionDir, input.sessionId);
+const sessionDir = '/workspace/group/sessions/vercel';
+const sessionMessages = loadSession(sessionDir, input.sessionId);
 
-    const messages: CoreMessage[] = [
-      ...sessionMessages as CoreMessage[],
-      { role: 'user' as const, content: prompt },
-    ];
+const messages: CoreMessage[] = [
+  ...(sessionMessages as CoreMessage[]),
+  { role: 'user' as const, content: prompt },
+];
 
-    const systemPrompt = buildSystemPrompt(input);
+const systemPrompt = buildSystemPrompt(input);
 
-    const result = await generateText({
-      model,
-      system: systemPrompt,
-      messages,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools: tools as any,
-      maxSteps: 50,
-      onStepFinish: ({ toolCalls }) => {
-        for (const tc of toolCalls ?? []) {
-          const label = formatToolLabel(tc.toolName);
-          writeOutput({
-            status: 'success',
-            result: null,
-            progressLabel: label,
-          });
-        }
-      },
-    });
+const result = await generateText({
+  model,
+  system: systemPrompt,
+  messages,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: tools as any,
+  maxSteps: 50,
+  onStepFinish: ({ toolCalls }) => {
+    for (const tc of toolCalls ?? []) {
+      const label = formatToolLabel(tc.toolName);
+      writeOutput({
+        status: 'success',
+        result: null,
+        progressLabel: label,
+      });
+    }
+  },
+});
 
-    // Preserve full message structure including tool_use/tool_result parts
-    const allMessages = [
-      ...messages,
-      ...result.response.messages,
-    ];
-    const newSessionId = saveSession(sessionDir, input.sessionId, allMessages);
+// Preserve full message structure including tool_use/tool_result parts
+const allMessages = [...messages, ...result.response.messages];
+const newSessionId = saveSession(sessionDir, input.sessionId, allMessages);
 ```
 
 - [ ] **Step 5: Run the test to verify it passes**
@@ -254,6 +251,7 @@ tool conversations on reload."
 The Claude SDK path auto-discovers MCP servers (nanoclaw, Gmail, Notion, SuperPilot) via its `mcpServers` config. The Vercel path currently only has the 4 IPC tools. This task bridges MCP servers into the Vercel runner using `createMCPClient` from the AI SDK with `StdioClientTransport` from `@modelcontextprotocol/sdk`.
 
 **Files:**
+
 - Create: `container/agent-runner/src/mcp-bridge.ts`
 - Modify: `container/agent-runner/src/vercel-runner.ts`
 - Modify: `container/agent-runner/src/index.ts` (pass MCP config to Vercel path)
@@ -271,9 +269,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 describe('mcp-bridge', () => {
   it('buildMcpServerConfigs parses container MCP config correctly', async () => {
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     const configs = buildMcpServerConfigs({
       chatJid: 'test@chat',
@@ -284,15 +281,20 @@ describe('mcp-bridge', () => {
     // Should always include the nanoclaw server
     expect(configs).toHaveProperty('nanoclaw');
     expect(configs.nanoclaw.command).toBe('node');
-    expect(configs.nanoclaw.env).toHaveProperty('NANOCLAW_CHAT_JID', 'test@chat');
-    expect(configs.nanoclaw.env).toHaveProperty('NANOCLAW_GROUP_FOLDER', 'test-group');
+    expect(configs.nanoclaw.env).toHaveProperty(
+      'NANOCLAW_CHAT_JID',
+      'test@chat',
+    );
+    expect(configs.nanoclaw.env).toHaveProperty(
+      'NANOCLAW_GROUP_FOLDER',
+      'test-group',
+    );
     expect(configs.nanoclaw.env).toHaveProperty('NANOCLAW_IS_MAIN', '1');
   });
 
   it('buildMcpServerConfigs detects Gmail accounts from mounted credentials', async () => {
-    const { buildMcpServerConfigs } = await import(
-      '../../container/agent-runner/src/mcp-bridge.js'
-    );
+    const { buildMcpServerConfigs } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
 
     // Mock fs.existsSync for Gmail credential detection
     const fs = await import('fs');
@@ -475,7 +477,9 @@ export async function connectMcpServers(
         allTools[prefixedName] = toolDef;
       }
 
-      log(`Connected to MCP server "${name}" — ${Object.keys(tools).length} tools`);
+      log(
+        `Connected to MCP server "${name}" — ${Object.keys(tools).length} tools`,
+      );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       log(`Failed to connect to MCP server "${name}": ${errMsg}`);
@@ -529,39 +533,41 @@ import { buildMcpServerConfigs, connectMcpServers } from './mcp-bridge.js';
 Replace the tools construction and generateText call in `runVercelQuery` (after the `factory` and `model` creation, around line 139) to add MCP tools:
 
 ```typescript
-    const ipcTools = buildIpcTools(
-      '/workspace/ipc',
-      input.chatJid,
-      input.groupFolder,
-    );
+const ipcTools = buildIpcTools(
+  '/workspace/ipc',
+  input.chatJid,
+  input.groupFolder,
+);
 
-    // Connect MCP servers for this session
-    const mcpConfigs = buildMcpServerConfigs({
-      chatJid: input.chatJid,
-      groupFolder: input.groupFolder,
-      isMain: input.isMain,
-    });
-    const mcpConnection = await connectMcpServers(mcpConfigs);
+// Connect MCP servers for this session
+const mcpConfigs = buildMcpServerConfigs({
+  chatJid: input.chatJid,
+  groupFolder: input.groupFolder,
+  isMain: input.isMain,
+});
+const mcpConnection = await connectMcpServers(mcpConfigs);
 
-    // Merge IPC tools and MCP tools into a single tool set
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tools: Record<string, any> = {};
+// Merge IPC tools and MCP tools into a single tool set
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const tools: Record<string, any> = {};
 
-    // IPC tools
-    for (const [name, def] of Object.entries(ipcTools)) {
-      tools[name] = {
-        description: def.description,
-        parameters: def.parameters,
-        execute: def.execute,
-      };
-    }
+// IPC tools
+for (const [name, def] of Object.entries(ipcTools)) {
+  tools[name] = {
+    description: def.description,
+    parameters: def.parameters,
+    execute: def.execute,
+  };
+}
 
-    // MCP tools (already in AI SDK format from createMCPClient)
-    for (const [name, def] of Object.entries(mcpConnection.tools)) {
-      tools[name] = def;
-    }
+// MCP tools (already in AI SDK format from createMCPClient)
+for (const [name, def] of Object.entries(mcpConnection.tools)) {
+  tools[name] = def;
+}
 
-    log(`Tools registered: ${Object.keys(tools).length} (${Object.keys(ipcTools).length} IPC + ${Object.keys(mcpConnection.tools).length} MCP)`);
+log(
+  `Tools registered: ${Object.keys(tools).length} (${Object.keys(ipcTools).length} IPC + ${Object.keys(mcpConnection.tools).length} MCP)`,
+);
 ```
 
 After the session save and return block (before the `catch`), add MCP cleanup:
@@ -623,6 +629,7 @@ the existing IPC tools."
 The tool bridge currently has a basic `checkTrust()` that calls the gateway but treats "pending" as a denial. The gateway already supports `GET /trust/approval/:id` for polling. This task adds a poll loop so the agent pauses and waits for user approval, matching the Claude SDK's `preToolUse` hook behavior.
 
 **Files:**
+
 - Modify: `container/agent-runner/src/tool-bridge.ts`
 - Create: `src/llm/trust-polling.test.ts`
 
@@ -667,9 +674,8 @@ describe('trust gateway polling', () => {
       });
 
     // Import after mocking fetch
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
 
     const result = await checkTrustWithPolling(
       'send_email',
@@ -698,9 +704,8 @@ describe('trust gateway polling', () => {
         json: async () => ({ decision: 'denied' }),
       });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
 
     const result = await checkTrustWithPolling(
       'delete_file',
@@ -730,9 +735,8 @@ describe('trust gateway polling', () => {
         json: async () => ({ decision: 'pending' }),
       });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
 
     const result = await checkTrustWithPolling(
       'send_email',
@@ -752,9 +756,8 @@ describe('trust gateway polling', () => {
       json: async () => ({ decision: 'approved' }),
     });
 
-    const { checkTrustWithPolling } = await import(
-      '../../container/agent-runner/src/tool-bridge.js'
-    );
+    const { checkTrustWithPolling } =
+      await import('../../container/agent-runner/src/tool-bridge.js');
 
     const result = await checkTrustWithPolling(
       'send_message',
@@ -830,7 +833,7 @@ export async function checkTrustWithPolling(
     if (!res.ok) {
       return { allowed: false, error: `Trust gateway returned ${res.status}` };
     }
-    evaluateResult = await res.json() as typeof evaluateResult;
+    evaluateResult = (await res.json()) as typeof evaluateResult;
   } catch {
     // Gateway unreachable — fail open (container may not have trust enabled)
     return { allowed: true };
@@ -858,9 +861,7 @@ export async function checkTrustWithPolling(
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
     try {
-      const pollRes = await fetch(
-        `${gatewayUrl}/trust/approval/${approvalId}`,
-      );
+      const pollRes = await fetch(`${gatewayUrl}/trust/approval/${approvalId}`);
       if (!pollRes.ok) {
         return {
           allowed: false,
@@ -905,6 +906,7 @@ export async function checkTrustWithPolling(
 In `container/agent-runner/src/tool-bridge.ts`, update each tool's `execute` function to use `checkTrustWithPolling` instead of `checkTrust`. Replace the four `checkTrust(...)` calls:
 
 For `send_message`:
+
 ```typescript
       execute: async ({ text }: { text: string }) => {
         const trust = await checkTrustWithPolling('send_message', chatJid, groupId, 'Send a chat message');
@@ -912,6 +914,7 @@ For `send_message`:
 ```
 
 For `schedule`:
+
 ```typescript
       execute: async ({ when, prompt, label }: { when: string; prompt: string; label?: string }) => {
         const trust = await checkTrustWithPolling('schedule', chatJid, groupId, `Schedule task: ${label ?? prompt.slice(0, 60)}`);
@@ -919,6 +922,7 @@ For `schedule`:
 ```
 
 For `relay_message`:
+
 ```typescript
       execute: async ({ text }: { text: string }) => {
         const trust = await checkTrustWithPolling('relay_message', chatJid, groupId, 'Relay message to main channel');
@@ -956,6 +960,7 @@ Claude SDK preToolUse hook behavior."
 Allow agents to dynamically switch their LLM model mid-conversation. The agent writes a `switch_model` IPC file, the host reads it and stores the override for the group's next container spawn. This is useful for agents that want to escalate to a stronger model for a specific sub-task.
 
 **Files:**
+
 - Modify: `container/agent-runner/src/tool-bridge.ts` (add switch_model tool)
 - Modify: `src/ipc.ts` (add switch_model handler)
 - Create: `src/llm/switch-model.test.ts`

@@ -3,11 +3,13 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Three features that finish the chat-ingest UX layer:
+
 1. **Identity-merge engine** — merge two `person` entities into one, atomically rebinding all `ku_entities` and `entity_aliases` and writing to `entity_merge_log`.
 2. **`claw merge` chat command** — operator says `claw merge <handle-a> <handle-b>` in any opted-in chat; the engine resolves both handles to entity_ids and merges them.
 3. **Window attachment summaries** — when a flushed window contains cached messages with attachments, the windowed transcript embeds a one-line summary per attachment so the LLM extractor sees their content (vision-tier where available, filename fallback otherwise).
 
 **Architecture:** Three layered concerns:
+
 - **Engine** (`src/brain/identity-merge.ts`) — pure DB transaction `mergeEntities(keptId, mergedId, evidence)` that pivots `ku_entities`, `entity_aliases`, and writes `entity_merge_log`. No event emission yet.
 - **Trigger surface** (Signal/Discord channel + chat-ingest) — `^claw\s+merge\s+<a>\s+<b>` text trigger emits `entity.merge.requested`; a brain-side handler resolves handles → entity_ids and calls the engine, then sends an ack reply.
 - **Window enrichment** (`src/brain/window-flusher.ts`) — the transcript builder calls a new `summarizeAttachment()` helper for each cached row that has attachments. Vision summarization piggybacks on existing `BRAIN_IMAGE_VISION` machinery; falls back to `[<kind>: <filename>]` otherwise.
@@ -20,21 +22,21 @@ The three are independently shippable and could land as 3a / 3b / 3c if preferre
 
 ## File Structure
 
-| File | Responsibility |
-|---|---|
-| `src/brain/identity-merge.ts` | NEW — `mergeEntities(keptId, mergedId, evidence)`; helpers to validate compatibility |
-| `src/brain/__tests__/identity-merge.test.ts` | NEW — engine tests (KU rebind, alias rebind, log entry, idempotency, type-mismatch rejection) |
-| `src/events.ts` | Add `EntityMergeRequestedEvent` type + bus map entry |
-| `src/channels/signal.ts` | Detect `claw merge <a> <b>` text trigger; emit `entity.merge.requested` |
-| `src/channels/discord.ts` | Same trigger for Discord |
-| `src/brain/identity-merge-handler.ts` | NEW — subscriber that resolves handles → entity_ids and calls the engine; sends ack reply |
-| `src/brain/__tests__/identity-merge-handler.test.ts` | NEW — handler integration tests |
-| `src/brain/chat-ingest.ts` | Wire `start/stopIdentityMergeHandler` |
-| `src/brain/attachment-summary.ts` | NEW — `summarizeAttachment(att, opts)` returns a single line; uses vision when enabled |
-| `src/brain/__tests__/attachment-summary.test.ts` | NEW — unit tests for summary generation |
-| `src/brain/window-flusher.ts` | In `flushOne`'s transcript build, call `summarizeAttachment` for each row with attachments |
-| `src/brain/__tests__/window-flusher.test.ts` | Append test verifying transcript contains attachment summary lines |
-| `.env.example` | Document `BRAIN_MERGE_AUTO_LOW_CONF_REJECT` (defaults true) |
+| File                                                 | Responsibility                                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/brain/identity-merge.ts`                        | NEW — `mergeEntities(keptId, mergedId, evidence)`; helpers to validate compatibility          |
+| `src/brain/__tests__/identity-merge.test.ts`         | NEW — engine tests (KU rebind, alias rebind, log entry, idempotency, type-mismatch rejection) |
+| `src/events.ts`                                      | Add `EntityMergeRequestedEvent` type + bus map entry                                          |
+| `src/channels/signal.ts`                             | Detect `claw merge <a> <b>` text trigger; emit `entity.merge.requested`                       |
+| `src/channels/discord.ts`                            | Same trigger for Discord                                                                      |
+| `src/brain/identity-merge-handler.ts`                | NEW — subscriber that resolves handles → entity_ids and calls the engine; sends ack reply     |
+| `src/brain/__tests__/identity-merge-handler.test.ts` | NEW — handler integration tests                                                               |
+| `src/brain/chat-ingest.ts`                           | Wire `start/stopIdentityMergeHandler`                                                         |
+| `src/brain/attachment-summary.ts`                    | NEW — `summarizeAttachment(att, opts)` returns a single line; uses vision when enabled        |
+| `src/brain/__tests__/attachment-summary.test.ts`     | NEW — unit tests for summary generation                                                       |
+| `src/brain/window-flusher.ts`                        | In `flushOne`'s transcript build, call `summarizeAttachment` for each row with attachments    |
+| `src/brain/__tests__/window-flusher.test.ts`         | Append test verifying transcript contains attachment summary lines                            |
+| `.env.example`                                       | Document `BRAIN_MERGE_AUTO_LOW_CONF_REJECT` (defaults true)                                   |
 
 ---
 
@@ -61,6 +63,7 @@ If the table is missing, the daemon will error on first merge — bail out and b
 ## Task 1: `mergeEntities` engine — happy path
 
 **Files:**
+
 - Create: `src/brain/identity-merge.ts`
 - Create: `src/brain/__tests__/identity-merge.test.ts`
 
@@ -77,11 +80,19 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../logger.js', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 let tmp: string;
 vi.mock('../../config.js', () => ({
-  get STORE_DIR() { return tmp; },
+  get STORE_DIR() {
+    return tmp;
+  },
   QDRANT_URL: '',
 }));
 
@@ -100,7 +111,12 @@ function seedPerson(db: any, id: string, name: string): void {
   db.prepare(
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES (?, 'person', ?, ?, ?)`,
-  ).run(id, JSON.stringify({ name }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z');
+  ).run(
+    id,
+    JSON.stringify({ name }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+  );
 }
 
 describe('mergeEntities — happy path', () => {
@@ -114,7 +130,9 @@ describe('mergeEntities — happy path', () => {
        VALUES ('k1', 'x', 'signal_message', 'personal', 0.9,
                '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
     ).run();
-    db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`).run();
+    db.prepare(
+      `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-merge', 'mentioned')`,
+    ).run();
     db.prepare(
       `INSERT INTO entity_aliases (alias_id, entity_id, source_type, field_name, field_value, valid_from, confidence)
        VALUES ('a1', 'e-merge', 'signal', 'phone', '+15551234567', '2026-04-27T00:00:00Z', 1.0)`,
@@ -129,13 +147,19 @@ describe('mergeEntities — happy path', () => {
 
     expect(result.merge_id).toMatch(/^[A-Z0-9]{26}$/);
     // ku_entities rebound.
-    const links = db.prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`).all() as any[];
+    const links = db
+      .prepare(`SELECT entity_id FROM ku_entities WHERE ku_id='k1'`)
+      .all() as any[];
     expect(links.map((l) => l.entity_id)).toEqual(['e-keep']);
     // entity_aliases rebound.
-    const alias = db.prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='a1'`).get() as any;
+    const alias = db
+      .prepare(`SELECT entity_id FROM entity_aliases WHERE alias_id='a1'`)
+      .get() as any;
     expect(alias.entity_id).toBe('e-keep');
     // merge_log row written.
-    const log = db.prepare(`SELECT * FROM entity_merge_log WHERE merge_id=?`).get(result.merge_id) as any;
+    const log = db
+      .prepare(`SELECT * FROM entity_merge_log WHERE merge_id=?`)
+      .get(result.merge_id) as any;
     expect(log.kept_entity_id).toBe('e-keep');
     expect(log.merged_entity_id).toBe('e-merge');
     expect(log.merged_by).toBe('human:op');
@@ -199,10 +223,16 @@ export async function mergeEntities(
   const db = opts.db ?? getBrainDb();
 
   // Look up both rows; reject if missing or type-mismatched.
-  const kept = db.prepare(`SELECT * FROM entities WHERE entity_id = ?`).get(keptEntityId) as any;
-  const merged = db.prepare(`SELECT * FROM entities WHERE entity_id = ?`).get(mergedEntityId) as any;
-  if (!kept) throw new Error(`mergeEntities: kept entity ${keptEntityId} not found`);
-  if (!merged) throw new Error(`mergeEntities: merged entity ${mergedEntityId} not found`);
+  const kept = db
+    .prepare(`SELECT * FROM entities WHERE entity_id = ?`)
+    .get(keptEntityId) as any;
+  const merged = db
+    .prepare(`SELECT * FROM entities WHERE entity_id = ?`)
+    .get(mergedEntityId) as any;
+  if (!kept)
+    throw new Error(`mergeEntities: kept entity ${keptEntityId} not found`);
+  if (!merged)
+    throw new Error(`mergeEntities: merged entity ${mergedEntityId} not found`);
   if (kept.entity_type !== merged.entity_type) {
     throw new Error(
       `mergeEntities: type mismatch ${kept.entity_type} vs ${merged.entity_type}`,
@@ -211,7 +241,9 @@ export async function mergeEntities(
 
   // Reject if merged was previously merged into something else.
   const prior = db
-    .prepare(`SELECT kept_entity_id FROM entity_merge_log WHERE merged_entity_id = ? LIMIT 1`)
+    .prepare(
+      `SELECT kept_entity_id FROM entity_merge_log WHERE merged_entity_id = ? LIMIT 1`,
+    )
     .get(mergedEntityId) as { kept_entity_id: string } | undefined;
   if (prior) {
     throw new Error(
@@ -230,24 +262,23 @@ export async function mergeEntities(
       `INSERT OR IGNORE INTO ku_entities (ku_id, entity_id, role)
        SELECT ku_id, ?, role FROM ku_entities WHERE entity_id = ?`,
     ).run(keptEntityId, mergedEntityId);
-    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ?`).run(mergedEntityId);
+    db.prepare(`DELETE FROM ku_entities WHERE entity_id = ?`).run(
+      mergedEntityId,
+    );
 
     // 2. Rebind entity_aliases. Same pattern; aliases have a unique alias_id so
     //    no conflict here, just an UPDATE.
-    db.prepare(`UPDATE entity_aliases SET entity_id = ? WHERE entity_id = ?`).run(
-      keptEntityId,
-      mergedEntityId,
-    );
+    db.prepare(
+      `UPDATE entity_aliases SET entity_id = ? WHERE entity_id = ?`,
+    ).run(keptEntityId, mergedEntityId);
 
     // 3. Rebind entity_relationships (both directions).
-    db.prepare(`UPDATE entity_relationships SET from_entity_id = ? WHERE from_entity_id = ?`).run(
-      keptEntityId,
-      mergedEntityId,
-    );
-    db.prepare(`UPDATE entity_relationships SET to_entity_id = ? WHERE to_entity_id = ?`).run(
-      keptEntityId,
-      mergedEntityId,
-    );
+    db.prepare(
+      `UPDATE entity_relationships SET from_entity_id = ? WHERE from_entity_id = ?`,
+    ).run(keptEntityId, mergedEntityId);
+    db.prepare(
+      `UPDATE entity_relationships SET to_entity_id = ? WHERE to_entity_id = ?`,
+    ).run(keptEntityId, mergedEntityId);
 
     // 4. Bump kept entity's updated_at.
     db.prepare(`UPDATE entities SET updated_at = ? WHERE entity_id = ?`).run(
@@ -274,7 +305,12 @@ export async function mergeEntities(
   })();
 
   logger.info(
-    { merge_id: mergeId, kept: keptEntityId, merged: mergedEntityId, by: opts.mergedBy },
+    {
+      merge_id: mergeId,
+      kept: keptEntityId,
+      merged: mergedEntityId,
+      by: opts.mergedBy,
+    },
     'identity-merge: entities merged',
   );
 
@@ -300,6 +336,7 @@ git commit -m "feat(brain): identity-merge engine — pivot ku_entities + aliase
 ## Task 2: `mergeEntities` — error paths
 
 **Files:**
+
 - Modify: `src/brain/__tests__/identity-merge.test.ts`
 
 Cover the three rejection cases.
@@ -307,41 +344,58 @@ Cover the three rejection cases.
 - [ ] **Step 1: Failing tests** appended to the existing describe block:
 
 ```ts
-  it('rejects self-merge', async () => {
-    await expect(
-      mergeEntities('e1', 'e1', {
-        evidence: { trigger: 'manual' }, confidence: 1, mergedBy: 'human:op', db: getBrainDb(),
-      }),
-    ).rejects.toThrow(/self-merge/);
-  });
+it('rejects self-merge', async () => {
+  await expect(
+    mergeEntities('e1', 'e1', {
+      evidence: { trigger: 'manual' },
+      confidence: 1,
+      mergedBy: 'human:op',
+      db: getBrainDb(),
+    }),
+  ).rejects.toThrow(/self-merge/);
+});
 
-  it('rejects when entities have different types', async () => {
-    const db = getBrainDb();
-    db.prepare(`INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
-       VALUES ('p1', 'person', ?, ?), ('c1', 'company', ?, ?)`).run(
-      '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
-    );
-    await expect(
-      mergeEntities('p1', 'c1', {
-        evidence: { trigger: 'manual' }, confidence: 1, mergedBy: 'human:op', db,
-      }),
-    ).rejects.toThrow(/type mismatch/);
-  });
+it('rejects when entities have different types', async () => {
+  const db = getBrainDb();
+  db.prepare(
+    `INSERT INTO entities (entity_id, entity_type, created_at, updated_at)
+       VALUES ('p1', 'person', ?, ?), ('c1', 'company', ?, ?)`,
+  ).run(
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+  );
+  await expect(
+    mergeEntities('p1', 'c1', {
+      evidence: { trigger: 'manual' },
+      confidence: 1,
+      mergedBy: 'human:op',
+      db,
+    }),
+  ).rejects.toThrow(/type mismatch/);
+});
 
-  it('rejects re-merging an already-merged loser', async () => {
-    const db = getBrainDb();
-    seedPerson(db, 'a', 'A');
-    seedPerson(db, 'b', 'B');
-    seedPerson(db, 'c', 'C');
-    await mergeEntities('a', 'b', {
-      evidence: { trigger: 'manual' }, confidence: 1, mergedBy: 'human:op', db,
-    });
-    await expect(
-      mergeEntities('c', 'b', {
-        evidence: { trigger: 'manual' }, confidence: 1, mergedBy: 'human:op', db,
-      }),
-    ).rejects.toThrow(/already merged/);
+it('rejects re-merging an already-merged loser', async () => {
+  const db = getBrainDb();
+  seedPerson(db, 'a', 'A');
+  seedPerson(db, 'b', 'B');
+  seedPerson(db, 'c', 'C');
+  await mergeEntities('a', 'b', {
+    evidence: { trigger: 'manual' },
+    confidence: 1,
+    mergedBy: 'human:op',
+    db,
   });
+  await expect(
+    mergeEntities('c', 'b', {
+      evidence: { trigger: 'manual' },
+      confidence: 1,
+      mergedBy: 'human:op',
+      db,
+    }),
+  ).rejects.toThrow(/already merged/);
+});
 ```
 
 - [ ] **Step 2: Run** — expect PASS (all three should already work with the Task 1 implementation).
@@ -358,6 +412,7 @@ git commit -m "test(brain): identity-merge — self/type/double-merge rejections
 ## Task 3: `EntityMergeRequestedEvent` type
 
 **Files:**
+
 - Modify: `src/events.ts`
 - Modify: `src/__tests__/events.test.ts`
 
@@ -423,6 +478,7 @@ git commit -m "feat(events): EntityMergeRequestedEvent type"
 ## Task 4: `claw merge` text trigger in Signal channel
 
 **Files:**
+
 - Modify: `src/channels/signal.ts`
 - Modify: `src/channels/__tests__/signal.test.ts`
 
@@ -431,29 +487,29 @@ Mirror of the existing `claw save` trigger (look for `^claw\s+save\b` pattern ar
 - [ ] **Step 1: Failing test**:
 
 ```ts
-  it('claw merge text emits entity.merge.requested', async () => {
-    const events: EntityMergeRequestedEvent[] = [];
-    eventBus.on('entity.merge.requested', (e) => events.push(e));
-    const env = {
-      source: 'alice',
-      sourceNumber: '+15551234567',
-      sourceName: 'Alice',
+it('claw merge text emits entity.merge.requested', async () => {
+  const events: EntityMergeRequestedEvent[] = [];
+  eventBus.on('entity.merge.requested', (e) => events.push(e));
+  const env = {
+    source: 'alice',
+    sourceNumber: '+15551234567',
+    sourceName: 'Alice',
+    timestamp: Date.now(),
+    dataMessage: {
       timestamp: Date.now(),
-      dataMessage: {
-        timestamp: Date.now(),
-        message: 'claw merge Jonathan "J Zhang"',
-        groupInfo: { groupId: 'group-X', type: 'DELIVER' },
-      },
-    };
-    await channel.handleEnvelope(env as any);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'entity.merge.requested',
-      platform: 'signal',
-      handle_a: 'Jonathan',
-      handle_b: 'J Zhang',
-    });
+      message: 'claw merge Jonathan "J Zhang"',
+      groupInfo: { groupId: 'group-X', type: 'DELIVER' },
+    },
+  };
+  await channel.handleEnvelope(env as any);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'entity.merge.requested',
+    platform: 'signal',
+    handle_a: 'Jonathan',
+    handle_b: 'J Zhang',
   });
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL.
@@ -461,30 +517,30 @@ Mirror of the existing `claw save` trigger (look for `^claw\s+save\b` pattern ar
 - [ ] **Step 3: Add trigger** in `src/channels/signal.ts`. Find the `claw save` block and add an analogous block immediately after it. Use a simple parser that handles bare words and double-quoted phrases:
 
 ```ts
-    // `claw merge` text trigger — operator-issued identity merge.
-    const mergeMatch = body.match(/^claw\s+merge\b\s*(.+)$/i);
-    if (mergeMatch) {
-      const args = parseMergeArgs(mergeMatch[1].trim());
-      if (args.length === 2) {
-        eventBus.emit('entity.merge.requested', {
-          type: 'entity.merge.requested',
-          source: 'signal',
-          timestamp: Date.now(),
-          payload: {},
-          platform: 'signal',
-          chat_id: chatId,
-          requested_by_handle: envelope.sourceName ?? sourceJid,
-          handle_a: args[0],
-          handle_b: args[1],
-        } satisfies EntityMergeRequestedEvent);
-      } else {
-        logger.warn(
-          { body, parsed: args },
-          'signal: claw merge needs exactly two handles — ignoring',
-        );
-      }
-      return;
-    }
+// `claw merge` text trigger — operator-issued identity merge.
+const mergeMatch = body.match(/^claw\s+merge\b\s*(.+)$/i);
+if (mergeMatch) {
+  const args = parseMergeArgs(mergeMatch[1].trim());
+  if (args.length === 2) {
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: chatId,
+      requested_by_handle: envelope.sourceName ?? sourceJid,
+      handle_a: args[0],
+      handle_b: args[1],
+    } satisfies EntityMergeRequestedEvent);
+  } else {
+    logger.warn(
+      { body, parsed: args },
+      'signal: claw merge needs exactly two handles — ignoring',
+    );
+  }
+  return;
+}
 ```
 
 Add the helper at the bottom of the file:
@@ -520,6 +576,7 @@ git commit -m "feat(signal): claw merge text trigger emits entity.merge.requeste
 ## Task 5: `claw merge` text trigger in Discord channel
 
 **Files:**
+
 - Modify: `src/channels/discord.ts`
 - Modify: `src/channels/__tests__/discord.test.ts`
 
@@ -528,26 +585,26 @@ Discord MessageCreate already detects `claw save` in the message content; mirror
 - [ ] **Step 1: Failing test**:
 
 ```ts
-  it('claw merge MessageCreate emits entity.merge.requested', async () => {
-    const events: EntityMergeRequestedEvent[] = [];
-    eventBus.on('entity.merge.requested', (e) => events.push(e));
-    const message = {
-      id: 'm1',
-      channelId: 'channel-1',
-      content: 'claw merge alice bob',
-      author: { id: 'u1', username: 'Op', bot: false },
-      member: { displayName: 'Op' },
-      createdAt: new Date(),
-    };
-    await client.emit('messageCreate', message);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      platform: 'discord',
-      chat_id: 'channel-1',
-      handle_a: 'alice',
-      handle_b: 'bob',
-    });
+it('claw merge MessageCreate emits entity.merge.requested', async () => {
+  const events: EntityMergeRequestedEvent[] = [];
+  eventBus.on('entity.merge.requested', (e) => events.push(e));
+  const message = {
+    id: 'm1',
+    channelId: 'channel-1',
+    content: 'claw merge alice bob',
+    author: { id: 'u1', username: 'Op', bot: false },
+    member: { displayName: 'Op' },
+    createdAt: new Date(),
+  };
+  await client.emit('messageCreate', message);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    platform: 'discord',
+    chat_id: 'channel-1',
+    handle_a: 'alice',
+    handle_b: 'bob',
   });
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL.
@@ -571,24 +628,25 @@ export function parseMergeArgs(s: string): string[] {
 In `src/channels/discord.ts` MessageCreate handler:
 
 ```ts
-      const mergeMatch = message.content?.match(/^claw\s+merge\b\s*(.+)$/i);
-      if (mergeMatch) {
-        const args = parseMergeArgs(mergeMatch[1].trim());
-        if (args.length === 2) {
-          eventBus.emit('entity.merge.requested', {
-            type: 'entity.merge.requested',
-            source: 'discord',
-            timestamp: Date.now(),
-            payload: {},
-            platform: 'discord',
-            chat_id: message.channelId,
-            requested_by_handle: message.member?.displayName ?? message.author?.username ?? 'unknown',
-            handle_a: args[0],
-            handle_b: args[1],
-          } satisfies EntityMergeRequestedEvent);
-        }
-        return;
-      }
+const mergeMatch = message.content?.match(/^claw\s+merge\b\s*(.+)$/i);
+if (mergeMatch) {
+  const args = parseMergeArgs(mergeMatch[1].trim());
+  if (args.length === 2) {
+    eventBus.emit('entity.merge.requested', {
+      type: 'entity.merge.requested',
+      source: 'discord',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'discord',
+      chat_id: message.channelId,
+      requested_by_handle:
+        message.member?.displayName ?? message.author?.username ?? 'unknown',
+      handle_a: args[0],
+      handle_b: args[1],
+    } satisfies EntityMergeRequestedEvent);
+  }
+  return;
+}
 ```
 
 (Add `import { parseMergeArgs } from './parse-merge-args.js';` and `import type { EntityMergeRequestedEvent } from '../events.js';`.)
@@ -607,6 +665,7 @@ git commit -m "feat(discord): claw merge text trigger; share parseMergeArgs"
 ## Task 6: `identity-merge-handler` — handle resolution + merge
 
 **Files:**
+
 - Create: `src/brain/identity-merge-handler.ts`
 - Create: `src/brain/__tests__/identity-merge-handler.test.ts`
 
@@ -623,8 +682,12 @@ it('resolves both handles via canonical name and calls mergeEntities', async () 
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES ('e-jz', 'person', ?, ?, ?), ('e-jz2', 'person', ?, ?, ?)`,
   ).run(
-    JSON.stringify({ name: 'Jonathan' }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
-    JSON.stringify({ name: 'J Zhang' }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
+    JSON.stringify({ name: 'Jonathan' }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+    JSON.stringify({ name: 'J Zhang' }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
   );
   // Seed a KU pointing at the loser so we can verify rebind happened.
   db.prepare(
@@ -633,21 +696,37 @@ it('resolves both handles via canonical name and calls mergeEntities', async () 
      VALUES ('k1', 'x', 'signal_message', 'personal', 0.9,
              '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z', 'rules', 0)`,
   ).run();
-  db.prepare(`INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-jz2', 'mentioned')`).run();
+  db.prepare(
+    `INSERT INTO ku_entities (ku_id, entity_id, role) VALUES ('k1', 'e-jz2', 'mentioned')`,
+  ).run();
 
   const sentReplies: string[] = [];
   await handleEntityMergeRequested(
     {
-      type: 'entity.merge.requested', source: 'signal', timestamp: Date.now(),
-      payload: {}, platform: 'signal', chat_id: 'c1',
-      requested_by_handle: 'op', handle_a: 'Jonathan', handle_b: 'J Zhang',
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'Jonathan',
+      handle_b: 'J Zhang',
     },
-    { db, sendReply: async (text: string) => { sentReplies.push(text); } },
+    {
+      db,
+      sendReply: async (text: string) => {
+        sentReplies.push(text);
+      },
+    },
   );
   // Both rebound to e-jz (whichever was alphabetically resolved first); confirm log row.
   const log = db.prepare(`SELECT * FROM entity_merge_log LIMIT 1`).get() as any;
   expect(log).toBeDefined();
-  expect([log.kept_entity_id, log.merged_entity_id].sort()).toEqual(['e-jz', 'e-jz2']);
+  expect([log.kept_entity_id, log.merged_entity_id].sort()).toEqual([
+    'e-jz',
+    'e-jz2',
+  ]);
   // Ack reply sent.
   expect(sentReplies).toHaveLength(1);
   expect(sentReplies[0]).toMatch(/merged/i);
@@ -659,20 +738,39 @@ it('refuses when a handle is ambiguous', async () => {
     `INSERT INTO entities (entity_id, entity_type, canonical, created_at, updated_at)
      VALUES ('e1', 'person', ?, ?, ?), ('e2', 'person', ?, ?, ?), ('e3', 'person', ?, ?, ?)`,
   ).run(
-    JSON.stringify({ name: 'Jonathan' }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
-    JSON.stringify({ name: 'Jonathan' }), '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
-    JSON.stringify({ name: 'Jane' }),    '2026-04-27T00:00:00Z', '2026-04-27T00:00:00Z',
+    JSON.stringify({ name: 'Jonathan' }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+    JSON.stringify({ name: 'Jonathan' }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
+    JSON.stringify({ name: 'Jane' }),
+    '2026-04-27T00:00:00Z',
+    '2026-04-27T00:00:00Z',
   );
   const sent: string[] = [];
   await handleEntityMergeRequested(
     {
-      type: 'entity.merge.requested', source: 'signal', timestamp: Date.now(),
-      payload: {}, platform: 'signal', chat_id: 'c1',
-      requested_by_handle: 'op', handle_a: 'Jonathan', handle_b: 'Jane',
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'Jonathan',
+      handle_b: 'Jane',
     },
-    { db, sendReply: async (t: string) => { sent.push(t); } },
+    {
+      db,
+      sendReply: async (t: string) => {
+        sent.push(t);
+      },
+    },
   );
-  expect(db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get()).toEqual({ n: 0 });
+  expect(
+    db.prepare(`SELECT COUNT(*) AS n FROM entity_merge_log`).get(),
+  ).toEqual({ n: 0 });
   expect(sent[0]).toMatch(/ambiguous|multiple/i);
 });
 
@@ -681,11 +779,22 @@ it('refuses when a handle resolves to nothing', async () => {
   const sent: string[] = [];
   await handleEntityMergeRequested(
     {
-      type: 'entity.merge.requested', source: 'signal', timestamp: Date.now(),
-      payload: {}, platform: 'signal', chat_id: 'c1',
-      requested_by_handle: 'op', handle_a: 'nobody', handle_b: 'somebody',
+      type: 'entity.merge.requested',
+      source: 'signal',
+      timestamp: Date.now(),
+      payload: {},
+      platform: 'signal',
+      chat_id: 'c1',
+      requested_by_handle: 'op',
+      handle_a: 'nobody',
+      handle_b: 'somebody',
     },
-    { db, sendReply: async (t: string) => { sent.push(t); } },
+    {
+      db,
+      sendReply: async (t: string) => {
+        sent.push(t);
+      },
+    },
   );
   expect(sent[0]).toMatch(/not found|no match/i);
 });
@@ -722,7 +831,10 @@ interface ResolvedCandidate {
  *   2. Canonical name match (canonical->>'name' lowercased == handle lowered).
  * Returns ALL matches so callers can detect ambiguity.
  */
-function resolveHandle(db: Database.Database, handle: string): ResolvedCandidate[] {
+function resolveHandle(
+  db: Database.Database,
+  handle: string,
+): ResolvedCandidate[] {
   const lowered = handle.trim().toLowerCase();
   if (!lowered) return [];
   const aliasHits = db
@@ -787,7 +899,9 @@ export async function handleEntityMergeRequested(
   const a = candA[0].entity_id;
   const b = candB[0].entity_id;
   if (a === b) {
-    await reply(`claw merge: '${evt.handle_a}' and '${evt.handle_b}' already resolve to the same entity`);
+    await reply(
+      `claw merge: '${evt.handle_a}' and '${evt.handle_b}' already resolve to the same entity`,
+    );
     return;
   }
 
@@ -836,6 +950,7 @@ git commit -m "feat(brain): identity-merge handler — resolve handles + ack rep
 ## Task 7: Wire merge handler into chat-ingest start/stop
 
 **Files:**
+
 - Modify: `src/brain/identity-merge-handler.ts`
 - Modify: `src/brain/chat-ingest.ts`
 
@@ -848,16 +963,23 @@ let unsub: (() => void) | null = null;
 
 export interface IdentityMergeStartOpts {
   /** Channel-aware reply sender. Wired by chat-ingest to router.replyTo(...). */
-  sendReply?: (chat_id: string, platform: 'discord' | 'signal', text: string) => Promise<void>;
+  sendReply?: (
+    chat_id: string,
+    platform: 'discord' | 'signal',
+    text: string,
+  ) => Promise<void>;
 }
 
-export function startIdentityMergeHandler(opts: IdentityMergeStartOpts = {}): void {
+export function startIdentityMergeHandler(
+  opts: IdentityMergeStartOpts = {},
+): void {
   if (unsub) return;
   unsub = eventBus.on('entity.merge.requested', async (evt) => {
     try {
       await handleEntityMergeRequested(evt, {
         sendReply: opts.sendReply
-          ? async (text: string) => opts.sendReply!(evt.chat_id, evt.platform, text)
+          ? async (text: string) =>
+              opts.sendReply!(evt.chat_id, evt.platform, text)
           : undefined,
       });
     } catch (err) {
@@ -890,7 +1012,7 @@ import {
 In `startChatIngest`, after `startWindowFlusher();` (and after PR 4's `startChatEditSync` if it landed), add:
 
 ```ts
-  startIdentityMergeHandler({ sendReply: opts.sendReply });
+startIdentityMergeHandler({ sendReply: opts.sendReply });
 ```
 
 Update `ChatIngestOpts`:
@@ -910,7 +1032,7 @@ export interface ChatIngestOpts {
 In `stopChatIngest`, after `stopWindowFlusher();`, add:
 
 ```ts
-  stopIdentityMergeHandler();
+stopIdentityMergeHandler();
 ```
 
 In `src/index.ts` (or wherever `startChatIngest` is currently called from production wiring), pass a real `sendReply`. Look up the existing channel router — it already knows how to send messages back per chat. Use whatever helper is in scope (e.g. `router.send`). If the wiring is non-obvious, add a TODO log line and accept that the ack won't reach the chat in production until index.ts is updated, but tests still pass.
@@ -929,10 +1051,12 @@ git commit -m "feat(brain): start/stop identity-merge handler with chat-ingest"
 ## Task 8: `attachment-summary` helper
 
 **Files:**
+
 - Create: `src/brain/attachment-summary.ts`
 - Create: `src/brain/__tests__/attachment-summary.test.ts`
 
 Generates a single-line summary of one attachment for inclusion in a windowed transcript. Three tiers:
+
 1. If `BRAIN_IMAGE_VISION` is enabled AND the attachment is an image with a downloaded local path → call vision summarizer (existing helper from PR 1).
 2. Else if attachment has a filename → `[<kind>: <filename>]` (e.g. `[image: receipt.jpg]`, `[file: contract.pdf]`).
 3. Else → `[attachment]`.
@@ -965,7 +1089,10 @@ describe('attachment-summary', () => {
   });
 
   it('handles missing filename', async () => {
-    const result = await summarizeAttachment({ kind: 'file' }, { visionEnabled: false });
+    const result = await summarizeAttachment(
+      { kind: 'file' },
+      { visionEnabled: false },
+    );
     expect(result).toBe('[file]');
   });
 
@@ -975,7 +1102,9 @@ describe('attachment-summary', () => {
   });
 
   it('falls back to filename when vision throws', async () => {
-    const visionMock = vi.fn(async () => { throw new Error('boom'); });
+    const visionMock = vi.fn(async () => {
+      throw new Error('boom');
+    });
     const result = await summarizeAttachment(
       { kind: 'image', filename: 'r.jpg', local_path: '/tmp/r.jpg' },
       { visionEnabled: true, summarizeVision: visionMock },
@@ -1004,7 +1133,7 @@ describe('attachment-summary', () => {
 import { logger } from '../logger.js';
 
 export interface AttachmentInput {
-  kind?: string;        // 'image' | 'file' | 'audio' | 'video' | other
+  kind?: string; // 'image' | 'file' | 'audio' | 'video' | other
   filename?: string;
   local_path?: string;
 }
@@ -1060,6 +1189,7 @@ git commit -m "feat(brain): attachment-summary helper with vision tier + fallbac
 ## Task 9: Use `summarizeAttachment` in window-flusher transcript
 
 **Files:**
+
 - Modify: `src/brain/window-flusher.ts`
 - Modify: `src/brain/__tests__/window-flusher.test.ts`
 
@@ -1068,25 +1198,32 @@ Find the transcript builder in `flushOne` (currently joining `[<sent_at>] <sende
 - [ ] **Step 1: Failing test** appended to `window-flusher.test.ts`:
 
 ```ts
-  it('window transcript includes attachment summary lines', async () => {
-    setRegisteredGroup('dc:c-att', {
-      name: 'g-att', folder: 'opt-att', trigger: '@nano',
-      added_at: new Date().toISOString(),
-    });
-    writeOptIn('opt-att', { idleMin: 1 });
-    const events = captured();
-    const t1 = new Date(Date.now() - 5 * 60_000).toISOString();
-    putChatMessage({
-      platform: 'discord', chat_id: 'c-att', message_id: 'mA',
-      sent_at: t1, sender: 'u', sender_name: 'X', text: 'see attached',
-      attachments: [{ kind: 'image', filename: 'receipt.jpg' }],
-    });
-    noteMessage('discord', 'c-att', 'mA', t1);
-    flushIdle(Date.now()); // force the idle flush
-    expect(events).toHaveLength(1);
-    expect(events[0].transcript).toContain('see attached');
-    expect(events[0].transcript).toContain('[image: receipt.jpg]');
+it('window transcript includes attachment summary lines', async () => {
+  setRegisteredGroup('dc:c-att', {
+    name: 'g-att',
+    folder: 'opt-att',
+    trigger: '@nano',
+    added_at: new Date().toISOString(),
   });
+  writeOptIn('opt-att', { idleMin: 1 });
+  const events = captured();
+  const t1 = new Date(Date.now() - 5 * 60_000).toISOString();
+  putChatMessage({
+    platform: 'discord',
+    chat_id: 'c-att',
+    message_id: 'mA',
+    sent_at: t1,
+    sender: 'u',
+    sender_name: 'X',
+    text: 'see attached',
+    attachments: [{ kind: 'image', filename: 'receipt.jpg' }],
+  });
+  noteMessage('discord', 'c-att', 'mA', t1);
+  flushIdle(Date.now()); // force the idle flush
+  expect(events).toHaveLength(1);
+  expect(events[0].transcript).toContain('see attached');
+  expect(events[0].transcript).toContain('[image: receipt.jpg]');
+});
 ```
 
 - [ ] **Step 2: Run** — expect FAIL (`receipt.jpg` won't appear in transcript).
@@ -1094,7 +1231,10 @@ Find the transcript builder in `flushOne` (currently joining `[<sent_at>] <sende
 - [ ] **Step 3: Modify** `flushOne` in `src/brain/window-flusher.ts`. Find the `transcript` build (currently `rows.map((r) => '[' + r.sent_at + '] ' + ... + ': ' + r.text).join('\n')`). Replace with an async transcript build:
 
 ```ts
-import { summarizeAttachment, type AttachmentInput } from './attachment-summary.js';
+import {
+  summarizeAttachment,
+  type AttachmentInput,
+} from './attachment-summary.js';
 
 // Inside flushOne, replace:
 //   const transcript = rows.map((r) => `[${r.sent_at}] ${...}: ${r.text ?? ''}`.trim()).join('\n');
@@ -1116,9 +1256,9 @@ const transcript = lines.join('\n');
 This requires `flushOne` to become `async` if it isn't already. Check the existing signature; if it's sync, mark it async and update callers (`flushIdle`, `flushAll`, `noteMessage`) to await it. The cap-flush path inside `noteMessage` becomes:
 
 ```ts
-  if (w.message_ids.length >= w.cap) {
-    void flushOne(w, 'cap');
-  }
+if (w.message_ids.length >= w.cap) {
+  void flushOne(w, 'cap');
+}
 ```
 
 (Fire-and-forget is acceptable here; the function completes before any further `noteMessage` for the same window.)
@@ -1141,6 +1281,7 @@ git commit -m "feat(brain): include attachment summaries in window transcript"
 ## Task 10: `.env.example` doc + manual end-to-end verification
 
 **Files:**
+
 - Modify: `.env.example`
 - (operator-run) verification
 
