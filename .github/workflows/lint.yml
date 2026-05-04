@@ -14,6 +14,12 @@ on:
 
 permissions:
   contents: read
+  # Required for prettier_changed_only mode (default true) so the reusable
+  # can call `gh api .../pulls/N/files`. Reusable's job-level permission
+  # request is a hard ceiling against the caller — without this, the
+  # reusable fails startup and `lint / actionlint` hangs in
+  # "Expected — Waiting for status to be reported".
+  pull-requests: read
 
 jobs:
   lint:
