@@ -1,0 +1,29 @@
+# Caller for regression-convention.yml reusable.
+# Installed by install-regression-convention.sh into
+# <target-repo>/.github/workflows/regression-convention.yml.
+#
+# Enforces: PRs that modify `## Lessons` in the configured file(s) must
+# also add or modify a file in tests/regression/. The installer auto-
+# detects which file(s) hold `## Lessons` (MEMORY.md preferred, CLAUDE.md
+# fallback, both allowed) and writes the resolved path(s) below.
+
+name: Regression Convention
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  regression-convention:
+    uses: topcoder1/ci-workflows/.github/workflows/regression-convention.yml@main
+    with:
+      #  is rewritten by install-regression-convention.sh
+      # at install time. Empty string = no-op (workflow installed, no Lessons
+      # section in this repo yet; the check will start firing when a Lessons
+      # section is added in either MEMORY.md or CLAUDE.md).
+      lessons_files: ''
+      # lessons_section_header: "## Lessons"  # default
+      # regression_dir: "tests/regression"    # default
