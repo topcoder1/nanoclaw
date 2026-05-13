@@ -1,0 +1,37 @@
+# Caller for coverage-floor.yml reusable.
+# Installed by install-coverage-floor.sh into <target-repo>/.github/workflows/coverage-floor.yml.
+#
+# Reads .coverage-floor JSON, measures coverage in CI, enforces the floor.
+# Install ships .coverage-floor with current=0.0 (seed-not-yet marker). On the
+# install PR, the reusable passes through with a comment naming the would-be
+# floor. After the install PR merges, push:main opens a follow-up
+# `chore(coverage): seed floor at X.X%` PR with the seeded value. After that
+# follow-up merges, future PRs run in enforce mode against the seeded floor.
+
+name: Coverage Floor
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # post-merge seed branch + push
+  pull-requests: write # sticky coverage comment + open seed PR
+
+jobs:
+  coverage-floor:
+    uses: topcoder1/ci-workflows/.github/workflows/coverage-floor.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+    secrets:
+      # AUTOMERGE_PAT is already deployed fleet-wide for claude-author-automerge.yml.
+      # The reusable uses it to push the seed branch and open the seed PR so that
+      # pull_request workflows actually fire on the seed PR (GITHUB_TOKEN-driven
+      # pushes/opens don't spawn workflows — recursion prevention). Without this
+      # forward, the seed PR sits "blocked" and needs a manual empty-commit
+      # unblock. Always pass explicitly per the cross-org-reusable lesson.
+      AUTOMERGE_PAT: ${{ secrets.AUTOMERGE_PAT }}
+    with:
+      language: 'js'
