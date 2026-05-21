@@ -37,6 +37,10 @@ groups/global/*
 .claude/worktrees/
 .claire/
 
+# Agent team contract files — tracked in git
+!.claude/agents/
+!.claude/sprints/
+
 # Skills system (local per-installation state)
 .nanoclaw/
 
