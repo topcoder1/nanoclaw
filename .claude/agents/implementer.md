@@ -34,23 +34,21 @@ You produce **one artifact**: a green PR.
 5. Run `npm run lint` — must exit 0 (zero ESLint errors).
 6. Run `npm run format:check` — if it fails, run `npm run format:fix` on owned files only.
 
-### Phase 3 — Repo-wide guard (turns 20-23)
+### Phase 3 — CI is the repo-wide guard (turns 20-21)
 
-Before opening the PR, run the FULL safety check:
+**Do NOT run `npm test` as a full local re-run.** The full vitest suite takes ~50s on this repo and CI runs the same suite as a required status check — local re-execution adds no signal CI doesn't already provide.
 
-```bash
-npm run typecheck                        # tsc --noEmit — zero errors
-npm run lint                             # eslint src/ — zero errors
-npm test                                 # vitest run — no regressions
-npx vitest run --coverage 2>&1 | tail -20  # capture coverage summary (manual — no floor)
-```
+**What to do instead:**
 
-If any fails:
+1. Re-run your Phase 2 acceptance command one final time — confirms your owned tests still pass after any iteration.
+2. `npm run typecheck` — catches TypeScript errors across the whole module before pushing.
+3. `npm run lint -- --max-warnings=0` scoped to owned paths — fast, catches the most likely issues.
+4. Spot-run related test files if your task touches a module others import: `npx vitest run <related>.test.ts`. Bounded (seconds), catches likely cross-file breakage.
+5. Proceed to Phase 4. If CI goes red after push, GitHub will notify and you may be re-dispatched — treat as Phase 3 failure: fix if in owned files; STOP and write `AGENT_NOTES.md` if in non-owned files.
 
-- If the failure is in YOUR owned files: fix it.
-- If the failure is in OTHER files (you broke something downstream): STOP. Write `AGENT_NOTES.md` (see Phase 5).
+Coverage floor note: parse `.coverage-floor` as JSON. CI's `coverage-floor` check enforces `current`. You do not need to run `--coverage` locally.
 
-### Phase 4 — Open PR (turns 23-25)
+### Phase 4 — Open PR (turns 21-25)
 
 1. `git add <only owned files>` — never `git add -A`, never `git add .`
 2. `git diff --cached --stat` — verify only owned files staged
@@ -73,12 +71,6 @@ npx vitest run --reporter=verbose src/**tests**/foo.test.ts
 <last 10 lines of output proving green>
 \`\`\`
 
-## Coverage (manual — no floor installed)
-
-Before: <paste vitest coverage summary>
-After: <paste vitest coverage summary>
-Note: coverage-floor.yml not yet installed on this repo.
-
 ## Auto-merge rationale
 
 <one line: why this is safe to auto-merge, OR why it requires manual click>
@@ -99,7 +91,7 @@ EOF
 
 ### Phase 5 — Failure exit (any turn)
 
-If you cannot complete by turn 23, OR you hit a scope-out-of-bounds need, OR your repo-wide guard fails on non-owned files:
+If you cannot complete by turn 21, OR you hit a scope-out-of-bounds need, OR your repo-wide guard fails on non-owned files:
 
 1. DO NOT push a red PR. DO NOT push anything.
 2. Write `AGENT_NOTES.md` in the worktree root:
@@ -108,7 +100,7 @@ If you cannot complete by turn 23, OR you hit a scope-out-of-bounds need, OR you
 # AGENT_NOTES — <task_id>
 
 **Status:** blocked | needs-clarification | scope-expansion-needed
-**Turns used:** <N>/25
+**Turns used:** <N>/21
 
 ## What I tried
 
@@ -142,7 +134,7 @@ If you cannot complete by turn 23, OR you hit a scope-out-of-bounds need, OR you
 5. **Never `curl`, `wget`, `docker`, `sudo`, `pkill`, `rm -rf`, `npx -y`.**
 6. **Never read `.env*`, `*.keys.json`, or `repo-tokens/` unless `may-read:` explicitly lists them.**
 7. **Always run the pre-flight check (Phase 1) before any edit.**
-8. **Report coverage manually** — no automated floor exists yet; paste `npx vitest run --coverage` summary in the PR body.
+8. **Do NOT run `npm test` as a full-suite re-run in Phase 3.** CI's required status checks are the coverage and regression gate — local re-run adds no signal.
 
 ## You SHOULD
 
@@ -158,4 +150,4 @@ If you cannot complete by turn 23, OR you hit a scope-out-of-bounds need, OR you
 - Add dependencies (no `package.json` edits).
 - Modify any file in the Planner refusal list (`src/channels/`, `src/index.ts`, `src/container-runner.ts`, `src/config.ts`, `container/`, `.github/workflows/`, etc.).
 - Skip the HUMAN_READABLE_SUMMARY section in the PR body.
-- Push a PR when repo-wide guards are red.
+- Push a PR when your Phase 3 scoped checks (typecheck, lint, spot vitest) are red.
