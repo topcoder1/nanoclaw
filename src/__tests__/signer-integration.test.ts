@@ -16,6 +16,7 @@ import { docusignExecutor } from '../signer/docusign-executor.js';
 import { getCeremony } from '../signer/ceremony-repo.js';
 
 const FIXTURES = path.join(import.meta.dirname, '../signer/__tests__/fixtures');
+const hasPlaywright = fs.existsSync(chromium.executablePath());
 
 // Test executor extends docusignExecutor with localhost/127.0.0.1 in the whitelist
 const testDocusignExecutor = {
@@ -27,7 +28,7 @@ const testDocusignExecutor = {
   ],
 };
 
-describe('signer end-to-end integration', () => {
+describe.skipIf(!hasPlaywright)('signer end-to-end integration', () => {
   let browser: Browser;
   let server: http.Server;
   let port: number;

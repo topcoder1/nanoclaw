@@ -17,6 +17,7 @@ import { isWhitelistedUrl } from '../executor-registry.js';
 import type { SignCeremony, SignerProfile } from '../types.js';
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
+const hasPlaywright = fs.existsSync(chromium.executablePath());
 
 function makeCeremony(overrides: Partial<SignCeremony> = {}): SignCeremony {
   return {
@@ -49,7 +50,7 @@ const profile: SignerProfile = {
   updatedAt: Date.now(),
 };
 
-describe('docusignExecutor', () => {
+describe.skipIf(!hasPlaywright)('docusignExecutor', () => {
   let browser: Browser;
   let server: http.Server;
   let port: number;
