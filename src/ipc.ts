@@ -104,6 +104,19 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+/**
+ * True when an FYI card declares itself as no-action (so it doesn't warrant
+ * a live push and should fall through to the digest path). Markers:
+ *   - leading "AUTO" followed by em-dash, en-dash, hyphen, or whitespace
+ *   - standalone phrase "no action needed/required" (case-insensitive)
+ */
+export function isNoActionFyi(text: string): boolean {
+  const trimmed = text.trim();
+  if (/^AUTO[\s—–-]/i.test(trimmed)) return true;
+  if (/\bno action (needed|required)\b/i.test(text)) return true;
+  return false;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -816,6 +829,19 @@ export async function processTaskIpc(
         logger.warn(
           { sourceGroup, hasJid: Boolean(jid), hasText: Boolean(text) },
           'send_fyi_card: missing jid or text',
+        );
+        break;
+      }
+
+      // Suppress live push when the agent self-declares "no action needed".
+      // The same content reaches the user via the daily digest, so live
+      // pinging adds noise without value. Triggers: leading "AUTO " marker
+      // (em dash, en dash, hyphen, or whitespace), or the standalone phrase
+      // "no action needed/required" anywhere in the body.
+      if (isNoActionFyi(text)) {
+        logger.info(
+          { jid, sourceGroup, trackedItemId },
+          'send_fyi_card: suppressed live push (no-action marker)',
         );
         break;
       }
