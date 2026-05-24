@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  _initTestDatabase,
-  _closeDatabase,
-  getDb,
-} from '../../db.js';
+import { _initTestDatabase, _closeDatabase, getDb } from '../../db.js';
 import { runAttentionReminderSweep } from '../reminder.js';
 
 const sent: Array<{ chatId: string; text: string }> = [];
@@ -62,7 +58,10 @@ describe('runAttentionReminderSweep — clustering', () => {
     insert('a', 'One-off review request', 2);
     await runAttentionReminderSweep({ windowHours: 1 });
     expect(sent).toEqual([
-      { chatId: 'test-chat', text: '⏰ Still waiting on you: *One-off review request*' },
+      {
+        chatId: 'test-chat',
+        text: '⏰ Still waiting on you: *One-off review request*',
+      },
     ]);
   });
 
@@ -71,7 +70,9 @@ describe('runAttentionReminderSweep — clustering', () => {
     insert('b', 'Build #1235 failed', 2);
     await runAttentionReminderSweep({ windowHours: 1 });
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.text).toMatch(/^⏰ 2 still waiting: \*Build #123\d failed\*$/);
+    expect(sent[0]?.text).toMatch(
+      /^⏰ 2 still waiting: \*Build #123\d failed\*$/,
+    );
   });
 
   it('stamps every row in the cluster so a second sweep is silent', async () => {
