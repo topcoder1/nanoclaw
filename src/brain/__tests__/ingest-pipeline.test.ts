@@ -100,6 +100,23 @@ async function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Poll until `predicate` holds (or timeout) instead of sleeping a fixed
+// interval. A fixed `wait(1500)` flakes on slow CI runners when the work
+// under test takes longer than the sleep — e.g. the Qdrant-rejection test
+// below, whose mocked failure triggers a retry/backoff path.
+async function pollUntil<T>(
+  read: () => T,
+  predicate: (value: T) => boolean,
+  timeoutMs = 10000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = read();
+    if (predicate(value) || Date.now() > deadline) return value;
+    await wait(25);
+  }
+}
+
 describe('brain/ingest — P1 pipeline integration', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-p1-pipe-'));
@@ -412,14 +429,20 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Deal deal_77 nudge',
       'Renewal $5,000 this month.',
     );
-    await wait(1500);
 
     const db = getBrainDb();
-    const raw = db
-      .prepare(
-        `SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-qdrant-fail'`,
-      )
-      .get() as { processed_at: string | null; process_error: string | null };
+    const raw = await pollUntil(
+      () =>
+        db
+          .prepare(
+            `SELECT processed_at, process_error FROM raw_events WHERE source_ref = 'thread-qdrant-fail'`,
+          )
+          .get() as {
+          processed_at: string | null;
+          process_error: string | null;
+        },
+      (row) => row?.processed_at != null,
+    );
     expect(raw.processed_at).not.toBeNull();
     // The Qdrant failure is logged warn, not a pipeline error.
     expect(raw.process_error).toBeNull();
