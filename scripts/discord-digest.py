@@ -187,6 +187,24 @@ def send_dm(content):
 def main():
     output_only = "--output-only" in sys.argv[1:]
 
+    # The standalone daily DM digest is DISABLED by default. It posted a daily
+    # "📋 Daily Discord Digest — … / No significant activity in the past 24h" DM
+    # that added no value. To actually send a DM you must now explicitly opt in
+    # with DISCORD_DIGEST_ENABLED=1. This guard is the root-cause kill-switch:
+    # any host that runs this script via launchd/cron without that env var will
+    # now exit quietly instead of DMing.
+    #
+    # The --output-only path (used by the morning-briefing skill to embed the
+    # digest inline) is intentionally unaffected — it never sends a DM anyway.
+    digest_enabled = os.environ.get("DISCORD_DIGEST_ENABLED") == "1"
+    if not output_only and not digest_enabled:
+        print(
+            "discord-digest: standalone daily DM is disabled "
+            "(set DISCORD_DIGEST_ENABLED=1 to re-enable). Exiting without sending.",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
     if not BOT_TOKEN:
         # Write a clearly-prefixed error to BOTH stdout and stderr so the
         # briefing skill can surface it as real evidence instead of an
