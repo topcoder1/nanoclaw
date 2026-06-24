@@ -534,6 +534,10 @@ describe('brain/wiki-projection — renderEntityPage', () => {
     const out = renderEntityPage({
       db,
       entityId: 'p-prolific',
+      // Pin nowIso so the recent-queries 30-day window is deterministic.
+      // Without it nowIso defaults to the wall clock and the April-dated
+      // queries below fall outside the window once >30 days have passed.
+      nowIso: '2026-04-25T10:00:00Z',
       maxFacts: 3,
       maxRecentQueries: 2,
     });
