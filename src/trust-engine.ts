@@ -152,17 +152,23 @@ function isValidActionClass(s: string): boolean {
   return domains.includes(parts[0]) && ops.includes(parts[1]);
 }
 
-/** Calculate confidence with time decay. */
+/**
+ * Calculate confidence with time decay. `nowMs` pins the instant decay is
+ * measured against; callers recording activity at `lastUpdated` itself must
+ * pass the matching epoch so decay is exactly zero rather than the few ms
+ * a re-read of the clock would introduce.
+ */
 export function calculateConfidence(
   approvals: number,
   denials: number,
   lastUpdated: string,
+  nowMs: number = Date.now(),
 ): number {
   const rawConfidence = approvals / (approvals + denials + 1);
 
   // Apply time decay: -0.01 per day since last activity
   const daysSinceActivity =
-    (Date.now() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
+    (nowMs - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
   const decayed = rawConfidence - 0.01 * daysSinceActivity;
 
   return Math.max(0.0, decayed);
@@ -256,7 +262,12 @@ export function recordTrustDecision(
 ): void {
   const actionClass = classifyTool(toolName, selfReportedClass);
   const { domain, operation } = parseActionClass(actionClass);
-  const now = new Date().toISOString();
+  // One clock read for the whole record: this decision IS activity, so the
+  // graduation check must see zero decay. Re-reading Date.now() inside
+  // calculateConfidence let a ≥1ms scheduler gap on loaded runners push an
+  // exact-threshold confidence (4/5 = 0.80 vs gate 0.80) below the gate.
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
 
   insertTrustAction({
     action_class: actionClass,
@@ -281,7 +292,12 @@ export function recordTrustDecision(
     decision === 'approved' ? prevApprovals + 1 : prevApprovals;
   const newDenials = decision === 'denied' ? prevDenials + 1 : prevDenials;
 
-  const newConfidence = calculateConfidence(newApprovals, newDenials, now);
+  const newConfidence = calculateConfidence(
+    newApprovals,
+    newDenials,
+    now,
+    nowMs,
+  );
 
   const wasBelow = prevConfidence < threshold;
   const nowAbove = newConfidence >= threshold;
