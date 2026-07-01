@@ -100,10 +100,23 @@ async function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Deterministic drain: the email.received handler enqueues synchronously
+// during emit, and stopBrainIngest() → queue.shutdown() flushes whatever is
+// buffered immediately and awaits the per-row pipeline. Fixed wait(1500)
+// sleeps here raced the queue's 500ms latency timer + pipeline work and
+// flaked on loaded CI runners (run 28550688807: embedBatch had 0 calls at
+// the 1500ms mark). startBrainIngest()/stopBrainIngest() are restart-safe,
+// so afterEach's second stop is a no-op. Negative assertions (e.g.
+// `expect(embedMock).not.toHaveBeenCalled()`) are only sound after a full
+// drain — they can't be polled for.
+async function drainIngest(): Promise<void> {
+  await stopBrainIngest();
+}
+
 // Poll until `predicate` holds (or timeout) instead of sleeping a fixed
-// interval. A fixed `wait(1500)` flakes on slow CI runners when the work
-// under test takes longer than the sleep — e.g. the Qdrant-rejection test
-// below, whose mocked failure triggers a retry/backoff path.
+// interval. Used where the awaited work isn't the ingest queue itself —
+// e.g. the Qdrant-rejection test below, whose mocked failure exercises the
+// per-KU catch path.
 async function pollUntil<T>(
   read: () => T,
   predicate: (value: T) => boolean,
@@ -153,7 +166,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Multi-claim email',
       'Quote $5,000 due Friday. Call +1 555 222 3333. See https://acme.co/x.',
     );
-    await wait(1500);
+    await drainIngest();
 
     // The batch path was attempted exactly once.
     expect(embedBatchMock).toHaveBeenCalledTimes(1);
@@ -170,7 +183,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Multi-claim healthy',
       'Quote $7,000 due Monday. Call +1 555 444 5555. See https://acme.co/y.',
     );
-    await wait(1500);
+    await drainIngest();
 
     expect(embedBatchMock).toHaveBeenCalledTimes(1);
     // No per-claim fallback when the batch path succeeds.
@@ -186,7 +199,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Deal deal_42 follow-up',
       'Quote is $12,500 for renewal. Call me at +1 555 111 2222. See https://acme.co.',
     );
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const raw = db
@@ -235,7 +248,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
     // constraint, but the canary must still bump (it measures events
     // SEEN by ingest, not rows written).
     emit('thread-canary-1', 'Subj 1 dup', 'body 1 dup');
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const rawCount = (
@@ -265,7 +278,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'CI credentials follow-up',
       'Hi team, the credentials are at https://secur',
     );
-    await wait(1500);
+    await drainIngest();
 
     expect(fetcher).toHaveBeenCalledWith('work@example.com', 'thread-fullbody');
 
@@ -292,7 +305,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Body persistence test',
       'truncated snippet only',
     );
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const row = db
@@ -319,7 +332,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Quick note',
       'Renewal quoted at $9,000 — confirm by EOW.',
     );
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const raw = db
@@ -355,7 +368,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Quote $4,200 due Friday. Call +1 555 222 3333.',
       emailReceivedMs,
     );
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const rows = db
@@ -394,7 +407,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Quote $1,000 due Monday.',
       originalReceivedMs,
     );
-    await wait(1500);
+    await drainIngest();
 
     const db = getBrainDb();
     const before = db
@@ -465,7 +478,7 @@ describe('brain/ingest — P1 pipeline integration', () => {
       'Renewal',
       'Quote $9,000 due Friday. Reach me at +1 555 999 8888.',
     );
-    await wait(1500);
+    await drainIngest();
 
     // Sender alice@acme.co produces at least one person + one company entity.
     expect(captured.length).toBeGreaterThan(0);
