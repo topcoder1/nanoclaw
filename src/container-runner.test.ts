@@ -470,29 +470,38 @@ describe('container-runner secret env-file security', () => {
     }
 
     // --env-file must be present in args
-    expect(spawnArgs).toContain('--env-file');
+    const envFileIdx = spawnArgs.indexOf('--env-file');
+    expect(envFileIdx).toBeGreaterThan(-1);
+    const envFilePath = spawnArgs[envFileIdx + 1];
 
-    // The env file should have been written with mode 0o600
+    // Find the write for THIS spawn's env file by exact path. Mock call
+    // history accumulates across tests, so matching the first 'nanoclaw-env-'
+    // call can grab an earlier test's file (written whenever the shell env
+    // carries any secret) instead of this one.
     const writeFileSyncMock = fs.writeFileSync as unknown as ReturnType<
       typeof vi.fn
     >;
     const envFileCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) =>
-        typeof call[0] === 'string' &&
-        (call[0] as string).includes('nanoclaw-env-'),
+      (call: unknown[]) => call[0] === envFilePath,
     );
     expect(envFileCall).toBeDefined();
 
-    // Verify the file contents contain the secrets
-    const envFileContent = envFileCall![1] as string;
-    expect(envFileContent).toContain(
-      'DISCORD_BOT_TOKEN=fake-DISCORD_BOT_TOKEN-value',
-    );
-    expect(envFileContent).toContain(
-      'NANOCLAW_SERVICE_TOKEN=fake-NANOCLAW_SERVICE_TOKEN-value',
-    );
-    expect(envFileContent).toContain('GH_TOKEN=fake-GH_TOKEN-value');
-    expect(envFileContent).toContain('NOTION_TOKEN=fake-NOTION_TOKEN-value');
+    // Verify the file contains the fake fixture secrets. Assert on booleans,
+    // not the raw content — a toContain failure diff would print the whole
+    // env file, which is exactly the secret material this test exists to
+    // protect.
+    const envFileLines = (envFileCall![1] as string).split('\n');
+    for (const key of [
+      'DISCORD_BOT_TOKEN',
+      'NANOCLAW_SERVICE_TOKEN',
+      'GH_TOKEN',
+      'NOTION_TOKEN',
+    ]) {
+      expect(
+        envFileLines.includes(`${key}=fake-${key}-value`),
+        `env file must contain the fake ${key} fixture (contents redacted)`,
+      ).toBe(true);
+    }
 
     // Verify file permissions
     expect(envFileCall![2]).toEqual({ mode: 0o600 });
