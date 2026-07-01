@@ -21,8 +21,27 @@ import type { EmailReceivedEvent } from './events.js';
 import { logger } from './logger.js';
 import type { EmailTriggerDebouncer } from './email-trigger-debouncer.js';
 
-const SSE_RECONNECT_MIN_MS = 5_000;
-const SSE_RECONNECT_MAX_MS = 300_000; // 5 minutes max backoff
+/**
+ * Reconnect/liveness timing. Mutable only via `_setSseTimingForTest` so the
+ * connection-lifecycle tests can run on millisecond scales.
+ */
+const SSE_TIMING = {
+  /** Initial reconnect delay after a close/error. */
+  reconnectMinMs: 5_000,
+  /** Backoff ceiling. */
+  reconnectMaxMs: 300_000, // 5 minutes
+  /** A stream that lived at least this long resets backoff to the minimum. */
+  stableResetMs: 60_000,
+  /** Server heartbeats every 15s; a socket silent this long is dead. */
+  idleTimeoutMs: 60_000,
+};
+
+/** Test-only override for reconnect/liveness timing. */
+export function _setSseTimingForTest(
+  overrides: Partial<typeof SSE_TIMING>,
+): void {
+  Object.assign(SSE_TIMING, overrides);
+}
 
 /** Per-connection state for independent reconnect/backoff. */
 interface SSEConnection {
@@ -31,6 +50,8 @@ interface SSEConnection {
   reconnectMs: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   currentRequest: ReturnType<typeof https.get> | null;
+  /** Last `id:` seen on the stream; sent as Last-Event-ID on reconnect. */
+  lastEventId: string | null;
 }
 
 let running = false;
@@ -64,15 +85,20 @@ export function startEmailSSE(): void {
     return;
   }
 
+  if (running) {
+    logger.warn('SSE connections already running, ignoring duplicate start');
+    return;
+  }
   running = true;
 
   for (const { token, label } of SSE_CONNECTIONS) {
     const conn: SSEConnection = {
       label,
       token,
-      reconnectMs: SSE_RECONNECT_MIN_MS,
+      reconnectMs: SSE_TIMING.reconnectMinMs,
       reconnectTimer: null,
       currentRequest: null,
+      lastEventId: null,
     };
     connections.push(conn);
     connect(conn);
@@ -105,19 +131,39 @@ export function stopEmailSSE(): void {
 function connect(conn: SSEConnection): void {
   if (!running) return;
 
+  // Never hold two sockets for one logical connection: clear any pending
+  // reconnect and destroy the previous request before opening a new one.
+  if (conn.reconnectTimer) {
+    clearTimeout(conn.reconnectTimer);
+    conn.reconnectTimer = null;
+  }
+  if (conn.currentRequest) {
+    const prev = conn.currentRequest;
+    conn.currentRequest = null;
+    prev.destroy();
+  }
+
   const url = new URL(`${SUPERPILOT_API_URL}/nanoclaw/events`);
   const isHttps = url.protocol === 'https:';
   const mod = isHttps ? https : http;
+
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'x-service-token': conn.token,
+    'Cache-Control': 'no-cache',
+  };
+  if (conn.lastEventId) {
+    headers['Last-Event-ID'] = conn.lastEventId;
+  }
 
   const options = {
     hostname: url.hostname,
     port: url.port || (isHttps ? 443 : 80),
     path: url.pathname + url.search,
-    headers: {
-      Accept: 'text/event-stream',
-      'x-service-token': conn.token,
-      'Cache-Control': 'no-cache',
-    },
+    headers,
+    // Dedicated socket per stream — no keep-alive pooling, so destroying
+    // the request always closes the TCP connection on the server too.
+    agent: false as const,
   };
 
   logger.info(
@@ -125,19 +171,46 @@ function connect(conn: SSEConnection): void {
     'SSE connecting to superpilot',
   );
 
-  conn.currentRequest = mod.get(options, (res) => {
+  let streamedAt: number | null = null;
+  const req = mod.get(options);
+
+  // Exactly one reconnect per connection attempt, no matter how many
+  // close/error events the request and response emit. (A destroyed response
+  // also fires the request 'error' handler — scheduling a reconnect from
+  // each is what doubled connections every backoff cycle and stormed the
+  // superpilot backend on 2026-06-30.)
+  let settled = false;
+  const settle = (minDelayMs?: number): void => {
+    if (settled) return;
+    settled = true;
+    const isCurrent = conn.currentRequest === req;
+    if (isCurrent) conn.currentRequest = null;
+    req.destroy();
+    if (!isCurrent) return; // orphaned attempt: close quietly, no reconnect
+    if (
+      streamedAt !== null &&
+      Date.now() - streamedAt >= SSE_TIMING.stableResetMs
+    ) {
+      // The stream lived long enough to count as healthy (e.g. the server's
+      // ~15-minute lifetime cap) — reconnect promptly instead of letting
+      // backoff compound forever across routine closes.
+      conn.reconnectMs = SSE_TIMING.reconnectMinMs;
+    }
+    scheduleReconnect(conn, minDelayMs);
+  };
+
+  req.on('response', (res) => {
     if (res.statusCode !== 200) {
+      const retryAfterMs = parseRetryAfterMs(res.headers['retry-after']);
       logger.warn(
-        { statusCode: res.statusCode, label: conn.label },
+        { statusCode: res.statusCode, label: conn.label, retryAfterMs },
         'SSE connection rejected',
       );
-      res.destroy();
-      scheduleReconnect(conn);
+      settle(retryAfterMs);
       return;
     }
 
-    // Connected successfully — reset backoff
-    conn.reconnectMs = SSE_RECONNECT_MIN_MS;
+    streamedAt = Date.now();
     logger.info({ label: conn.label }, 'SSE connected to superpilot');
 
     let buffer = '';
@@ -161,6 +234,8 @@ function connect(conn: SSEConnection): void {
             eventType = line.slice(7);
           } else if (line.startsWith('data: ')) {
             data = line.slice(6);
+          } else if (line.startsWith('id: ')) {
+            conn.lastEventId = line.slice(4);
           }
         }
 
@@ -172,7 +247,7 @@ function connect(conn: SSEConnection): void {
 
     res.on('end', () => {
       logger.info({ label: conn.label }, 'SSE connection closed by server');
-      scheduleReconnect(conn);
+      settle();
     });
 
     res.on('error', (err) => {
@@ -180,32 +255,60 @@ function connect(conn: SSEConnection): void {
         { err: err.message, label: conn.label },
         'SSE connection error',
       );
-      scheduleReconnect(conn);
+      settle();
     });
+
+    res.on('close', () => settle());
   });
 
-  conn.currentRequest.on('error', (err) => {
-    logger.warn({ err: err.message, label: conn.label }, 'SSE request error');
-    scheduleReconnect(conn);
+  conn.currentRequest = req;
+
+  // The server heartbeats every 15s; a socket silent for idleTimeoutMs is
+  // dead (half-open) — destroy it and reconnect instead of waiting forever.
+  req.setTimeout(SSE_TIMING.idleTimeoutMs, () => {
+    logger.warn({ label: conn.label }, 'SSE stream idle timeout');
+    settle();
   });
+
+  req.on('error', (err) => {
+    logger.warn({ err: err.message, label: conn.label }, 'SSE request error');
+    settle();
+  });
+
+  req.on('close', () => settle());
 }
 
-function scheduleReconnect(conn: SSEConnection): void {
-  if (!running) return;
+/** Parse a Retry-After header (delta-seconds or HTTP-date) into ms. */
+function parseRetryAfterMs(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return 0;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+  const untilMs = Date.parse(raw) - Date.now();
+  return Number.isFinite(untilMs) ? Math.max(0, untilMs) : 0;
+}
 
-  conn.currentRequest = null;
-  logger.info(
-    { reconnectMs: conn.reconnectMs, label: conn.label },
-    'SSE reconnecting',
-  );
+function scheduleReconnect(conn: SSEConnection, minDelayMs = 0): void {
+  if (!running) return;
+  if (conn.reconnectTimer) return; // at most one pending reconnect
+
+  if (conn.currentRequest) {
+    const prev = conn.currentRequest;
+    conn.currentRequest = null;
+    prev.destroy();
+  }
+
+  // A 429 Retry-After can push the delay past the current backoff step.
+  const delayMs = Math.max(conn.reconnectMs, minDelayMs);
+  logger.info({ delayMs, label: conn.label }, 'SSE reconnecting');
 
   conn.reconnectTimer = setTimeout(() => {
     conn.reconnectTimer = null;
     connect(conn);
-  }, conn.reconnectMs);
+  }, delayMs);
 
   // Exponential backoff
-  conn.reconnectMs = Math.min(conn.reconnectMs * 2, SSE_RECONNECT_MAX_MS);
+  conn.reconnectMs = Math.min(conn.reconnectMs * 2, SSE_TIMING.reconnectMaxMs);
 }
 
 export function writeIpcTrigger(
