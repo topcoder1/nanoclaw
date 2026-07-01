@@ -12,7 +12,10 @@ name: Coverage Floor
 
 on:
   pull_request:
-    paths-ignore: ['**/*.md', 'docs/**']
+    # No paths-ignore: this is a required status check in the main-protection
+    # ruleset — a path filter would leave docs-only PRs stuck at "Expected"
+    # forever (filtered-out workflows never report). Push keeps its filter;
+    # only pull_request runs gate merges.
   push:
     branches: [main]
     paths-ignore: ['**/*.md', 'docs/**']

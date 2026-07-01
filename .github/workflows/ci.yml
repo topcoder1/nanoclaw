@@ -3,7 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    paths-ignore: ['**/*.md', 'docs/**']
+    # No paths-ignore: 'ci' is a required status check in the main-protection
+    # ruleset (added 2026-07-01). A path filter here would leave docs-only PRs
+    # stuck at "Expected — waiting for status" forever, since a filtered-out
+    # workflow never reports. ~2 min of runner time on docs PRs is the price.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
