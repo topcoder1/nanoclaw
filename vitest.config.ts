@@ -6,6 +6,8 @@ export default defineConfig({
       'src/**/*.test.ts',
       'setup/**/*.test.ts',
       'container/**/*.test.ts',
+      // Lesson-pinned regression tests (see tests/regression/CONVENTIONS.md).
+      'tests/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
