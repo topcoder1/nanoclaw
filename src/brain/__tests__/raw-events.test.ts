@@ -20,6 +20,34 @@ vi.mock('../../config.js', () => ({
   get STORE_DIR() {
     return tmpDir;
   },
+  // Keep the exercise SQLite-only — no vector-store cleanup attempts.
+  QDRANT_URL: '',
+}));
+
+// The P1 pipeline behind raw_events capture embeds every extracted claim
+// (the test emails' sender address alone is enough for the cheap-rules
+// tier to produce one). Without these mocks the first test triggers a
+// real ~140MB transformers model fetch; on a CI runner with a cold HF
+// cache that in-flight flush outlives the 10s afterEach hookTimeout,
+// because stopBrainIngest() drains the queue, which awaits the model
+// load. Same contract as ingest-pipeline.test.ts: never load
+// transformers or hit the network from tests.
+vi.mock('../embed.js', () => ({
+  embedText: vi.fn(async () => new Array(768).fill(0)),
+  embedBatch: vi.fn(async (texts: string[]) =>
+    texts.map(() => new Array(768).fill(0)),
+  ),
+  getEmbeddingModelVersion: () => 'nomic-embed-text-v1.5:768',
+  EMBEDDING_DIMS: 768,
+  _resetEmbeddingPipeline: () => {},
+}));
+vi.mock('../qdrant.js', () => ({
+  upsertKu: vi.fn(),
+  searchSemantic: vi.fn(),
+  ensureBrainCollection: vi.fn(),
+  kuPointId: (id: string) => id,
+  BRAIN_COLLECTION: 'ku_nomic-embed-text-v1.5_768',
+  _setQdrantClientForTest: () => {},
 }));
 
 import { EventBus } from '../../event-bus.js';
@@ -55,9 +83,15 @@ function emitEmailEvent(threadId: string, subject = 'hello'): void {
   eventBus.emit('email.received', event);
 }
 
-async function flushQueue(): Promise<void> {
-  // Queue flushes on maxLatencyMs=500 by default; speed up by waiting that long.
-  await new Promise((r) => setTimeout(r, 600));
+async function drainIngest(): Promise<void> {
+  // Deterministic drain: the email.received handler enqueues synchronously
+  // during emit, and stopBrainIngest() → queue.shutdown() flushes whatever
+  // is buffered immediately and awaits the per-row pipeline. No reliance on
+  // the queue's 500ms maxLatencyMs timer — the previous fixed 600ms sleep
+  // here flaked on slow CI runners (same fixed-sleep class as #89).
+  // startBrainIngest()/stopBrainIngest() are restart-safe, so afterEach's
+  // second stop is a no-op.
+  await stopBrainIngest();
 }
 
 describe('brain ingest → raw_events', () => {
@@ -77,7 +111,7 @@ describe('brain ingest → raw_events', () => {
   it('inserts one raw_events row per unique email thread', async () => {
     startBrainIngest();
     emitEmailEvent('thread-A');
-    await flushQueue();
+    await drainIngest();
 
     const db = getBrainDb();
     const rows = db
@@ -90,7 +124,11 @@ describe('brain ingest → raw_events', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].source_type).toBe('email');
     expect(rows[0].source_ref).toBe('thread-A');
-    expect(rows[0].processed_at).toBeNull();
+    // After a full drain the P1 pipeline has completed, so the row must be
+    // stamped processed. (Asserting NULL here — "captured but not yet
+    // processed" — was inherently racy: it only held while the pipeline
+    // happened to still be in flight.)
+    expect(rows[0].processed_at).not.toBeNull();
   });
 
   it('is idempotent on (source_type, source_ref) — duplicate thread_id yields one row', async () => {
@@ -98,7 +136,7 @@ describe('brain ingest → raw_events', () => {
     emitEmailEvent('thread-B');
     emitEmailEvent('thread-B');
     emitEmailEvent('thread-B');
-    await flushQueue();
+    await drainIngest();
 
     const db = getBrainDb();
     const count = db
@@ -110,7 +148,7 @@ describe('brain ingest → raw_events', () => {
   it('stores payload as a BLOB containing the serialized email JSON', async () => {
     startBrainIngest();
     emitEmailEvent('thread-C', 'important subject');
-    await flushQueue();
+    await drainIngest();
 
     const db = getBrainDb();
     const row = db
@@ -142,7 +180,7 @@ describe('brain ingest → raw_events', () => {
         connection: 'test',
       },
     });
-    await flushQueue();
+    await drainIngest();
 
     const db = getBrainDb();
     const count = db.prepare(`SELECT COUNT(*) as n FROM raw_events`).get() as {

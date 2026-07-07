@@ -6,11 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 describe('database migrations', () => {
   it('defaults Telegram backfill chats to direct messages', async () => {
-    const repoRoot = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-db-test-'));
 
     try {
-      process.chdir(tempDir);
       fs.mkdirSync(path.join(tempDir, 'store'), { recursive: true });
 
       const dbPath = path.join(tempDir, 'store', 'messages.db');
@@ -40,6 +38,11 @@ describe('database migrations', () => {
       legacyDb.close();
 
       vi.resetModules();
+      vi.doMock('./config.js', async (importOriginal) => ({
+        ...(await importOriginal<typeof import('./config.js')>()),
+        STORE_DIR: path.join(tempDir, 'store'),
+        DATA_DIR: path.join(tempDir, 'data'),
+      }));
       const { initDatabase, getAllChats, _closeDatabase } =
         await import('./db.js');
 
@@ -61,7 +64,7 @@ describe('database migrations', () => {
 
       _closeDatabase();
     } finally {
-      process.chdir(repoRoot);
+      vi.doUnmock('./config.js');
     }
   });
 });

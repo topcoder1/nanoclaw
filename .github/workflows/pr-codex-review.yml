@@ -1,13 +1,34 @@
 name: PR Codex Review
 
 # OpenAI Codex CLI as a third-party reviewer for vendor diversity.
-# Runs ONLY on risk:sensitive PRs (per .github/risk-paths.yml). Pairs with
-# Claude Review (which runs on every PR via pr-review.yml) to give
-# independent-model coverage on high-impact code paths.
+# Runs on risk:sensitive AND risk:blocked PRs (per .github/risk-paths.yml).
+# Pairs with Claude Review (every PR via pr-review.yml) for independent-model
+# coverage on high-impact code paths.
+#
+# Why blocked is included: blocked-path PRs (workflows, Dockerfile, secrets,
+# CODEOWNERS, risk-paths.yml) require manual merge by design — auto-merge is
+# refused by claude-author-automerge.yml. Without this widening, those PRs
+# would ship with ZERO automated second-model review. Codex runs alongside
+# so the manual merge is informed, not blind.
+#
+# The embedded classify job below ONLY computes the risk_class output
+# (skip_label: true) — the standalone PR Classify workflow owns the risk:*
+# label and the blocked-PR sticky comment, so the two never race. The job id
+# `codex-classify` is deliberately distinct from the standalone caller's
+# `classify`: `classify / Classify PR Risk` is a required status check in
+# some repos' rulesets, and a same-named context from this workflow pollutes
+# its evaluation (bit us on 2026-06-10 when a GitHub 401 incident reddened
+# the duplicate while the required one stayed green).
+#
+# Output propagation: the reusable writes risk_class to GITHUB_OUTPUT in its
+# compute step, so `needs.codex-classify.outputs.risk_class` is available
+# even if a later classify step fails. `!cancelled()` overrides the default
+# needs-skip-on-upstream-failure behavior while still bailing on workflow
+# cancellation.
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -18,13 +39,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  classify:
+  codex-classify:
     if: github.event.pull_request.draft == false
     uses: topcoder1/ci-workflows/.github/workflows/pr-classify.yml@main
+    with:
+      skip_label: true
 
   review:
-    needs: classify
-    if: needs.classify.outputs.risk_class == 'sensitive'
+    needs: codex-classify
+    if: |
+      !cancelled() &&
+      (needs.codex-classify.outputs.risk_class == 'sensitive' ||
+       needs.codex-classify.outputs.risk_class == 'blocked')
     uses: topcoder1/ci-workflows/.github/workflows/codex-review.yml@main
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

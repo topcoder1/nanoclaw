@@ -24,6 +24,6 @@ jobs:
       # at install time. Empty string = no-op (workflow installed, no Lessons
       # section in this repo yet; the check will start firing when a Lessons
       # section is added in either MEMORY.md or CLAUDE.md).
-      lessons_files: ''
+      lessons_files: 'MEMORY.md'
       # lessons_section_header: "## Lessons"  # default
       # regression_dir: "tests/regression"    # default
