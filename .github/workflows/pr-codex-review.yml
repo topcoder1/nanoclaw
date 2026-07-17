@@ -28,14 +28,26 @@ name: PR Codex Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `ready_for_review` is load-bearing: every draft-phase run (opened,
+    # synchronize) skips on the `draft == false` gate below, so without this
+    # trigger a PR opened as a draft and later marked ready never gets Codex
+    # review — the ready click fires no run, and only an incidental post-ready
+    # push would. An explicit `types:` list is a denylist by omission.
+    # Mirrors ci-workflows/pr-codex-review.yml. See ci-workflows#115.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
   pull-requests: write
 
+# The group key partitions runs by the payload's draft flag, not just per-PR. A
+# `synchronize` run whose payload was snapshotted while the PR was still draft is
+# a guaranteed no-op (the draft gate below), yet in a shared group it can cancel
+# — or, if queued, replace regardless of cancel-in-progress — the
+# `ready_for_review` run, so a sensitive/blocked PR taken draft → ready would
+# still merge with zero Codex review (attaxion_dev#303, 2026-07-06).
 concurrency:
-  group: codex-${{ github.event.pull_request.number }}
+  group: codex-${{ github.event.pull_request.number }}-${{ github.event.pull_request.draft && 'draft' || 'live' }}
   cancel-in-progress: true
 
 jobs:
