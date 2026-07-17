@@ -31,49 +31,12 @@ import {
   handleDismiss,
   handleSnooze,
 } from '../triage/queue-actions.js';
-import {
-  insertTrackedItem,
-  transitionItemState,
-  type TrackedItem,
-} from '../tracked-items.js';
+import { transitionItemState } from '../tracked-items.js';
+import { seedItem } from './helpers/seed-tracked-item.js';
 import {
   STATE_MACHINE_INVARIANTS,
   mutedThreadsNeverVisible,
 } from '../../scripts/qa/invariant-predicates.js';
-
-function seedItem(overrides: Partial<TrackedItem> = {}): TrackedItem {
-  const now = Date.now();
-  const item: TrackedItem = {
-    id: `item-${Math.random().toString(36).slice(2, 10)}`,
-    source: 'gmail',
-    source_id: `src-${Math.random().toString(36).slice(2, 10)}`,
-    group_name: 'main',
-    state: 'queued',
-    classification: 'push',
-    superpilot_label: null,
-    trust_tier: null,
-    title: 'test',
-    summary: null,
-    thread_id: 't',
-    detected_at: now,
-    pushed_at: null,
-    resolved_at: null,
-    resolution_method: null,
-    digest_count: 0,
-    telegram_message_id: null,
-    classification_reason: null,
-    metadata: { sender: 'x@example.com', account: 'me@gmail.com' },
-    confidence: 0.9,
-    model_tier: 1,
-    action_intent: null,
-    facts_extracted: null,
-    repo_candidates: null,
-    reasons: null,
-    ...overrides,
-  };
-  insertTrackedItem(item);
-  return item;
-}
 
 /**
  * Run every state-machine predicate against the test DB. Each must
