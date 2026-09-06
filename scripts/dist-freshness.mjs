@@ -46,8 +46,9 @@ function walk(dir, out) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return; // no such input dir: nothing to hash
+    throw err;
   }
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const e of entries) {

@@ -61,8 +61,9 @@ function runNode(
       stdout?: string;
       stderr?: string;
     };
+    if (typeof err.status !== 'number') throw e; // not an exit status: a real failure
     return {
-      code: err.status ?? -1,
+      code: err.status,
       out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
     };
   }
@@ -233,8 +234,9 @@ function runLauncher(): Run {
       stdout?: string;
       stderr?: string;
     };
+    if (typeof err.status !== 'number') throw e; // not an exit status: a real failure
     return {
-      code: err.status ?? -1,
+      code: err.status,
       out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
     };
   }
