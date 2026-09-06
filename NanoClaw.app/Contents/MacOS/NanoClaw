@@ -1,9 +1,34 @@
 #!/bin/bash
+# Launchd entry point (com.nanoclaw). Overridable roots exist so the regression
+# test can drive this exact script against a temporary tree.
+ROOT="${NANOCLAW_ROOT:-/Users/topcoder1/dev/nanoclaw}"
+NODE="${NANOCLAW_NODE:-/opt/homebrew/bin/node}"
+
 # Source .env so launchd-managed runs see the same env vars as `npm run dev`.
 # Without this, only vars in com.nanoclaw.plist's EnvironmentVariables make it
 # through, and per-feature env gates like BRAIN_MERGE_AUTO_ENABLED silently
 # stay off in production.
 set -a
-[ -f /Users/topcoder1/dev/nanoclaw/.env ] && source /Users/topcoder1/dev/nanoclaw/.env
+[ -f "$ROOT/.env" ] && source "$ROOT/.env"
 set +a
-exec /opt/homebrew/bin/node /Users/topcoder1/dev/nanoclaw/dist/index.js
+
+cd "$ROOT" || exit 1
+
+# Never exec a dist/ that does not match src/. On 2026-09-06 a box ran a dist/
+# built 2026-04-17 for five months while src/ carried the 2026-07-01 SSE
+# reconnect-storm fix (#90): `git pull` updates src/, nothing rebuilt dist/, and
+# every launchd restart (65 of them) reloaded the pre-fix build, which hammered
+# the SuperPilot backend at ~80 connection attempts/s. `npm run build` stamps
+# dist/.src-hash; the check below compares it with a hash of src/. Stale or
+# unstamped → rebuild; rebuild fails → refuse to start. Fail closed: a down
+# assistant gets noticed, a storming one was not.
+if ! "$NODE" scripts/dist-freshness.mjs check; then
+  echo "[NanoClaw launcher] dist/ is stale or missing — rebuilding (npm run build)" >&2
+  if ! npm run build; then
+    echo "[NanoClaw launcher] build FAILED — refusing to start a stale dist/" >&2
+    exit 1
+  fi
+  "$NODE" scripts/dist-freshness.mjs check || exit 1
+fi
+
+exec "$NODE" "$ROOT/dist/index.js"
