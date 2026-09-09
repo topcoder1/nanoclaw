@@ -289,7 +289,7 @@ describe('email-trigger pipeline – interface contract', () => {
         // Dropped by this branch, not by an earlier guard (feature flag off,
         // empty email list).
         expect(warn).toHaveBeenCalledWith(
-          expect.stringContaining('No Telegram or main group registered'),
+          expect.stringContaining('No connected channel owns a main group'),
         );
       } finally {
         warn.mockRestore();

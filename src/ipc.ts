@@ -739,7 +739,7 @@ export async function processTaskIpc(
 
       if (!agentJid) {
         logger.warn(
-          'No Telegram or main group registered, cannot process email trigger',
+          'No connected channel owns a main group (Telegram or otherwise), cannot process email trigger',
         );
         break;
       }
