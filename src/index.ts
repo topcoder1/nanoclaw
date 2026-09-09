@@ -1727,6 +1727,9 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    // Main group some connected channel owns (multiple `is_main=1` rows can
+    // coexist, one per channel). `channels` is read lazily at call time.
+    mainGroupJid: () => findMainGroupJid(registeredGroups, channels),
   };
 
   // Create and connect all registered channels.
@@ -2027,15 +2030,16 @@ async function main(): Promise<void> {
     );
   });
 
-  // Status bar — sends/edits a pinned message in the main group
-  const mainGroupEntry = Object.entries(registeredGroups).find(
-    ([, g]) => g.isMain,
-  );
+  // Main-group notifications (status bar, escalations, batched auto-handled
+  // items, snooze/draft events): resolved per call rather than captured once
+  // at startup so it tracks group/channel changes, and only a main group some
+  // connected channel owns is a usable target.
+  const resolveMainGroupJid = () =>
+    findMainGroupJid(registeredGroups, channels);
   const statusBar = new StatusBarManager(eventBus, {
     sendProgress: async (text) => {
-      if (!mainGroupEntry)
-        return { update: async () => {}, clear: async () => {} };
-      const [mainJid] = mainGroupEntry;
+      const mainJid = resolveMainGroupJid();
+      if (!mainJid) return { update: async () => {}, clear: async () => {} };
       const channel = findChannel(channels, mainJid);
       if (channel?.sendProgress) {
         return channel.sendProgress(mainJid, text);
@@ -2044,8 +2048,8 @@ async function main(): Promise<void> {
       return { update: async () => {}, clear: async () => {} };
     },
     sendMessage: async (text) => {
-      if (!mainGroupEntry) return;
-      const [mainJid] = mainGroupEntry;
+      const mainJid = resolveMainGroupJid();
+      if (!mainJid) return;
       const channel = findChannel(channels, mainJid);
       await channel?.sendMessage(mainJid, text);
     },
@@ -2054,8 +2058,8 @@ async function main(): Promise<void> {
   // Failure escalator
   const _failureEscalator = new FailureEscalator(eventBus, {
     onEscalate: (text, actions) => {
-      if (mainGroupEntry) {
-        const [mainJid] = mainGroupEntry;
+      const mainJid = resolveMainGroupJid();
+      if (mainJid) {
         const channel = findChannel(channels, mainJid);
         channel
           ?.sendMessageWithActions?.(mainJid, text, actions)
@@ -2069,8 +2073,8 @@ async function main(): Promise<void> {
     maxItems: 5,
     maxWaitMs: 10_000,
     onFlush: (items) => {
-      if (mainGroupEntry) {
-        const [mainJid] = mainGroupEntry;
+      const mainJid = resolveMainGroupJid();
+      if (mainJid) {
         const channel = findChannel(channels, mainJid);
         channel?.sendMessage(mainJid, formatBatch(items)).catch(() => {});
       }
@@ -2172,11 +2176,10 @@ async function main(): Promise<void> {
     // new draft; the correlation listener above matches on (account, threadId)
     // and emits email.draft.ready. Run on the main group so the agent has a
     // working chat identity, even though the prompt instructs it to stay
-    // silent (no send_message / relay_message calls).
-    const mainEntry = Object.entries(registeredGroups).find(
-      ([, g]) => g.isMain,
-    );
-    if (!mainEntry) {
+    // silent (no send_message / relay_message calls). Only a main group some
+    // connected channel owns gives it that identity.
+    const mainJid = findMainGroupJid(registeredGroups, channels);
+    if (!mainJid) {
       resolved = true;
       unsubscribe();
       logger.warn(
@@ -2191,7 +2194,7 @@ async function main(): Promise<void> {
       });
       return { taskId };
     }
-    const [mainJid, mainGroup] = mainEntry;
+    const mainGroup = registeredGroups[mainJid];
 
     queue.enqueueTask(mainJid, taskId, async () => {
       try {
@@ -2266,8 +2269,8 @@ async function main(): Promise<void> {
 
   // --- Notify on snooze wake ---
   eventBus.on('email.snooze.waked', (event) => {
-    if (!mainGroupEntry) return;
-    const [mainJid] = mainGroupEntry;
+    const mainJid = resolveMainGroupJid();
+    if (!mainJid) return;
     const channel = findChannel(channels, mainJid);
     const text = `⏰ Reminder: ${event.payload.subject}`;
     channel
@@ -2279,8 +2282,8 @@ async function main(): Promise<void> {
 
   // --- Notify on draft enrichment ---
   eventBus.on('email.draft.enriched', (event) => {
-    if (!mainGroupEntry) return;
-    const [mainJid] = mainGroupEntry;
+    const mainJid = resolveMainGroupJid();
+    if (!mainJid) return;
     const channel = findChannel(channels, mainJid);
     const text = `✏️ Draft enriched: "${event.payload.changes}"`;
     const actions = [
@@ -2300,8 +2303,8 @@ async function main(): Promise<void> {
 
   // --- Notify on draft send failure (mini-app 10s timer fired but sendDraft errored) ---
   eventBus.on('email.draft.send_failed', (event) => {
-    if (!mainGroupEntry) return;
-    const [mainJid] = mainGroupEntry;
+    const mainJid = resolveMainGroupJid();
+    if (!mainJid) return;
     const channel = findChannel(channels, mainJid);
     if (!channel) return;
     const subjectPart = event.payload.subject
@@ -2345,10 +2348,14 @@ async function main(): Promise<void> {
     };
 
     const mainGroupRoot = path.join(GROUPS_DIR, 'main');
+    // The signer delivers via sendTelegramMessage, so its chat must be the
+    // main group the telegram channel owns — not whichever `is_main` row
+    // sorts first (a WhatsApp JID here fails with `400: chat not found`).
+    const signerTelegram = channels.find((c) => c.name.startsWith('telegram'));
     const mainChatId =
-      Object.keys(registeredGroups).find(
-        (jid) => registeredGroups[jid]?.isMain,
-      ) ??
+      (signerTelegram
+        ? findMainGroupJid(registeredGroups, [signerTelegram])
+        : null) ??
       process.env.MAIN_GROUP_CHAT_ID ??
       '';
 
@@ -2819,14 +2826,12 @@ async function main(): Promise<void> {
 
   // Webhook event consumer: route received webhooks to the main group as tasks
   eventBus.on('webhook.received', (event) => {
-    const mainEntry = Object.entries(registeredGroups).find(
-      ([, g]) => g.isMain,
-    );
-    if (!mainEntry) {
+    const mainJid = findMainGroupJid(registeredGroups, channels);
+    if (!mainJid) {
       logger.warn('webhook.received: no main group registered, dropping event');
       return;
     }
-    const [mainJid, mainGroup] = mainEntry;
+    const mainGroup = registeredGroups[mainJid];
     handleWebhookEvent(
       {
         type: event.type,
@@ -3183,9 +3188,7 @@ async function main(): Promise<void> {
   startGmailRefreshLoop({
     onAuthExpired: (summary) => {
       // Alert via the main group's channel
-      const mainJid = Object.keys(registeredGroups).find(
-        (jid) => registeredGroups[jid].isMain,
-      );
+      const mainJid = findMainGroupJid(registeredGroups, channels);
       if (!mainJid) return;
       const channel = findChannel(channels, mainJid);
       if (!channel) return;

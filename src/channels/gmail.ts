@@ -27,6 +27,8 @@ export interface GmailChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Main group some connected channel owns; null when none is. */
+  mainGroupJid?: () => string | null;
 }
 
 /** Multi-account Gmail configuration */
@@ -382,11 +384,17 @@ export class GmailChannel implements Channel {
     // Store chat metadata for group discovery
     this.opts.onChatMetadata(chatJid, timestamp, subject, 'gmail', false);
 
-    // Find the main group to deliver the email notification
-    const groups = this.opts.registeredGroups();
-    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
+    // Find the main group to deliver the email notification. Multiple
+    // `is_main=1` rows can coexist (one per channel), so prefer the
+    // orchestrator's ownership-checked resolver; without one, fall back to
+    // the first `is_main` row.
+    const mainJid = this.opts.mainGroupJid
+      ? this.opts.mainGroupJid()
+      : (Object.entries(this.opts.registeredGroups()).find(
+          ([, g]) => g.isMain === true,
+        )?.[0] ?? null);
 
-    if (!mainEntry) {
+    if (!mainJid) {
       logger.debug(
         { chatJid, subject },
         'No main group registered, skipping email',
@@ -394,7 +402,6 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const mainJid = mainEntry[0];
     const accountTag =
       this.accountAlias !== 'default' ? ` [${this.accountAlias}]` : '';
     const content = `[Email${accountTag} from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;

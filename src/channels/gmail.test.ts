@@ -5,6 +5,7 @@ vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
 import { GmailChannel, GmailChannelOpts } from './gmail.js';
 import { gmail_v1 } from 'googleapis';
+import { RegisteredGroup } from '../types.js';
 
 function makeOpts(overrides?: Partial<GmailChannelOpts>): GmailChannelOpts {
   return {
@@ -254,5 +255,88 @@ describe('GmailChannel.sendEmail', () => {
     expect(decoded).toMatch(/In-Reply-To: <orig@mail>/);
     expect(decoded).toMatch(/References: <orig@mail>/);
     expect(decoded.endsWith('ok')).toBe(true);
+  });
+});
+
+// --- inbound main-group routing ---------------------------------------------
+//
+// processMessage delivers each email into "the main group". Multiple
+// `is_main=1` rows can coexist (one per channel), and the channel has no view
+// of which channels are connected, so the orchestrator hands it an
+// ownership-checked resolver via opts.mainGroupJid. Without one it keeps the
+// original first-is_main-row behaviour (documented by the negative control).
+
+describe('GmailChannel.processMessage main-group routing', () => {
+  const WHATSAPP_MAIN = '1234567890@g.us';
+  const TELEGRAM_MAIN = 'tg:-1001234567890';
+
+  const mainRow = (name: string): RegisteredGroup => ({
+    name,
+    folder: name,
+    trigger: '',
+    added_at: '2026-09-09T00:00:00.000Z',
+    isMain: true,
+  });
+  // WhatsApp FIRST: a "first is_main row" lookup picks it.
+  const bothMains = () => ({
+    [WHATSAPP_MAIN]: mainRow('main-whatsapp'),
+    [TELEGRAM_MAIN]: mainRow('main-telegram'),
+  });
+
+  function fakeGmail() {
+    return {
+      users: {
+        messages: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              threadId: 'thread-1',
+              internalDate: '1757376000000',
+              payload: {
+                mimeType: 'text/plain',
+                headers: [
+                  { name: 'From', value: 'Ada <ada@example.com>' },
+                  { name: 'Subject', value: 'Hello' },
+                  { name: 'Message-ID', value: '<m1@example.com>' },
+                ],
+                body: { data: Buffer.from('hi there').toString('base64') },
+              },
+            },
+          }),
+          modify: vi.fn().mockResolvedValue({}),
+        },
+      },
+    };
+  }
+
+  async function deliver(overrides: Partial<GmailChannelOpts>) {
+    const onMessage = vi.fn();
+    const ch = new GmailChannel(
+      makeOpts({ onMessage, registeredGroups: bothMains, ...overrides }),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ch as any).gmail = fakeGmail() as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (ch as any).processMessage('msg-1');
+    return onMessage;
+  }
+
+  it('delivers to the main group the resolver reports as owned', async () => {
+    const onMessage = await deliver({ mainGroupJid: () => TELEGRAM_MAIN });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0][0]).toBe(TELEGRAM_MAIN);
+    expect(onMessage.mock.calls[0][1].chat_jid).toBe(TELEGRAM_MAIN);
+  });
+
+  it('skips delivery when the resolver finds no owned main group', async () => {
+    // A present resolver is authoritative — it must NOT fall through to an
+    // unowned first-is_main row, or the email lands on a dead JID.
+    const onMessage = await deliver({ mainGroupJid: () => null });
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it('negative control: without a resolver it takes the first is_main row', async () => {
+    const onMessage = await deliver({});
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0][0]).toBe(WHATSAPP_MAIN);
   });
 });
