@@ -45,6 +45,21 @@ describe('email-trigger pipeline – interface contract', () => {
     return { stub, calls };
   }
 
+  /** A connected channel `name` that owns every JID starting with `prefix`. */
+  const channelOwning = (name: string, prefix: string): Channel => ({
+    name,
+    connect: async () => {},
+    sendMessage: async () => {},
+    isConnected: () => true,
+    ownsJid: (jid) => jid.startsWith(prefix),
+    disconnect: async () => {},
+  });
+  // Real channel names and JID prefixes (src/channels/*.ts): the handler
+  // finds Telegram by `name`, as the signer and brain deliverer in index.ts
+  // do.
+  const telegram = channelOwning('telegram', 'tg:');
+  const discord = channelOwning('discord', 'dc:');
+
   it('passes email metadata to enqueueEmailTrigger as 4th argument', async () => {
     const { stub, calls } = buildStub();
 
@@ -127,8 +142,9 @@ describe('email-trigger pipeline – interface contract', () => {
 
   it('email-trigger prompt instructs agent to pass email_id + email_account', async () => {
     const { processTaskIpc } = await import('../ipc.js');
-    const { stub, calls } = buildStub();
-    // Register a main Telegram group so the handler routes to it.
+    // Register a main Telegram group, owned by a connected Telegram channel,
+    // so the handler routes to it (it drops the trigger otherwise).
+    const { stub, calls } = buildStub([telegram]);
     (stub.registeredGroups as any) = vi.fn().mockReturnValue({
       'tg:1': {
         name: 'main',
@@ -162,11 +178,15 @@ describe('email-trigger pipeline – interface contract', () => {
     expect(calls[0].prompt).toMatch(/Expand.*Full Email.*Archive/);
   });
 
-  // Which chat the email-intelligence agent runs on. A registered Telegram
-  // group wins so user replies land in the same container session; otherwise
-  // "the main group" — which must be one a connected channel owns, because
-  // several is_main rows coexist (one per channel) and an unowned JID is one
-  // that runAgent / sendMessage cannot deliver to.
+  // Which chat the email-intelligence agent runs on. The main group the
+  // Telegram channel owns wins so user replies land in the same container
+  // session; otherwise "the main group" — one a connected channel owns.
+  // Both picks are ownership-checked: several is_main rows coexist (one per
+  // channel), a row can outlive its channel (credentials missing, connect()
+  // threw), and an unowned JID is one that runAgent / sendMessage cannot
+  // deliver to. Both are main groups, too: the container inherits the chosen
+  // row's isMain, and a non-main group runs without the project/store
+  // mounts the email-intelligence prompt relies on.
   describe('agent chat identity', () => {
     let processTaskIpc: typeof import('../ipc.js').processTaskIpc;
     beforeAll(async () => {
@@ -179,16 +199,6 @@ describe('email-trigger pipeline – interface contract', () => {
       trigger: '@bot',
       added_at: '2026-09-09T00:00:00.000Z',
       isMain,
-    });
-
-    /** A connected channel that owns every JID starting with `prefix`. */
-    const channelOwning = (prefix: string): Channel => ({
-      name: prefix,
-      connect: async () => {},
-      sendMessage: async () => {},
-      isConnected: () => true,
-      ownsJid: (jid) => jid.startsWith(prefix),
-      disconnect: async () => {},
     });
 
     const trigger = {
@@ -209,15 +219,51 @@ describe('email-trigger pipeline – interface contract', () => {
       return calls.map((c) => c.chatJid);
     }
 
-    it('keeps the Telegram-first pick as is: a non-main tg group outranks an owned main group', async () => {
-      // Characterization, not endorsement. The tg: branch checks neither
-      // isMain nor channel ownership; only the fallback below it changed.
+    it('runs on the main group the Telegram channel owns, ahead of every other owned main group', async () => {
+      // Telegram-first is deliberate: the user replies there, and the reply
+      // must reach the same container session. Discord's main row was
+      // registered first; Telegram still wins.
       expect(
         await chatJidsFor(
-          { 'dc:1': group('main', true), 'tg:5': group('telegram_side') },
-          [channelOwning('dc:'), channelOwning('tg:')],
+          {
+            'dc:1': group('discord_main', true),
+            'tg:5': group('telegram_main', true),
+          },
+          [discord, telegram],
         ),
       ).toEqual(['tg:5']);
+    });
+
+    it('skips a stale tg: row no connected channel owns and falls back to an owned main group', async () => {
+      // The Telegram channel never came up (credentials missing, or
+      // connect() threw) but its registered_groups row outlived it. Picking
+      // it burns a full agent run, then delivery throws
+      // `No channel for JID: tg:...`.
+      expect(
+        await chatJidsFor(
+          {
+            'tg:5': group('telegram_main', true),
+            'dc:1': group('discord_main', true),
+          },
+          [discord],
+        ),
+      ).toEqual(['dc:1']);
+    });
+
+    it('does not run on a non-main Telegram group: an owned main group outranks it', async () => {
+      // Flipped on purpose from "a non-main tg group outranks an owned main
+      // group" (#107 characterized that without endorsing it). The container
+      // inherits the chosen row's isMain, so a Telegram side group would
+      // process email without the project/store mounts.
+      expect(
+        await chatJidsFor(
+          {
+            'tg:5': group('telegram_side'),
+            'dc:1': group('discord_main', true),
+          },
+          [discord, telegram],
+        ),
+      ).toEqual(['dc:1']);
     });
 
     it('falls back to a main group a connected channel owns, not the first is_main row', async () => {
@@ -229,7 +275,7 @@ describe('email-trigger pipeline – interface contract', () => {
             'wa-main@g.us': group('main', true),
             'dc:1': group('main', true),
           },
-          [channelOwning('dc:')],
+          [discord],
         ),
       ).toEqual(['dc:1']);
     });

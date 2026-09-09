@@ -2,12 +2,15 @@
  * src/ipc.ts main-group wiring.
  *
  * The email_trigger IPC handler picks the chat the email-intelligence agent
- * runs on: a registered Telegram group first (so replies reach the same
- * container session), else "the main group". That fallback must go through
- * the ownership-checked `findMainGroupJid` helper (src/main-group.ts), never
- * a scan for the first `is_main=1` row: several such rows coexist, one per
- * channel, and an unowned one (a WhatsApp JID on a Telegram-only box) hands
- * runAgent and sendMessage a chat nothing can deliver to.
+ * runs on: the main group the Telegram channel owns first (so replies reach
+ * the same container session), else "the main group". Both picks must go
+ * through the ownership-checked `findMainGroupJid` helper
+ * (src/main-group.ts), never a scan for the first `is_main=1` row or the
+ * first `tg:` row: several `is_main` rows coexist, one per channel, a row
+ * can outlive its channel (credentials missing, connect() threw), and an
+ * unowned one (a WhatsApp JID on a Telegram-only box, a `tg:` row after
+ * Telegram dropped) hands runAgent and sendMessage a chat nothing can
+ * deliver to.
  *
  * Counterpart of main-group-wiring.test.ts, which pins src/index.ts (#106).
  * The handler itself is exercised for real in email-trigger-pipeline.test.ts;
@@ -59,15 +62,20 @@ describe('src/ipc.ts main-group wiring', () => {
     expect(ipcSrc).not.toMatch(NAIVE_LOOKUP);
   });
 
-  it('email_trigger falls back to a main group a connected channel owns', () => {
+  it('email_trigger picks the Telegram-owned main group, else a main group a connected channel owns', () => {
     const b = block(ipcSrc, "case 'email_trigger':", "case 'relay_message':");
+    // Telegram-first is deliberate (replies must reach the same session),
+    // but the pick goes through the same ownership-checked helper restricted
+    // to the telegram channel — never a bare `tg:` prefix scan over
+    // registeredGroups, which returns a row whose channel never came up.
+    expect(b).toMatch(
+      /findMainGroupJid\(\s*registeredGroups,\s*deps\.channels\(\)\.filter\(\(c\) => c\.name\.startsWith\('telegram'\)\),?\s*\)/,
+    );
+    expect(b).not.toMatch(/startsWith\('tg:'\)/);
     expect(b).toMatch(
       /findMainGroupJid\(registeredGroups, deps\.channels\(\)\)/,
     );
     expect(b).not.toMatch(NAIVE_LOOKUP);
-    // Telegram-first is deliberate (replies must reach the same session);
-    // only the fallback changed.
-    expect(b).toMatch(/jid\.startsWith\('tg:'\)/);
   });
 
   it('index.ts hands the IPC watcher the connected channels', () => {
