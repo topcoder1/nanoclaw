@@ -21,6 +21,7 @@ function makeDeps(
           },
         ]),
       ),
+    channels: () => [],
     registerGroup: vi.fn(),
     syncGroups: vi.fn().mockResolvedValue(undefined),
     getAvailableGroups: () => [],

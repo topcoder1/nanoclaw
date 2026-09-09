@@ -13,6 +13,7 @@ function makeDeps(overrides: Partial<IpcDeps> = {}): IpcDeps {
         containerConfig: {},
       },
     }),
+    channels: () => [],
     registerGroup: vi.fn(),
     syncGroups: vi.fn().mockResolvedValue(undefined),
     getAvailableGroups: vi.fn().mockReturnValue([]),
