@@ -9,6 +9,9 @@ export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Main group some connected channel owns; null when none is. Optional so
+   *  channels constructed without it keep their own fallback. */
+  mainGroupJid?: () => string | null;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
