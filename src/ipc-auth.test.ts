@@ -55,6 +55,7 @@ beforeEach(() => {
     sendMessage: async () => {},
     sendAgentMessage: async () => {},
     registeredGroups: () => groups,
+    channels: () => [],
     registerGroup: (jid, group) => {
       groups[jid] = group;
       setRegisteredGroup(jid, group);

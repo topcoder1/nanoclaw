@@ -2,15 +2,17 @@
  * Tests for the email-trigger pipeline: verifies that IpcDeps.enqueueEmailTrigger
  * passes email metadata through to the onResult callback.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import type { IpcDeps } from '../ipc.js';
+import type { Channel, RegisteredGroup } from '../types.js';
+import { logger } from '../logger.js';
 
 describe('email-trigger pipeline – interface contract', () => {
   /**
    * Build a minimal IpcDeps stub that fulfils the interface and records
    * the arguments passed to enqueueEmailTrigger.
    */
-  function buildStub() {
+  function buildStub(channels: Channel[] = []) {
     const calls: Array<{
       chatJid: string;
       prompt: string;
@@ -31,6 +33,7 @@ describe('email-trigger pipeline – interface contract', () => {
       getAvailableGroups: vi.fn().mockReturnValue([]),
       writeGroupsSnapshot: vi.fn(),
       onTasksChanged: vi.fn(),
+      channels: () => channels,
       enqueueEmailTrigger: (chatJid, prompt, onResult, emails) => {
         calls.push({ chatJid, prompt, emails });
         // Immediately invoke onResult so callers can verify the callback
@@ -158,6 +161,95 @@ describe('email-trigger pipeline – interface contract', () => {
     expect(calls[0].prompt).toMatch(/email_account/);
     expect(calls[0].prompt).toMatch(/Expand.*Full Email.*Archive/);
   });
+
+  // Which chat the email-intelligence agent runs on. A registered Telegram
+  // group wins so user replies land in the same container session; otherwise
+  // "the main group" — which must be one a connected channel owns, because
+  // several is_main rows coexist (one per channel) and an unowned JID is one
+  // that runAgent / sendMessage cannot deliver to.
+  describe('agent chat identity', () => {
+    let processTaskIpc: typeof import('../ipc.js').processTaskIpc;
+    beforeAll(async () => {
+      ({ processTaskIpc } = await import('../ipc.js'));
+    });
+
+    const group = (folder: string, isMain = false): RegisteredGroup => ({
+      name: folder,
+      folder,
+      trigger: '@bot',
+      added_at: '2026-09-09T00:00:00.000Z',
+      isMain,
+    });
+
+    /** A connected channel that owns every JID starting with `prefix`. */
+    const channelOwning = (prefix: string): Channel => ({
+      name: prefix,
+      connect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => true,
+      ownsJid: (jid) => jid.startsWith(prefix),
+      disconnect: async () => {},
+    });
+
+    const trigger = {
+      type: 'email_trigger',
+      emails: [
+        { thread_id: 't1', account: 'personal', subject: 's', sender: 'x@y' },
+      ],
+    };
+
+    /** Chat JIDs the trigger was enqueued on (empty when it was dropped). */
+    async function chatJidsFor(
+      groups: Record<string, RegisteredGroup>,
+      channels: Channel[],
+    ): Promise<string[]> {
+      const { stub, calls } = buildStub(channels);
+      stub.registeredGroups = () => groups;
+      await processTaskIpc(trigger, 'main', true, stub);
+      return calls.map((c) => c.chatJid);
+    }
+
+    it('keeps the Telegram-first pick as is: a non-main tg group outranks an owned main group', async () => {
+      // Characterization, not endorsement. The tg: branch checks neither
+      // isMain nor channel ownership; only the fallback below it changed.
+      expect(
+        await chatJidsFor(
+          { 'dc:1': group('main', true), 'tg:5': group('telegram_side') },
+          [channelOwning('dc:'), channelOwning('tg:')],
+        ),
+      ).toEqual(['tg:5']);
+    });
+
+    it('falls back to a main group a connected channel owns, not the first is_main row', async () => {
+      // Two is_main rows, one per channel. The WhatsApp row was registered
+      // first, but only Discord is connected.
+      expect(
+        await chatJidsFor(
+          {
+            'wa-main@g.us': group('main', true),
+            'dc:1': group('main', true),
+          },
+          [channelOwning('dc:')],
+        ),
+      ).toEqual(['dc:1']);
+    });
+
+    it('drops the trigger when no connected channel owns a main group', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      try {
+        expect(
+          await chatJidsFor({ 'wa-main@g.us': group('main', true) }, []),
+        ).toEqual([]);
+        // Dropped by this branch, not by an earlier guard (feature flag off,
+        // empty email list).
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('No Telegram or main group registered'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
 });
 
 import { classifyAndFormat } from '../router.js';
@@ -171,7 +263,7 @@ Subject: Meeting tomorrow
 
 Hi, let's meet tomorrow at 3pm to discuss the project.`;
 
-    const { text, meta } = classifyAndFormat(emailText);
+    const { meta } = classifyAndFormat(emailText);
     expect(meta.category).toBe('email');
   });
 
@@ -315,7 +407,7 @@ describe('email trigger pipeline — end-to-end', () => {
       'I reviewed 2 new emails:\n1. Project update from pm@example.com — scheduling meeting\n2. CI failure from ci@example.com — test suite needs fix';
 
     // Run through the pipeline
-    const { text, meta } = classifyAndFormat(agentResponse);
+    const { meta } = classifyAndFormat(agentResponse);
 
     // Force-attach archive buttons from trigger metadata
     for (const email of triggerEmails) {

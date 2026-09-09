@@ -16,7 +16,8 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import type { Action, LlmConfig, RegisteredGroup } from './types.js';
+import { findMainGroupJid } from './main-group.js';
+import type { Action, Channel, LlmConfig, RegisteredGroup } from './types.js';
 import { addRule } from './learning/rules-engine.js';
 import { addTrace } from './learning/procedure-recorder.js';
 import { inferActionClasses } from './learning/outcome-enricher.js';
@@ -55,6 +56,12 @@ export interface IpcDeps {
     actions: Action[],
   ) => Promise<number | undefined>;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /**
+   * Connected channels, read at call time. Resolves "the main group" by
+   * ownership (findMainGroupJid): several `is_main=1` rows coexist, one per
+   * channel, and only one a connected channel owns can be delivered to.
+   */
+  channels: () => Channel[];
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
@@ -715,13 +722,14 @@ export async function processTaskIpc(
       // so that user replies on Telegram go to the same container session.
       // This enables the approval flow: agent proposes → user replies
       // "approve"/"skip" → same agent session processes the response.
-      // Falls back to main group if Telegram isn't registered.
+      // Falls back to the main group if Telegram isn't registered — and only
+      // to one a connected channel owns: several `is_main=1` rows coexist
+      // (one per channel), and the first one scanned may be a JID nothing
+      // can deliver to.
       const telegramJid = Object.entries(registeredGroups).find(([jid]) =>
         jid.startsWith('tg:'),
       )?.[0];
-      const mainJid = Object.entries(registeredGroups).find(
-        ([, g]) => g.isMain,
-      )?.[0];
+      const mainJid = findMainGroupJid(registeredGroups, deps.channels());
       const agentJid = telegramJid || mainJid;
 
       if (!agentJid) {

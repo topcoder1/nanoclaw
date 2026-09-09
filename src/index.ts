@@ -2546,6 +2546,9 @@ async function main(): Promise<void> {
       return undefined;
     },
     registeredGroups: () => registeredGroups,
+    // Read lazily, like registeredGroups — resolves the email_trigger
+    // fallback to a main group some connected channel owns.
+    channels: () => channels,
     registerGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(

@@ -15,6 +15,7 @@ function makeDeps(overrides: Partial<IpcDeps> = {}): IpcDeps {
         isMain: true,
       },
     }),
+    channels: () => [],
     registerGroup: vi.fn(),
     syncGroups: vi.fn().mockResolvedValue(undefined),
     getAvailableGroups: () => [],
