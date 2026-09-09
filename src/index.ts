@@ -70,6 +70,7 @@ import {
 import { ExecutorPool } from './executor-pool.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { findMainGroupJid } from './main-group.js';
 import {
   findChannel,
   formatMessages,
@@ -1364,18 +1365,15 @@ async function main(): Promise<void> {
     (label: string) =>
     (md: string): void => {
       const primary = channels.find((c) => c.name.startsWith('telegram'));
-      // Multiple `is_main=1` rows can coexist (one per channel: WhatsApp,
-      // Telegram, Signal). Pick the main group whose JID the telegram
-      // channel actually owns — otherwise we'd hand a WhatsApp JID to
-      // grammy and get `400: chat not found`.
-      const mainGroup = primary
-        ? Object.entries(registeredGroups).find(
-            ([jid, g]) => g.isMain && primary.ownsJid(jid),
-          )
-        : undefined;
-      if (primary && mainGroup) {
+      // Multiple `is_main=1` rows can coexist (one per channel). Restrict
+      // the lookup to the telegram channel — otherwise we'd hand a WhatsApp
+      // JID to grammy and get `400: chat not found`.
+      const mainJid = primary
+        ? findMainGroupJid(registeredGroups, [primary])
+        : null;
+      if (primary && mainJid) {
         void primary
-          .sendMessage(mainGroup[0], md)
+          .sendMessage(mainJid, md)
           .catch((err) =>
             logger.warn(
               { err: err instanceof Error ? err.message : String(err), label },
@@ -1772,14 +1770,11 @@ async function main(): Promise<void> {
       // Same pattern as deliverBrainMessage — pick the main group whose JID is
       // owned by some connected channel.
       if (chat_id === 'main') {
-        const mainEntry = Object.entries(registeredGroups).find(
-          ([jid, g]) => g.isMain && channels.some((c) => c.ownsJid(jid)),
-        );
-        if (!mainEntry) {
+        const mainJid = findMainGroupJid(registeredGroups, channels);
+        if (!mainJid) {
           logger.warn({ text }, 'merge-suggested: no main group registered');
           return;
         }
-        const [mainJid] = mainEntry;
         const mainChannel = channels.find((c) => c.ownsJid(mainJid));
         if (!mainChannel) return;
         try {
@@ -3169,14 +3164,15 @@ async function main(): Promise<void> {
   startDealWatchLoop({
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
-      if (!channel) {
-        logger.warn({ jid }, 'deal-watch: no channel owns JID, cannot send');
-        return;
-      }
+      // Throw, don't return: deal-watch retries an alert on the next poll
+      // only when the send rejects. Resolving here would mark the digest
+      // processed and lose it permanently.
+      if (!channel) throw new Error(`deal-watch: no channel owns JID ${jid}`);
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
+    channels: () => channels,
   });
   // Background Gmail token refresh: tokens expire every 60 min, refresh every 45 min.
   startGmailRefreshLoop({
