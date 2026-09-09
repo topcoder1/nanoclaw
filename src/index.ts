@@ -3131,11 +3131,16 @@ async function main(): Promise<void> {
   const digestDeps = {
     sendMessage: async (jid: string, text: string) => {
       const channel = findChannel(channels, jid);
-      if (!channel) return;
+      // Throw, don't return: a resolved send makes runDailyDigest log
+      // "Daily digest sent" for a digest nobody received.
+      if (!channel) throw new Error(`daily-digest: no channel owns JID ${jid}`);
       await channel.sendMessage(jid, text);
     },
+    // Multiple `is_main=1` rows coexist (one per channel). The JID picks the
+    // delivery target AND scopes generateDigest's pending-approval lookup, so
+    // it must be one a connected channel owns.
     getMainGroupJid: () =>
-      Object.keys(registeredGroups).find((jid) => registeredGroups[jid].isMain),
+      findMainGroupJid(registeredGroups, channels) ?? undefined,
   };
   let lastDigestDate = '';
   setInterval(async () => {

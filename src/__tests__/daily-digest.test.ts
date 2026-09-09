@@ -45,7 +45,12 @@ vi.mock('../triage/config.js', () => ({
   },
 }));
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { _initTestDatabase, _closeDatabase } from '../db.js';
+import { logger } from '../logger.js';
 import { logEvent } from '../event-log.js';
 import {
   generateDigest,
@@ -309,5 +314,82 @@ describe('daily-digest', () => {
       const late = new Date('2026-04-17T23:00:00Z');
       expect(describeNextDigest(late, 'UTC')).toBe('tomorrow 8am');
     });
+  });
+});
+
+// --- digest main-group wiring (2026-09-08) ---------------------------------
+//
+// digestDeps in src/index.ts carried both halves of the deal-watch defect
+// fixed in #104: a naive "first is_main row" lookup, and a sender that
+// returned instead of throwing when no channel owned the JID. Unlike
+// deal-watch this path has no feature flag, and `lastDigestDate` is stamped
+// BEFORE the run, so a silent no-op drops that day's digest with no retry —
+// while runDailyDigest still logs "Daily digest sent". The JID also scopes
+// generateDigest's getPendingTrustApprovalIds lookup, so a wrong one silently
+// suppresses the "pending trust approval(s)" line.
+
+describe('runDailyDigest when the send fails', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+    vi.mocked(logger.info).mockClear();
+  });
+  afterEach(() => _closeDatabase());
+
+  it('propagates the rejection and does not report the digest as sent', async () => {
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValue(new Error('daily-digest: no channel owns JID x@g.us'));
+    await expect(
+      runDailyDigest({ sendMessage, getMainGroupJid: () => 'tg:-100' }),
+    ).rejects.toThrow(/no channel owns JID/);
+    expect(vi.mocked(logger.info).mock.calls.flat()).not.toContain(
+      'Daily digest sent',
+    );
+  });
+
+  it('negative control: a send that resolves without delivering still reports success', async () => {
+    // The pre-fix sender shape (`if (!channel) return;`) resolves without
+    // delivering anything, and the run then logs "Daily digest sent" for a
+    // digest nobody received. That lie is why the wiring must throw.
+    const swallowing = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      runDailyDigest({
+        sendMessage: swallowing,
+        getMainGroupJid: () => 'tg:-100',
+      }),
+    ).resolves.toBeUndefined();
+    expect(vi.mocked(logger.info).mock.calls.flat()).toContain(
+      'Daily digest sent',
+    );
+  });
+});
+
+describe('src/index.ts digest wiring', () => {
+  const INDEX = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'index.ts',
+  );
+
+  function digestDepsBlock(): string {
+    const src = readFileSync(INDEX, 'utf8');
+    const start = src.indexOf('const digestDeps = {');
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf('\n  };', start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  }
+
+  it('resolves the main group through the ownership-checked helper', () => {
+    const block = digestDepsBlock();
+    expect(block).toMatch(/findMainGroupJid\(registeredGroups, channels\)/);
+    // The pre-fix lookup took the first is_main row, ignoring ownership.
+    expect(block).not.toMatch(/Object\.keys\(registeredGroups\)\.find/);
+  });
+
+  it('throws rather than returns when no channel owns the JID', () => {
+    const block = digestDepsBlock();
+    expect(block).toMatch(/if \(!channel\)[\s\S]{0,120}?throw new Error/);
+    expect(block).not.toMatch(/if \(!channel\) return;/);
   });
 });
