@@ -19,7 +19,8 @@ import path from 'path';
 import { isItemProcessed, markItemProcessed } from './db.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { findMainGroupJid } from './main-group.js';
+import { Channel, RegisteredGroup } from './types.js';
 
 // Read a single flag from either process.env or the repo's .env file.
 // readEnvFile intentionally does not populate process.env (security), so we
@@ -61,6 +62,8 @@ type DealWatchResult = {
 type Deps = {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Connected channels — used to pick a main group one of them owns. */
+  channels: () => Channel[];
 };
 
 // Run the existing CLI dry-run script as a child process. Keeping the
@@ -168,16 +171,9 @@ function formatDigest(newAlerts: Alert[]): string {
   return [header, '', ...sorted.map(formatAlert)].join('\n\n');
 }
 
-function findMainGroupJid(
-  groups: Record<string, RegisteredGroup>,
-): string | null {
-  for (const [jid, g] of Object.entries(groups)) {
-    if (g.isMain) return jid;
-  }
-  return null;
-}
-
-async function pollOnce(deps: Deps): Promise<void> {
+// One full poll cycle: run the script, dedupe, send, mark processed.
+// Exported so tests can drive a cycle without the interval timer.
+export async function pollOnce(deps: Deps): Promise<void> {
   const result = await runDealWatchScript();
   if (!result) return; // already logged
 
@@ -200,7 +196,9 @@ async function pollOnce(deps: Deps): Promise<void> {
 
   if (fresh.length === 0) return;
 
-  const jid = findMainGroupJid(deps.registeredGroups());
+  // Multiple `is_main=1` rows coexist (one per channel), so the only
+  // sendable one is the main group a connected channel actually owns.
+  const jid = findMainGroupJid(deps.registeredGroups(), deps.channels());
   if (!jid) {
     logger.warn('deal-watch: no main group registered, skipping send');
     return;
