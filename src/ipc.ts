@@ -718,23 +718,28 @@ export async function processTaskIpc(
 
       const prompt = `## Email Intelligence Trigger\n\n${emailCount} new email(s) to process:\n\n${emailSummaries}\n\nEach email above includes a Preview of the first ~400 chars of the body. Use the Preview as your primary context — only call \`superpilot\` MCP \`get_thread_summary\` if the Preview is empty or insufficient for a decision. If the preview is missing AND fetch fails transiently (not found, not yet indexed), mark the email processed with status \`fetch_failed_transient\` and MOVE ON SILENTLY — do NOT send a user-facing message about the failure.\n\nFor each email:\n1. Check if already processed (search processed_items)\n2. Use the Preview (or fetch via superpilot MCP if Preview is empty/short)\n3. Classify action tier (AUTO/PROPOSE/ESCALATE)\n4. Act accordingly\n5. Mark as processed\n\nWhen you send a message about a specific email via \`send_message\`, include \`email_id\` (thread_id from above) and \`email_account\` so the user gets Expand / Full Email / Archive buttons. For batch summaries that span multiple emails, omit these fields.`;
 
-      // Run the agent on the Telegram JID (primary notification channel)
-      // so that user replies on Telegram go to the same container session.
-      // This enables the approval flow: agent proposes → user replies
-      // "approve"/"skip" → same agent session processes the response.
-      // Falls back to the main group if Telegram isn't registered — and only
-      // to one a connected channel owns: several `is_main=1` rows coexist
-      // (one per channel), and the first one scanned may be a JID nothing
-      // can deliver to.
-      const telegramJid = Object.entries(registeredGroups).find(([jid]) =>
-        jid.startsWith('tg:'),
-      )?.[0];
+      // Run the agent on the main group the Telegram channel owns (primary
+      // notification channel) so that user replies on Telegram go to the
+      // same container session. This enables the approval flow: agent
+      // proposes → user replies "approve"/"skip" → same agent session
+      // processes the response. Falls back to a main group any connected
+      // channel owns. Both picks are ownership-checked: several `is_main=1`
+      // rows coexist (one per channel), a row can outlive its channel
+      // (credentials missing, connect() threw), and either way the first
+      // row scanned may be a JID nothing can deliver to. Both are main
+      // groups: the container inherits the chosen row's isMain, and a
+      // non-main group runs without the project/store mounts the prompt
+      // above relies on.
+      const telegramJid = findMainGroupJid(
+        registeredGroups,
+        deps.channels().filter((c) => c.name.startsWith('telegram')),
+      );
       const mainJid = findMainGroupJid(registeredGroups, deps.channels());
       const agentJid = telegramJid || mainJid;
 
       if (!agentJid) {
         logger.warn(
-          'No Telegram or main group registered, cannot process email trigger',
+          'No connected channel owns a main group (Telegram or otherwise), cannot process email trigger',
         );
         break;
       }
