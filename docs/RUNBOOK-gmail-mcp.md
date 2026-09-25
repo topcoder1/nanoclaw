@@ -79,7 +79,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth
 After re-auth, `credentials.json` will be regenerated with a fresh
 refresh_token. Confirm with section 1's refresh script.
 
-> **Note (IMPORTANT):** The in-container `@gongrzhe/server-gmail-autoauth-mcp`
+> **Note (IMPORTANT):** The in-container `@gongrzhe/server-gmail-autoauth-mcp@1.1.11`
 > package is hard-coded to a single account directory (`~/.gmail-mcp`), so
 > even though jonathan, attaxion, and dev directories can be authorized on
 > disk, **only personal is reachable from the agent today**. Authorizing the

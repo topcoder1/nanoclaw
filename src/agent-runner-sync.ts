@@ -24,9 +24,9 @@ function hashTree(dir: string): string {
  * is re-made too.
  *
  * The source hash is recorded beside the copy, outside the container mount,
- * so an agent editing its own /app/src can neither force nor block a
- * re-copy: its edits last until the source next changes. Comparing file
- * times instead let an agent's edit, being newer, pin a stale runner.
+ * so nothing an agent does to its own /app/src keeps a stale runner in
+ * place: its edits last until the source next changes. (Comparing file
+ * times let an agent's edit, being newer, pin the old runner.)
  *
  * A re-copy mirrors the source: files it no longer has are removed, since
  * the entrypoint compiles every file in /app/src. The copy is emptied in
@@ -43,6 +43,9 @@ export function syncAgentRunnerSrc(srcDir: string, destDir: string): boolean {
     fs.existsSync(stampFile) &&
     fs.readFileSync(stampFile, 'utf8') === srcHash;
   if (current) return false;
+  // Record no source until the new copy is complete, so a copy that fails
+  // partway is re-made rather than taken for current.
+  fs.rmSync(stampFile, { force: true });
   if (fs.existsSync(destDir)) {
     for (const entry of fs.readdirSync(destDir)) {
       fs.rmSync(path.join(destDir, entry), { recursive: true, force: true });

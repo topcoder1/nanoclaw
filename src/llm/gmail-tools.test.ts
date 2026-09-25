@@ -172,9 +172,11 @@ describe('agent-runner Gmail tools', () => {
       '../../container/agent-runner/src/mcp-bridge.ts',
       '../index.ts',
       '../../scripts/check-gmail-mcp.sh',
+      '../../docs/RUNBOOK-gmail-mcp.md',
+      '../../.claude/skills/add-gmail/SKILL.md',
     ]) {
       const text = readFileSync(new URL(file, import.meta.url), 'utf8');
-      const refs = text.match(/@gongrzhe\/server-gmail-autoauth-mcp[^\s'"]*/g);
+      const refs = text.match(/@gongrzhe\/server-gmail-autoauth-mcp[^\s'"`]*/g);
       expect(refs, file).not.toBeNull();
       expect(new Set(refs), file).toEqual(new Set([PINNED]));
     }

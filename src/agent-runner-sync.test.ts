@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { syncAgentRunnerSrc } from './agent-runner-sync.js';
 
@@ -38,6 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -81,6 +82,26 @@ describe('syncAgentRunnerSrc', () => {
   it('re-copies a cache an older host made, with no record of its source', () => {
     write(path.join(dest, 'index.ts'), 'index v0');
     write(path.join(dest, 'gmail-tools.ts'), 'gmail-tools v0');
+    syncAgentRunnerSrc(src, dest);
+    expect(read(path.join(dest, 'gmail-tools.ts'))).toBe('gmail-tools v1');
+  });
+
+  it('does not take a copy that failed partway for current', () => {
+    syncAgentRunnerSrc(src, dest);
+    write(
+      path.join(src, 'gmail-tools.ts'),
+      'gmail-tools v2',
+      minutesFromNow(1),
+    );
+    // The copy dies after index.ts, before gmail-tools.ts.
+    vi.spyOn(fs, 'cpSync').mockImplementationOnce(() => {
+      fs.copyFileSync(path.join(src, 'index.ts'), path.join(dest, 'index.ts'));
+      throw new Error('ENOSPC');
+    });
+    expect(() => syncAgentRunnerSrc(src, dest)).toThrow('ENOSPC');
+    // The deploy is reverted before the next spawn, so the source matches the
+    // last complete copy again, but the copy on disk is partial.
+    write(path.join(src, 'gmail-tools.ts'), 'gmail-tools v1', CHECKOUT);
     syncAgentRunnerSrc(src, dest);
     expect(read(path.join(dest, 'gmail-tools.ts'))).toBe('gmail-tools v1');
   });
