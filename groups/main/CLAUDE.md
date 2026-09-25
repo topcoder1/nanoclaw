@@ -454,7 +454,7 @@ Details:
 
 Parse the user's response:
 
-- "approve" / "yes" / "send it" / "go" / "ok" → execute the action
+- "approve" / "yes" / "send it" / "go" / "ok" → execute the action (for an email reply the action is the Gmail draft: you have no send tool, so tell the user the draft is ready to send from Gmail)
 - "edit: make it shorter" → revise based on instruction and re-propose
 - "skip" / "ignore" / "no" → don't act (no trust demotion)
 - "on it" / "I'll handle it" → stand down, user is handling it
