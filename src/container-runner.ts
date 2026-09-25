@@ -233,11 +233,11 @@ function buildVolumeMounts(
   // errors when the agent first tries to call a Gmail tool. Better to omit
   // the mount entirely so the gmail-mcp never sees a half-configured directory.
   //
-  // NOTE: The in-container @gongrzhe/server-gmail-autoauth-mcp package is
-  // hard-coded to a single account directory (~/.gmail-mcp), so the jonathan,
-  // attaxion, and dev mounts are reserved for a future per-account MCP launcher
-  // and are currently inert from the agent's perspective. Personal is the only
-  // reachable account today.
+  // NOTE: The agent runner starts one Gmail MCP server per account and points
+  // it at that account's files (GMAIL_OAUTH_PATH and GMAIL_CREDENTIALS_PATH,
+  // which the pinned @gongrzhe/server-gmail-autoauth-mcp reads), so every
+  // account mounted here is reachable from the agent, limited to the tools
+  // container/agent-runner/src/gmail-tools.ts allows.
   const homeDir = os.homedir();
   const gmailDirs = [
     { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
