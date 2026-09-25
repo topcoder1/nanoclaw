@@ -33,6 +33,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { syncAgentRunnerSrc } from './agent-runner-sync.js';
 import { readEnvFile } from './env.js';
 import { ensureMemoryDirs } from './memory/shared/paths.js';
 import { regenerateIndex } from './memory/shared/store.js';
@@ -279,7 +280,8 @@ function buildVolumeMounts(
 
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // groups. Re-copied whenever any source file changes (agent-runner-sync.ts).
+  // Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -292,17 +294,11 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
+  if (
+    fs.existsSync(agentRunnerSrc) &&
+    syncAgentRunnerSrc(agentRunnerSrc, groupAgentRunnerDir)
+  ) {
+    logger.info({ group: group.name }, 'Copied agent-runner source to group');
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
