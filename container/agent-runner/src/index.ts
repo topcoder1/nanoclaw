@@ -24,46 +24,9 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { runVercelQuery } from './vercel-runner.js';
+import { blockedGmailTools, safeGmailTools } from './gmail-tools.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-/**
- * Safe Gmail MCP tool suffixes — destructive tools (delete_email,
- * batch_delete_emails, delete_label, delete_filter) are intentionally
- * excluded so the agent cannot permanently destroy emails.
- */
-const SAFE_GMAIL_TOOL_SUFFIXES = [
-  'search_emails',
-  'read_email',
-  'draft_email',
-  'send_email',
-  'modify_email',
-  'batch_modify_emails',
-  'list_email_labels',
-  'download_attachment',
-  'create_label',
-  'update_label',
-  'create_filter',
-  'create_filter_from_template',
-  'get_filter',
-  'get_or_create_label',
-  'list_filters',
-] as const;
-
-const GMAIL_ACCOUNT_NAMES = [
-  'gmail',
-  'gmail-personal',
-  'gmail-whoisxml',
-  'gmail-attaxion',
-  'gmail-dev',
-] as const;
-
-/** Expand safe Gmail tools for all accounts into allowedTools entries */
-function safeGmailTools(): string[] {
-  return GMAIL_ACCOUNT_NAMES.flatMap((acct) =>
-    SAFE_GMAIL_TOOL_SUFFIXES.map((suffix) => `mcp__${acct}__${suffix}`),
-  );
-}
 
 interface ContainerInput {
   prompt: string;
@@ -702,6 +665,9 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
+      // bypassPermissions approves every tool allowedTools does not list;
+      // only disallowedTools keeps a tool out of reach (see gmail-tools.ts).
+      disallowedTools: blockedGmailTools(),
       settingSources: ['project', 'user'],
       mcpServers: (() => {
         const servers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
