@@ -55,7 +55,9 @@ export function buildMcpServerConfigs(
     if (fs.existsSync(credsPath)) {
       servers[acct.name] = {
         command: 'npx',
-        args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        // Pinned: classify a new release's tools in gmail-tools.ts before
+        // bumping.
+        args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp@1.1.11'],
         env: {
           GMAIL_OAUTH_PATH: oauthPath,
           GMAIL_CREDENTIALS_PATH: credsPath,
@@ -106,32 +108,45 @@ export function buildMcpServerConfigs(
   return servers;
 }
 
+type McpConnection = Pick<MCPClient, 'tools' | 'close'>;
+
+function connectStdio(
+  name: string,
+  config: McpServerConfig,
+): Promise<McpConnection> {
+  const transport = new StdioMCPTransport({
+    command: config.command,
+    args: config.args,
+    env: { ...(process.env as Record<string, string>), ...config.env },
+  });
+  return createMCPClient({ transport, name: `nanoclaw-${name}` });
+}
+
+/**
+ * Connect to every server and gather their tools. `connect` is a parameter so
+ * a test can check the gathered tools without starting any server.
+ */
 export async function connectMcpServers(
   configs: Record<string, McpServerConfig>,
+  connect: (
+    name: string,
+    config: McpServerConfig,
+  ) => Promise<McpConnection> = connectStdio,
 ): Promise<{
   tools: Record<string, unknown>;
   cleanup: () => Promise<void>;
 }> {
-  const clients: MCPClient[] = [];
+  const clients: McpConnection[] = [];
   const allTools: Record<string, unknown> = {};
 
   for (const [name, config] of Object.entries(configs)) {
     try {
-      const transport = new StdioMCPTransport({
-        command: config.command,
-        args: config.args,
-        env: { ...(process.env as Record<string, string>), ...config.env },
-      });
-
-      const client = await createMCPClient({
-        transport,
-        name: `nanoclaw-${name}`,
-      });
+      const client = await connect(name, config);
 
       clients.push(client);
       const tools = await client.tools();
 
-      // The Vercel runner has no disallowedTools: dropping the blocked Gmail
+      // The Vercel runner has no disallowedTools: keeping only the safe Gmail
       // tools here keeps sending and destroying mail out of every provider's
       // reach, not only the Claude Agent SDK's (see gmail-tools.ts).
       Object.assign(allTools, exposedTools(name, tools));
