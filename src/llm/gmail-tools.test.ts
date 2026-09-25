@@ -21,6 +21,7 @@ const ACCOUNTS = [
 ];
 const MUST_BLOCK = [
   'send_email',
+  'create_filter', // its forward action sends mail on
   'delete_email',
   'batch_delete_emails',
   'delete_label',
@@ -43,6 +44,9 @@ describe('agent-runner Gmail tools', () => {
       SAFE_GMAIL_TOOL_SUFFIXES.filter((suffix) => MUST_BLOCK.includes(suffix)),
     ).toEqual([]);
     expect(safe.has('mcp__gmail-personal__draft_email')).toBe(true);
+    expect(safe.has('mcp__gmail-personal__create_filter_from_template')).toBe(
+      true,
+    );
   });
 
   it('the runner hands the blocked tools to disallowedTools', () => {

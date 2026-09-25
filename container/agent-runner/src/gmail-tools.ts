@@ -12,6 +12,10 @@
  * Blocked:
  * - `send_email` (2026-09-24): agents draft, Jonathan sends — from Gmail, or
  *   from a Claude Code session where every send raises a permission prompt.
+ * - `create_filter`: its `forward` action sends matching mail on to any
+ *   verified forwarding address, a send with no send call.
+ *   `create_filter_from_template` stays: its templates only label, archive or
+ *   mark mail.
  * - The four tools that destroy mail. The allowed list below always meant to
  *   exclude them ("so the agent cannot permanently destroy emails"), but under
  *   bypassPermissions leaving them out of it did nothing.
@@ -43,7 +47,6 @@ export const SAFE_GMAIL_TOOL_SUFFIXES = [
   'download_attachment',
   'create_label',
   'update_label',
-  'create_filter',
   'create_filter_from_template',
   'get_filter',
   'get_or_create_label',
@@ -53,6 +56,7 @@ export const SAFE_GMAIL_TOOL_SUFFIXES = [
 /** Gmail tools the agent must never see, whatever the permission mode. */
 export const BLOCKED_GMAIL_TOOL_SUFFIXES = [
   'send_email',
+  'create_filter',
   'delete_email',
   'batch_delete_emails',
   'delete_label',
