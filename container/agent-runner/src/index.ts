@@ -24,7 +24,11 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { runVercelQuery } from './vercel-runner.js';
-import { blockedGmailTools, safeGmailTools } from './gmail-tools.js';
+import {
+  blockedGmailTools,
+  denyBlockedGmailTools,
+  safeGmailTools,
+} from './gmail-tools.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -666,7 +670,8 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       // bypassPermissions approves every tool allowedTools does not list;
-      // only disallowedTools keeps a tool out of reach (see gmail-tools.ts).
+      // only disallowedTools and the PreToolUse hook below keep a tool out of
+      // reach (see gmail-tools.ts).
       disallowedTools: blockedGmailTools(),
       settingSources: ['project', 'user'],
       mcpServers: (() => {
@@ -696,7 +701,9 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
           if (fs.existsSync(credsPath)) {
             servers[acct.name] = {
               command: 'npx',
-              args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+              // Pinned: classify a new release's tools in gmail-tools.ts
+              // before bumping.
+              args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp@1.1.11'],
               env: {
                 GMAIL_OAUTH_PATH: oauthPath,
                 GMAIL_CREDENTIALS_PATH: credsPath,
@@ -770,6 +777,9 @@ Only use ✓ for KNOWN facts with a named source. Use ~ for REMEMBERED claims. U
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
         ],
+        // disallowedTools hides only the Gmail tools we have classified; this
+        // denies any other Gmail tool, e.g. one a newer release adds.
+        PreToolUse: [{ hooks: [denyBlockedGmailTools] }],
       },
     },
   })) {
