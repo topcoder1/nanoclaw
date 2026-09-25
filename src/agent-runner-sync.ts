@@ -28,6 +28,11 @@ function hashTree(dir: string): string {
  * re-copy: its edits last until the source next changes. Comparing file
  * times instead let an agent's edit, being newer, pin a stale runner.
  *
+ * A re-copy mirrors the source: files it no longer has are removed, since
+ * the entrypoint compiles every file in /app/src. The copy is emptied in
+ * place rather than deleted, so a running container's mount of it stays
+ * valid.
+ *
  * Returns true when it copied.
  */
 export function syncAgentRunnerSrc(srcDir: string, destDir: string): boolean {
@@ -38,6 +43,11 @@ export function syncAgentRunnerSrc(srcDir: string, destDir: string): boolean {
     fs.existsSync(stampFile) &&
     fs.readFileSync(stampFile, 'utf8') === srcHash;
   if (current) return false;
+  if (fs.existsSync(destDir)) {
+    for (const entry of fs.readdirSync(destDir)) {
+      fs.rmSync(path.join(destDir, entry), { recursive: true, force: true });
+    }
+  }
   fs.cpSync(srcDir, destDir, { recursive: true });
   fs.writeFileSync(stampFile, srcHash);
   return true;

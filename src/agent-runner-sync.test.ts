@@ -59,6 +59,15 @@ describe('syncAgentRunnerSrc', () => {
     expect(read(path.join(dest, 'gmail-tools.ts'))).toBe('gmail-tools v2');
   });
 
+  it('removes a file deleted from the source, which the entrypoint would still compile', () => {
+    write(path.join(src, 'old-tool.ts'), 'old tool', CHECKOUT);
+    syncAgentRunnerSrc(src, dest);
+    fs.rmSync(path.join(src, 'old-tool.ts'));
+    syncAgentRunnerSrc(src, dest);
+    expect(fs.existsSync(path.join(dest, 'old-tool.ts'))).toBe(false);
+    expect(read(path.join(dest, 'index.ts'))).toBe('index v1');
+  });
+
   it("does not let an agent's edit to its own copy pin a stale runner", () => {
     syncAgentRunnerSrc(src, dest);
     // A deploy changes index.ts, then an agent still running on the old copy
