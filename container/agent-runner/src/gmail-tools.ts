@@ -15,6 +15,13 @@
  * - The four tools that destroy mail. The allowed list below always meant to
  *   exclude them ("so the agent cannot permanently destroy emails"), but under
  *   bypassPermissions leaving them out of it did nothing.
+ *
+ * Limit: this hides the tools; it is not a security boundary. The agent keeps
+ * Bash, and the container mounts each account's Gmail OAuth credentials
+ * (src/container-runner.ts), so it could still call the Gmail API directly.
+ * Gmail has no OAuth scope that allows drafts but not sending (`gmail.compose`
+ * covers both), so a hard boundary means keeping the credentials out of the
+ * container, e.g. a host-side proxy that refuses send and delete.
  */
 
 export const GMAIL_ACCOUNT_NAMES = [
