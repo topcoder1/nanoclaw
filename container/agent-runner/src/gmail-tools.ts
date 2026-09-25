@@ -83,3 +83,20 @@ export function blockedGmailTools(): string[] {
 export function isBlockedGmailTool(prefixedName: string): boolean {
   return blockedGmailTools().includes(prefixedName);
 }
+
+/**
+ * A server's tools under their prefixed names (`mcp__<server>__<tool>`), with
+ * the blocked Gmail tools dropped. The MCP bridge builds every provider's tool
+ * set with this, because the Vercel runner has no disallowedTools.
+ */
+export function exposedTools<T>(
+  server: string,
+  tools: Record<string, T>,
+): Record<string, T> {
+  const exposed: Record<string, T> = {};
+  for (const [toolName, toolDef] of Object.entries(tools)) {
+    const prefixedName = `mcp__${server}__${toolName}`;
+    if (!isBlockedGmailTool(prefixedName)) exposed[prefixedName] = toolDef;
+  }
+  return exposed;
+}

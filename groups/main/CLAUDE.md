@@ -454,7 +454,7 @@ Details:
 
 Parse the user's response:
 
-- "approve" / "yes" / "send it" / "go" / "ok" → execute the action (for an email reply the action is the Gmail draft: you have no send tool, so tell the user the draft is ready to send from Gmail)
+- "approve" / "yes" / "send it" / "go" / "ok" → execute the action (for an email reply, create the Gmail draft with `draft_email`: you have no send tool, so tell the user the draft is ready to send from Gmail)
 - "edit: make it shorter" → revise based on instruction and re-propose
 - "skip" / "ignore" / "no" → don't act (no trust demotion)
 - "on it" / "I'll handle it" → stand down, user is handling it
@@ -467,7 +467,7 @@ If the response is ambiguous, ask for clarification.
 Track each approval/rejection outcome. After 5 consecutive approvals of the same action type without edits:
 
 - Propose graduating: "I've auto-handled 5 meeting request replies. Graduate to AUTO?"
-- If approved, move that action type to the AUTO section above
+- If approved, move that action type to the AUTO section above. Email replies graduate to auto-drafting only: you have no send tool, so the user still sends them from Gmail
 - If rejected, keep at PROPOSE
 
 After 1 rejection or significant edit of a previously reliable action type:

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SAFE_GMAIL_TOOL_SUFFIXES,
   blockedGmailTools,
+  exposedTools,
   isBlockedGmailTool,
   safeGmailTools,
 } from '../../container/agent-runner/src/gmail-tools.js';
@@ -56,13 +57,25 @@ describe('agent-runner Gmail tools', () => {
       'utf8',
     );
     expect(src).toContain("permissionMode: 'bypassPermissions'");
-    expect(src).toContain('disallowedTools: blockedGmailTools()');
+    // Anchored to a whole line, so a commented-out line does not satisfy it.
+    expect(src).toMatch(/^\s*disallowedTools: blockedGmailTools\(\),\s*$/m);
     expect(src).not.toContain("'send_email'");
   });
 
   it('the MCP bridge drops blocked tools for every provider', () => {
     // The Vercel runner (OpenAI, Google, Ollama, ...) takes every tool the
     // bridge returns and has no disallowedTools, so the bridge must drop them.
+    expect(
+      exposedTools('gmail-personal', {
+        send_email: 1,
+        create_filter: 2,
+        draft_email: 3,
+      }),
+    ).toEqual({ 'mcp__gmail-personal__draft_email': 3 });
+    // Control: another server's send tool is not ours to drop.
+    expect(exposedTools('notion', { send_email: 1 })).toEqual({
+      mcp__notion__send_email: 1,
+    });
     expect(isBlockedGmailTool('mcp__gmail-whoisxml__send_email')).toBe(true);
     expect(isBlockedGmailTool('mcp__gmail-dev__batch_delete_emails')).toBe(
       true,
@@ -76,6 +89,10 @@ describe('agent-runner Gmail tools', () => {
       ),
       'utf8',
     );
-    expect(bridge).toContain('if (isBlockedGmailTool(prefixedName)) continue;');
+    // A live call, not a comment, and no second way into the tool set.
+    expect(bridge).toMatch(
+      /^\s*Object\.assign\(allTools, exposedTools\(name, tools\)\);\s*$/m,
+    );
+    expect(bridge).not.toMatch(/allTools\[/);
   });
 });
