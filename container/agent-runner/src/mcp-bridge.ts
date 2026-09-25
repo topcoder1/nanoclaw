@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import { Experimental_StdioMCPTransport as StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
+import { isBlockedGmailTool } from './gmail-tools.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -130,8 +131,12 @@ export async function connectMcpServers(
       clients.push(client);
       const tools = await client.tools();
 
+      // The Vercel runner has no disallowedTools: dropping the blocked Gmail
+      // tools here keeps sending and destroying mail out of every provider's
+      // reach, not only the Claude Agent SDK's (see gmail-tools.ts).
       for (const [toolName, toolDef] of Object.entries(tools)) {
         const prefixedName = `mcp__${name}__${toolName}`;
+        if (isBlockedGmailTool(prefixedName)) continue;
         allTools[prefixedName] = toolDef;
       }
 

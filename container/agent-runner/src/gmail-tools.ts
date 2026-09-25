@@ -67,3 +67,8 @@ export function safeGmailTools(): string[] {
 export function blockedGmailTools(): string[] {
   return forAllAccounts(BLOCKED_GMAIL_TOOL_SUFFIXES);
 }
+
+/** True for a prefixed MCP tool name (`mcp__<server>__<tool>`) that is blocked. */
+export function isBlockedGmailTool(prefixedName: string): boolean {
+  return blockedGmailTools().includes(prefixedName);
+}

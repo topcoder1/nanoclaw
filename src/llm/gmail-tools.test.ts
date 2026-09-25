@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SAFE_GMAIL_TOOL_SUFFIXES,
   blockedGmailTools,
+  isBlockedGmailTool,
   safeGmailTools,
 } from '../../container/agent-runner/src/gmail-tools.js';
 
@@ -53,5 +54,24 @@ describe('agent-runner Gmail tools', () => {
     expect(src).toContain("permissionMode: 'bypassPermissions'");
     expect(src).toContain('disallowedTools: blockedGmailTools()');
     expect(src).not.toContain("'send_email'");
+  });
+
+  it('the MCP bridge drops blocked tools for every provider', () => {
+    // The Vercel runner (OpenAI, Google, Ollama, ...) takes every tool the
+    // bridge returns and has no disallowedTools, so the bridge must drop them.
+    expect(isBlockedGmailTool('mcp__gmail-whoisxml__send_email')).toBe(true);
+    expect(isBlockedGmailTool('mcp__gmail-dev__batch_delete_emails')).toBe(
+      true,
+    );
+    expect(isBlockedGmailTool('mcp__gmail-personal__draft_email')).toBe(false);
+    expect(isBlockedGmailTool('mcp__notion__send_email')).toBe(false);
+    const bridge = readFileSync(
+      new URL(
+        '../../container/agent-runner/src/mcp-bridge.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    expect(bridge).toContain('if (isBlockedGmailTool(prefixedName)) continue;');
   });
 });
