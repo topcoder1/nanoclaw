@@ -56,9 +56,10 @@ ls ~/.gmail-mcp-jonathan/gcp-oauth.keys.json   # whoisxml  — inert (see note)
 ls ~/.gmail-mcp-attaxion/gcp-oauth.keys.json   # attaxion  — inert (see note)
 ls ~/.gmail-mcp-dev/gcp-oauth.keys.json        # dev       — inert (see note)
 
-# 2. Run the gmail-mcp's auth helper (opens a browser)
+# 2. Run the gmail-mcp's auth helper (opens a browser). Same pinned version
+#    as the container runs (container/agent-runner/src/gmail-tools.ts).
 cd ~/.gmail-mcp
-npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth
 
 # 3. To re-auth any other account, the current package forces you to
 #    temporarily rename your ~/.gmail-mcp to ~/.gmail-mcp.bak, then
@@ -69,7 +70,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp auth
 #
 #      mv ~/.gmail-mcp ~/.gmail-mcp.personal-bak
 #      cp -R ~/.gmail-mcp-jonathan ~/.gmail-mcp
-#      cd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+#      cd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth
 #      cp ~/.gmail-mcp/credentials.json ~/.gmail-mcp-jonathan/credentials.json
 #      rm -rf ~/.gmail-mcp
 #      mv ~/.gmail-mcp.personal-bak ~/.gmail-mcp

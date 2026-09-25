@@ -162,12 +162,16 @@ describe('agent-runner Gmail tools', () => {
 
   it('pins the Gmail MCP package wherever it is installed or started', () => {
     // A new release can add tools. Bump the pin only after classifying every
-    // tool the new release has in gmail-tools.ts. Hardcoded on purpose.
+    // tool the new release has in gmail-tools.ts. Hardcoded on purpose. The
+    // host's re-auth command counts too: it runs the package on the Mac, with
+    // the OAuth keys, and writes the credentials the container then reads.
     const PINNED = '@gongrzhe/server-gmail-autoauth-mcp@1.1.11';
     for (const file of [
       '../../container/Dockerfile',
       '../../container/agent-runner/src/index.ts',
       '../../container/agent-runner/src/mcp-bridge.ts',
+      '../index.ts',
+      '../../scripts/check-gmail-mcp.sh',
     ]) {
       const text = readFileSync(new URL(file, import.meta.url), 'utf8');
       const refs = text.match(/@gongrzhe\/server-gmail-autoauth-mcp[^\s'"]*/g);
