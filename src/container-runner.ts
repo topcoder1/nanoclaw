@@ -33,6 +33,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { syncAgentRunnerSrc } from './agent-runner-sync.js';
 import { readEnvFile } from './env.js';
 import { ensureMemoryDirs } from './memory/shared/paths.js';
 import { regenerateIndex } from './memory/shared/store.js';
@@ -232,11 +233,11 @@ function buildVolumeMounts(
   // errors when the agent first tries to call a Gmail tool. Better to omit
   // the mount entirely so the gmail-mcp never sees a half-configured directory.
   //
-  // NOTE: The in-container @gongrzhe/server-gmail-autoauth-mcp package is
-  // hard-coded to a single account directory (~/.gmail-mcp), so the jonathan,
-  // attaxion, and dev mounts are reserved for a future per-account MCP launcher
-  // and are currently inert from the agent's perspective. Personal is the only
-  // reachable account today.
+  // NOTE: The agent runner starts one Gmail MCP server per account and points
+  // it at that account's files (GMAIL_OAUTH_PATH and GMAIL_CREDENTIALS_PATH,
+  // which the pinned @gongrzhe/server-gmail-autoauth-mcp reads), so every
+  // account mounted here is reachable from the agent, limited to the tools
+  // container/agent-runner/src/gmail-tools.ts allows.
   const homeDir = os.homedir();
   const gmailDirs = [
     { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
@@ -279,7 +280,8 @@ function buildVolumeMounts(
 
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // groups. Re-copied whenever any source file changes (agent-runner-sync.ts).
+  // Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -292,17 +294,11 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
+  if (
+    fs.existsSync(agentRunnerSrc) &&
+    syncAgentRunnerSrc(agentRunnerSrc, groupAgentRunnerDir)
+  ) {
+    logger.info({ group: group.name }, 'Copied agent-runner source to group');
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,

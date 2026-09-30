@@ -93,3 +93,43 @@ describe('MCP bridge config builder', () => {
     expect(Object.keys(configs)).toHaveLength(0);
   });
 });
+
+describe('connectMcpServers', () => {
+  it('returns only the safe Gmail tools, and every tool of the other servers', async () => {
+    const { connectMcpServers } =
+      await import('../../container/agent-runner/src/mcp-bridge.js');
+    const toolsByServer: Record<string, Record<string, string>> = {
+      'gmail-personal': {
+        search_emails: 'gmail search',
+        send_email: 'gmail send',
+        forward_email: 'gmail forward',
+      },
+      notion: { send_email: 'notion send', search: 'notion search' },
+    };
+    const closed: string[] = [];
+    // Never started: the injected connect below stands in for the transport.
+    const config = { command: '/nonexistent/test-mcp', args: [], env: {} };
+
+    const { tools, cleanup } = await connectMcpServers(
+      { 'gmail-personal': config, broken: config, notion: config },
+      async (name: string) => {
+        if (name === 'broken') throw new Error('spawn failed');
+        return {
+          tools: async () => toolsByServer[name],
+          close: async () => {
+            closed.push(name);
+          },
+        };
+      },
+    );
+
+    // One server failing to connect costs only its own tools.
+    expect(tools).toEqual({
+      'mcp__gmail-personal__search_emails': 'gmail search',
+      mcp__notion__send_email: 'notion send',
+      mcp__notion__search: 'notion search',
+    });
+    await cleanup();
+    expect(closed).toEqual(['gmail-personal', 'notion']);
+  });
+});

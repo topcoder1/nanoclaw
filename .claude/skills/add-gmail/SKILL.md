@@ -53,7 +53,7 @@ This merges in:
 - `src/channels/gmail.test.ts` (unit tests)
 - `import './gmail.js'` appended to the channel barrel file `src/channels/index.ts`
 - Gmail credentials mount (`~/.gmail-mcp`) in `src/container-runner.ts`
-- Gmail MCP server (`@gongrzhe/server-gmail-autoauth-mcp`) and `mcp__gmail__*` allowed tool in `container/agent-runner/src/index.ts`
+- Gmail MCP server (`@gongrzhe/server-gmail-autoauth-mcp@1.1.11`) and `mcp__gmail__*` allowed tool in `container/agent-runner/src/index.ts`
 - `googleapis` npm dependency in `package.json`
 
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
@@ -137,10 +137,10 @@ Tell the user:
 Run the authorization:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth
 ```
 
-If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
+If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
 
 ### Build and restart
 
@@ -193,7 +193,7 @@ tail -f logs/nanoclaw.log
 Test directly:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11
 ```
 
 ### OAuth token expired
@@ -202,7 +202,7 @@ Re-authorize:
 
 ```bash
 rm ~/.gmail-mcp/credentials.json
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11
 ```
 
 ### Container can't access Gmail
