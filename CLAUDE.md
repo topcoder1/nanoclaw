@@ -1,5 +1,7 @@
 # NanoClaw
 
+Shared agent instructions (also read by other coding agents): @AGENTS.md
+
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context
