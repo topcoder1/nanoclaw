@@ -3198,7 +3198,7 @@ async function main(): Promise<void> {
       channel
         .sendMessage(
           mainJid,
-          `⚠️ Gmail auth needs re-authorization.\n\nRun on your Mac:\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp auth\n\nDetails: ${summary}`,
+          `⚠️ Gmail auth needs re-authorization.\n\nRun on your Mac:\ncd ~/.gmail-mcp && npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 auth\n\nDetails: ${summary}`,
         )
         .catch((err) =>
           logger.warn({ err }, 'Failed to send Gmail auth alert'),

@@ -57,7 +57,7 @@ echo "      container spawn will re-register tools with a fresh MCP process."
 echo
 docker exec "$CONTAINER" sh -c '
   echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}" \
-    | timeout 10 npx -y @gongrzhe/server-gmail-autoauth-mcp 2>&1 \
+    | timeout 10 npx -y @gongrzhe/server-gmail-autoauth-mcp@1.1.11 2>&1 \
     | head -50
 ' || echo "(probe failed — see error above)"
 echo
